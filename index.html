@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="referrer" content="no-referrer" />
+    <title>AntiTimpa - Baca Komik Digital Mobile</title>
+    <meta name="description" content="AntiTimpa - Platform baca komik online mobile-first dan pembaca terproteksi." />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Cabinet+Grotesk:wght@700;800;900&display=swap" rel="stylesheet">
+    <script>
+      (function() {
+        try {
+          if (typeof window !== 'undefined') {
+            var origFetch = window.fetch ? window.fetch.bind(window) : undefined;
+            var activeFetch = origFetch;
+            try {
+              Object.defineProperty(window, 'fetch', {
+                get: function() { return activeFetch || origFetch; },
+                set: function(fn) { if (typeof fn === 'function') { activeFetch = fn; } },
+                configurable: true,
+                enumerable: true
+              });
+            } catch (_) {}
+          }
+        } catch (_) {}
+      })();
+    </script>
+  </head>
+  <body class="bg-[#0b0b0e] text-slate-100 antialiased selection:bg-[#ff5b14] selection:text-white">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

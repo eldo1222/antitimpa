@@ -1,0 +1,152 @@
+{
+  "$schema": "https://raw.githubusercontent.com/firebase/firebase-tools/master/schema/firestore-blueprint.json",
+  "entities": {
+    "users": {
+      "title": "Users",
+      "description": "User accounts including super admin and readers with access plan tiers",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "username": { "type": "string" },
+        "passwordHash": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "reader"] },
+        "status": { "type": "string", "enum": ["active", "locked", "expired", "inactive"] },
+        "createdAt": { "type": "string" },
+        "firstLoginAt": { "type": ["string", "null"] },
+        "expiresAt": { "type": ["string", "null"] },
+        "durationType": { "type": "string" },
+        "failedAttempts": { "type": "number" },
+        "avatar": { "type": "string" },
+        "tier": { "type": "string" },
+        "planType": { "type": "string", "enum": ["plan_15k_all", "plan_5k_single", "custom"] },
+        "accessType": { "type": "string", "enum": ["all", "specific"] },
+        "allowedComicIds": { "type": "array", "items": { "type": "string" } },
+        "priceNote": { "type": "string" },
+        "bio": { "type": "string" },
+        "stats": {
+          "type": "object",
+          "properties": {
+            "comicsRead": { "type": "number" },
+            "chaptersRead": { "type": "number" },
+            "daysActive": { "type": "number" }
+          }
+        }
+      },
+      "required": ["username", "role", "status"]
+    },
+    "comics": {
+      "title": "Comics",
+      "description": "Comic series catalog and metadata",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "slug": { "type": "string" },
+        "coverImage": { "type": "string" },
+        "bannerImage": { "type": "string" },
+        "synopsis": { "type": "string" },
+        "genres": { "type": "array", "items": { "type": "string" } },
+        "status": { "type": "string" },
+        "storyWriter": { "type": "string" },
+        "artist": { "type": "string" },
+        "rating": { "type": "number" },
+        "ratingCount": { "type": "number" },
+        "totalChapters": { "type": "number" },
+        "totalReaders": { "type": "number" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "isTrending": { "type": "boolean" },
+        "isFeatured": { "type": "boolean" },
+        "primaryDriveAccountId": { "type": "string" },
+        "tiktokPromoNote": { "type": "string" }
+      },
+      "required": ["title", "slug"]
+    },
+    "chapters": {
+      "title": "Chapters",
+      "description": "Comic chapters containing page images or Google Drive/PDF embeds",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "comicId": { "type": "string" },
+        "chapterNumber": { "type": "number" },
+        "title": { "type": "string" },
+        "releaseDate": { "type": "string" },
+        "sourceType": { "type": "string" },
+        "driveUrl": { "type": "string" },
+        "driveEmbedUrl": { "type": "string" },
+        "driveAccountId": { "type": "string" },
+        "driveNotes": { "type": "string" },
+        "pdfUrl": { "type": "string" },
+        "pdfFileName": { "type": "string" },
+        "pages": { "type": "array" },
+        "viewsCount": { "type": "number" }
+      },
+      "required": ["comicId", "chapterNumber"]
+    },
+    "driveAccounts": {
+      "title": "Drive Accounts",
+      "description": "Multi-account Google Drive storage catalog",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "folderUrl": { "type": "string" },
+        "status": { "type": "string" },
+        "storageUsedGb": { "type": "number" },
+        "storageTotalGb": { "type": "number" },
+        "colorTag": { "type": "string" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["name", "email"]
+    },
+    "banners": {
+      "title": "Banners",
+      "description": "Hero slider banner items",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "subtitle": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "targetComicId": { "type": "string" },
+        "badgeText": { "type": "string" },
+        "order": { "type": "number" },
+        "isActive": { "type": "boolean" }
+      },
+      "required": ["title", "imageUrl"]
+    },
+    "activityLogs": {
+      "title": "Activity Logs",
+      "description": "Security audit and system activity logs",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "username": { "type": "string" },
+        "ipAddress": { "type": "string" },
+        "action": { "type": "string" },
+        "type": { "type": "string" },
+        "status": { "type": "string" },
+        "details": { "type": "string" }
+      },
+      "required": ["username", "action"]
+    },
+    "systemSettings": {
+      "title": "System Settings",
+      "description": "Global application configuration",
+      "type": "object",
+      "properties": {
+        "siteName": { "type": "string" },
+        "siteLogo": { "type": "string" },
+        "siteFavicon": { "type": "string" },
+        "tiktokUrl": { "type": "string" },
+        "tiktokHandle": { "type": "string" },
+        "adminPhone": { "type": "string" },
+        "maxLoginAttempts": { "type": "number" }
+      }
+    }
+  }
+}

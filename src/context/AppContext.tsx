@@ -1,0 +1,1757 @@
+import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { 
+  Comic, 
+  Chapter, 
+  User, 
+  Banner, 
+  ActivityLog, 
+  SystemSettings, 
+  Bookmark, 
+  ReadingHistory,
+  DurationType,
+  PlanType,
+  AccessType,
+  ComicPage,
+  ChapterSourceType,
+  DriveAccount,
+  Comment
+} from '../types';
+import { 
+  initialComics, 
+  initialChapters, 
+  initialUsers, 
+  initialBanners, 
+  initialActivityLogs, 
+  initialSystemSettings,
+  initialDriveAccounts,
+  initialComments,
+  generateComicPageSvg
+} from '../data/initialData';
+import { formatGoogleDriveEmbedUrl } from '../utils/driveHelper';
+import {
+  initializeFirestoreDatabase,
+  subscribeToFirestore,
+  saveComicToFirestore,
+  deleteComicFromFirestore,
+  saveChapterToFirestore,
+  deleteChapterFromFirestore,
+  saveUserToFirestore,
+  deleteUserFromFirestore,
+  saveDriveAccountToFirestore,
+  deleteDriveAccountFromFirestore,
+  saveBannerToFirestore,
+  deleteBannerFromFirestore,
+  saveActivityLogToFirestore,
+  saveSettingsToFirestore
+} from '../services/firestoreService';
+
+export interface ComicAccessCheck {
+  allowed: boolean;
+  reason?: 'unauthenticated' | 'locked' | 'inactive' | 'expired' | 'restricted_plan';
+  message?: string;
+  allowedComicTitles?: string[];
+}
+
+export interface GoogleAuthUser {
+  uid: string;
+  displayName: string;
+  email: string;
+  photoURL: string;
+}
+
+interface AppContextType {
+  // State
+  currentUser: User | null;
+  googleUser: GoogleAuthUser | null;
+  comics: Comic[];
+  chapters: Record<string, Chapter[]>;
+  users: User[];
+  banners: Banner[];
+  activityLogs: ActivityLog[];
+  systemSettings: SystemSettings;
+  driveAccounts: DriveAccount[];
+  bookmarks: Bookmark[];
+  readingHistory: ReadingHistory[];
+  comments: Comment[];
+  selectedGenreFilter: string;
+  
+  // Navigation & UI state
+  activeTab: 'home' | 'discover' | 'library' | 'profile';
+  selectedComicId: string | null;
+  readingChapterId: string | null;
+  isAdminView: boolean;
+  adminActiveMenu: 'dashboard' | 'comics' | 'scraper' | 'chapters' | 'drives' | 'readers' | 'banners' | 'genres' | 'database' | 'logs' | 'settings';
+  isLoginModalOpen: boolean;
+  loginModalRedirectNotice?: string;
+  isMobileDeviceFrame: boolean;
+  
+  // Actions - Auth & Google
+  login: (username: string, password: string) => { success: boolean; message: string; remainingAttempts?: number };
+  logout: () => void;
+  loginWithGoogle: (customData?: { displayName?: string; email?: string; photoURL?: string }) => void;
+  logoutGoogle: () => void;
+  openLoginModal: (notice?: string) => void;
+  closeLoginModal: () => void;
+
+  // Actions - Access & Permissions
+  canUserReadComic: (comicId: string, userToCheck?: User | null) => ComicAccessCheck;
+
+  // Actions - Navigation & Genre
+  setActiveTab: (tab: 'home' | 'discover' | 'library' | 'profile') => void;
+  selectComic: (comicId: string | null) => void;
+  setSelectedGenreFilter: (genre: string) => void;
+  navigateToGenre: (genre: string) => void;
+  startReading: (chapterId: string) => boolean;
+  closeReader: () => void;
+  setIsAdminView: (isAdmin: boolean) => void;
+  setAdminActiveMenu: (menu: 'dashboard' | 'comics' | 'scraper' | 'chapters' | 'drives' | 'readers' | 'banners' | 'genres' | 'database' | 'logs' | 'settings') => void;
+  toggleMobileDeviceFrame: () => void;
+
+  // Actions - Comics & Chapters
+  addComic: (comic: Omit<Comic, 'id' | 'createdAt' | 'updatedAt' | 'rating' | 'ratingCount' | 'totalReaders' | 'totalChapters'> & { id?: string; createdAt?: string; updatedAt?: string; rating?: number; ratingCount?: number; totalReaders?: number; totalChapters?: number }) => void;
+  injectComicWithChapters: (comic: Comic, chaptersList: Chapter[]) => void;
+  batchInjectComicsWithChapters: (items: { comic: Comic; chapters: Chapter[] }[]) => void;
+  updateComic: (id: string, updates: Partial<Comic>) => void;
+  deleteComic: (id: string, reason?: string) => void;
+  batchDeleteComics: (ids: string[], reason?: string) => void;
+  toggleComicHomeVisibility: (comicId: string) => void;
+  batchToggleComicHomeVisibility: (comicIds: string[], isVisible: boolean) => void;
+  addChapter: (comicId: string, chapterData: { 
+    chapterNumber: number; 
+    title: string; 
+    sourceType?: ChapterSourceType;
+    pageCount?: number; 
+    customPages?: string[];
+    pdfUrl?: string;
+    pdfFileName?: string;
+    driveUrl?: string;
+    driveEmbedUrl?: string;
+    driveAccountId?: string;
+    driveNotes?: string;
+  }) => void;
+  updateChapter: (comicId: string, chapterId: string, updates: Partial<Chapter>) => void;
+  deleteChapter: (comicId: string, chapterId: string, reason?: string) => void;
+  batchDeleteChapters: (comicId: string, chapterIds: string[], reason?: string) => void;
+  updateChapterDriveLink: (comicId: string, chapterId: string, driveUrl: string, driveAccountId?: string, driveNotes?: string) => void;
+
+  // Actions - Comments & Threading
+  addComment: (data: { comicId: string; chapterId?: string; chapterNumber?: number; content: string; spoiler?: boolean; replyToId?: string }) => Comment;
+  toggleLikeComment: (commentId: string) => void;
+  deleteComment: (commentId: string) => void;
+
+  // Actions - Drive Storage Hub
+  addDriveAccount: (account: Omit<DriveAccount, 'id' | 'createdAt'>) => void;
+  updateDriveAccount: (id: string, updates: Partial<DriveAccount>) => void;
+  deleteDriveAccount: (id: string) => void;
+
+  // Actions - Users Management
+  addUser: (userData: { 
+    username: string; 
+    password: string; 
+    durationType: DurationType; 
+    tier?: 'Free Tier' | 'Pro Member' | 'Premium';
+    planType?: PlanType;
+    accessType?: AccessType;
+    allowedComicIds?: string[];
+    priceNote?: string;
+  }) => { success: boolean; message: string };
+  updateUser: (id: string, updates: Partial<User>) => void;
+  updateUserProfile: (userId: string, updates: { avatar?: string; displayName?: string; bio?: string }) => void;
+  unlockUser: (id: string) => void;
+  toggleUserStatus: (id: string) => void;
+  deleteUser: (id: string) => void;
+  changeAdminPassword: (oldPassword: string, newPassword: string) => { success: boolean; message: string };
+
+  // Actions - Banners & Settings
+  addBanner: (banner: Omit<Banner, 'id'>) => void;
+  updateBanner: (id: string, updates: Partial<Banner>) => void;
+  deleteBanner: (id: string) => void;
+  updateSettings: (settings: Partial<SystemSettings>) => void;
+  addActivityLog: (type: string, message: string) => void;
+  clearActivityLogs?: (reason?: string) => void;
+
+  // Actions - Bookmarks & History
+  toggleBookmark: (comicId: string) => void;
+  isBookmarked: (comicId: string) => boolean;
+  saveReadingProgress: (comicId: string, chapterId: string, chapterNumber: number, pageNumber: number, totalPages: number) => void;
+  getReadingProgress: (comicId: string) => ReadingHistory | undefined;
+}
+
+const AppContext = createContext<AppContextType | undefined>(undefined);
+
+const STORAGE_KEYS = {
+  CURRENT_USER: 'komikyuk_current_user_v1',
+  GOOGLE_USER: 'komikyuk_google_user_v1',
+  COMICS: 'komikyuk_comics_v1',
+  CHAPTERS: 'komikyuk_chapters_v1',
+  USERS: 'komikyuk_users_v1',
+  BANNERS: 'komikyuk_banners_v1',
+  DRIVE_ACCOUNTS: 'antitimpa_drive_accounts_v1',
+  LOGS: 'komikyuk_logs_v1',
+  SETTINGS: 'komikyuk_settings_v1',
+  BOOKMARKS: 'komikyuk_bookmarks_v1',
+  HISTORY: 'komikyuk_history_v1',
+  COMMENTS: 'komikyuk_comments_v1',
+};
+
+const getDurationMs = (durationType: DurationType): number => {
+  switch (durationType) {
+    case '1_day': return 24 * 60 * 60 * 1000;
+    case '3_days': return 3 * 24 * 60 * 60 * 1000;
+    case '30_days': return 30 * 24 * 60 * 60 * 1000;
+    case '1_year': return 365 * 24 * 60 * 60 * 1000;
+    default: return 30 * 24 * 60 * 60 * 1000;
+  }
+};
+
+function safeParseJson<T>(key: string, fallback: T): T {
+  try {
+    const saved = localStorage.getItem(key);
+    if (!saved) return fallback;
+    return JSON.parse(saved);
+  } catch (e) {
+    console.warn(`Failed to parse localStorage key ${key}, using fallback:`, e);
+    return fallback;
+  }
+}
+
+function safeSetItem(key: string, data: any): void {
+  try {
+    const serialized = typeof data === 'string' ? data : JSON.stringify(data);
+    localStorage.setItem(key, serialized);
+  } catch (error: any) {
+    // Gracefully handle browser quota exceeded error (typically 5MB limit)
+    console.warn(`[LocalStorage] Quota limit reached or write failed for '${key}'. Continuing with Firebase and Memory state.`);
+    // If chapters exceeded quota, purge the heavy chapters key to free up local space for user session & settings
+    if (key === STORAGE_KEYS.CHAPTERS || error?.name === 'QuotaExceededError' || error?.code === 22 || error?.number === -2147024882) {
+      try {
+        localStorage.removeItem(STORAGE_KEYS.CHAPTERS);
+      } catch (_) {}
+    }
+  }
+}
+
+function deduplicateById<T extends { id: string }>(items: T[]): T[] {
+  if (!Array.isArray(items)) return [];
+  const seen = new Set<string>();
+  return items.filter(item => {
+    if (!item || !item.id || seen.has(item.id)) return false;
+    seen.add(item.id);
+    return true;
+  });
+}
+
+export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+  // Load from localStorage or fallback to initial data safely
+  const [currentUser, setCurrentUser] = useState<User | null>(() => {
+    return safeParseJson<User | null>(STORAGE_KEYS.CURRENT_USER, null);
+  });
+
+  const [googleUser, setGoogleUser] = useState<GoogleAuthUser | null>(() => {
+    return safeParseJson<GoogleAuthUser | null>(STORAGE_KEYS.GOOGLE_USER, null);
+  });
+
+  const [comics, setComics] = useState<Comic[]>(() => {
+    const raw = safeParseJson<Comic[]>(STORAGE_KEYS.COMICS, initialComics);
+    return deduplicateById(raw);
+  });
+
+  const [chapters, setChapters] = useState<Record<string, Chapter[]>>(() => {
+    return safeParseJson<Record<string, Chapter[]>>(STORAGE_KEYS.CHAPTERS, initialChapters);
+  });
+
+  const [users, setUsers] = useState<User[]>(() => {
+    return safeParseJson<User[]>(STORAGE_KEYS.USERS, initialUsers);
+  });
+
+  const [banners, setBanners] = useState<Banner[]>(() => {
+    return safeParseJson<Banner[]>(STORAGE_KEYS.BANNERS, initialBanners);
+  });
+
+  const [driveAccounts, setDriveAccounts] = useState<DriveAccount[]>(() => {
+    return safeParseJson<DriveAccount[]>(STORAGE_KEYS.DRIVE_ACCOUNTS, initialDriveAccounts);
+  });
+
+  const [activityLogs, setActivityLogs] = useState<ActivityLog[]>(() => {
+    return safeParseJson<ActivityLog[]>(STORAGE_KEYS.LOGS, initialActivityLogs);
+  });
+
+  const [systemSettings, setSystemSettings] = useState<SystemSettings>(() => {
+    return safeParseJson<SystemSettings>(STORAGE_KEYS.SETTINGS, initialSystemSettings);
+  });
+
+  const [bookmarks, setBookmarks] = useState<Bookmark[]>(() => {
+    return safeParseJson<Bookmark[]>(STORAGE_KEYS.BOOKMARKS, [
+      { comicId: 'comic-1', addedAt: new Date().toISOString() },
+      { comicId: 'comic-2', addedAt: new Date().toISOString() }
+    ]);
+  });
+
+  const [readingHistory, setReadingHistory] = useState<ReadingHistory[]>(() => {
+    return safeParseJson<ReadingHistory[]>(STORAGE_KEYS.HISTORY, [
+      { comicId: 'comic-1', chapterId: 'ch-1-45', chapterNumber: 45, pageNumber: 4, totalPages: 8, updatedAt: new Date().toISOString() }
+    ]);
+  });
+
+  const [comments, setComments] = useState<Comment[]>(() => {
+    return safeParseJson<Comment[]>(STORAGE_KEYS.COMMENTS, initialComments);
+  });
+
+  const [selectedGenreFilter, setSelectedGenreFilter] = useState<string>('All');
+
+  // UI state
+  const [activeTab, setActiveTab] = useState<'home' | 'discover' | 'library' | 'profile'>('home');
+  const [selectedComicId, setSelectedComicId] = useState<string | null>(null);
+  const [readingChapterId, setReadingChapterId] = useState<string | null>(null);
+  const [isAdminView, setIsAdminViewState] = useState<boolean>(false);
+  const [adminActiveMenu, setAdminActiveMenu] = useState<'dashboard' | 'comics' | 'scraper' | 'chapters' | 'drives' | 'readers' | 'banners' | 'genres' | 'database' | 'logs' | 'settings'>('dashboard');
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState<boolean>(false);
+  const [loginModalRedirectNotice, setLoginModalRedirectNotice] = useState<string | undefined>(undefined);
+  const [isMobileDeviceFrame, setIsMobileDeviceFrame] = useState<boolean>(false);
+
+  // Firestore Realtime Synchronization
+  useEffect(() => {
+    // 1. Seed or verify Firestore
+    initializeFirestoreDatabase();
+
+    // 2. Subscribe to realtime updates
+    const unsubscribe = subscribeToFirestore({
+      onComics: (remoteComics) => {
+        if (remoteComics && remoteComics.length > 0) {
+          setComics(deduplicateById(remoteComics));
+        }
+      },
+      onChapters: (remoteChapters) => {
+        if (remoteChapters && Object.keys(remoteChapters).length > 0) {
+          setChapters(remoteChapters);
+        }
+      },
+      onUsers: (remoteUsers) => {
+        if (remoteUsers && remoteUsers.length > 0) {
+          setUsers(remoteUsers);
+          // Also update currentUser if currently logged in
+          setCurrentUser(prev => {
+            if (!prev) return null;
+            const match = remoteUsers.find(u => u.id === prev.id);
+            return match || prev;
+          });
+        }
+      },
+      onDrives: (remoteDrives) => {
+        if (remoteDrives && remoteDrives.length > 0) {
+          setDriveAccounts(remoteDrives);
+        }
+      },
+      onBanners: (remoteBanners) => {
+        if (remoteBanners && remoteBanners.length > 0) {
+          setBanners(remoteBanners);
+        }
+      },
+      onLogs: (remoteLogs) => {
+        if (remoteLogs && remoteLogs.length > 0) {
+          setActivityLogs(remoteLogs);
+        }
+      },
+      onSettings: (remoteSettings) => {
+        if (remoteSettings) {
+          setSystemSettings(remoteSettings);
+        }
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
+  // Sync to LocalStorage (Fast Client-side fallback Cache with Quota Protection)
+  useEffect(() => {
+    if (currentUser) {
+      safeSetItem(STORAGE_KEYS.CURRENT_USER, currentUser);
+    } else {
+      try {
+        localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+      } catch (_) {}
+    }
+  }, [currentUser]);
+
+  useEffect(() => {
+    safeSetItem(STORAGE_KEYS.COMICS, comics);
+  }, [comics]);
+
+  useEffect(() => {
+    safeSetItem(STORAGE_KEYS.CHAPTERS, chapters);
+  }, [chapters]);
+
+  useEffect(() => {
+    safeSetItem(STORAGE_KEYS.USERS, users);
+  }, [users]);
+
+  useEffect(() => {
+    safeSetItem(STORAGE_KEYS.BANNERS, banners);
+  }, [banners]);
+
+  useEffect(() => {
+    safeSetItem(STORAGE_KEYS.DRIVE_ACCOUNTS, driveAccounts);
+  }, [driveAccounts]);
+
+  useEffect(() => {
+    safeSetItem(STORAGE_KEYS.LOGS, activityLogs);
+  }, [activityLogs]);
+
+  useEffect(() => {
+    safeSetItem(STORAGE_KEYS.SETTINGS, systemSettings);
+  }, [systemSettings]);
+
+  useEffect(() => {
+    safeSetItem(STORAGE_KEYS.BOOKMARKS, bookmarks);
+  }, [bookmarks]);
+
+  useEffect(() => {
+    safeSetItem(STORAGE_KEYS.HISTORY, readingHistory);
+  }, [readingHistory]);
+
+  useEffect(() => {
+    safeSetItem(STORAGE_KEYS.COMMENTS, comments);
+  }, [comments]);
+
+  useEffect(() => {
+    if (googleUser) {
+      safeSetItem(STORAGE_KEYS.GOOGLE_USER, googleUser);
+    } else {
+      try {
+        localStorage.removeItem(STORAGE_KEYS.GOOGLE_USER);
+      } catch (_) {}
+    }
+  }, [googleUser]);
+
+  const addLog = (
+    username: string,
+    action: string,
+    type: ActivityLog['type'],
+    status: ActivityLog['status'],
+    details?: string
+  ) => {
+    const newLog: ActivityLog = {
+      id: `log-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+      timestamp: new Date().toISOString(),
+      username,
+      ipAddress: '180.252.' + Math.floor(Math.random() * 250 + 1) + '.' + Math.floor(Math.random() * 250 + 1),
+      action,
+      type,
+      status,
+      details
+    };
+    setActivityLogs(prev => [newLog, ...prev]);
+    saveActivityLogToFirestore(newLog);
+  };
+
+  // Access check for reader tiers & plans
+  const canUserReadComic = (comicId: string, userToCheck?: User | null): ComicAccessCheck => {
+    const targetComic = comics.find(c => c.id === comicId);
+    
+    // Normal comics (Manga, Manhwa, Manhua with isFree !== false) are completely free to read without login!
+    const isNormalComic = targetComic?.contentType === 'normal' || targetComic?.isFree === true;
+    if (isNormalComic) {
+      return { allowed: true };
+    }
+
+    const targetUser = userToCheck !== undefined ? userToCheck : currentUser;
+
+    if (!targetUser) {
+      return {
+        allowed: false,
+        reason: 'unauthenticated',
+        message: 'Komik 18+ VIP: Silakan login dengan akun VIP berbayar Anda untuk membaca judul ini.'
+      };
+    }
+
+    // Admins have unrestricted access to all titles
+    if (targetUser.role === 'admin') {
+      return { allowed: true };
+    }
+
+    // Check account status
+    if (targetUser.status === 'locked') {
+      return {
+        allowed: false,
+        reason: 'locked',
+        message: 'Akun Anda sedang terkunci karena melebihi batas percobaan password. Silakan hubungi Admin.'
+      };
+    }
+
+    if (targetUser.status === 'inactive') {
+      return {
+        allowed: false,
+        reason: 'inactive',
+        message: 'Akun Anda berstatus nonaktif. Silakan hubungi Admin.'
+      };
+    }
+
+    // Check expiration
+    if (targetUser.firstLoginAt && targetUser.expiresAt) {
+      const now = Date.now();
+      const expireTime = new Date(targetUser.expiresAt).getTime();
+      if (now > expireTime) {
+        return {
+          allowed: false,
+          reason: 'expired',
+          message: 'Masa aktif paket akun Anda telah berakhir/kadaluarsa. Silakan hubungi Admin untuk memperpanjang.'
+        };
+      }
+    }
+
+    // Plan & Title Permissions Logic
+    const isAllAccess = targetUser.accessType === 'all' || targetUser.planType === 'plan_15k_all' || (!targetUser.accessType && !targetUser.allowedComicIds);
+
+    if (isAllAccess) {
+      return { allowed: true };
+    }
+
+    // Specific comic access (e.g. 5k Single Title Plan or custom list)
+    const allowedIds = targetUser.allowedComicIds || [];
+    const isAllowed = allowedIds.includes(comicId);
+
+    if (isAllowed) {
+      return { allowed: true };
+    }
+
+    const allowedTitles = comics.filter(c => allowedIds.includes(c.id)).map(c => c.title);
+
+    return {
+      allowed: false,
+      reason: 'restricted_plan',
+      message: `Akun Anda terdaftar pada Paket Khusus 1 Judul. Anda tidak memiliki izin untuk membaca komik ini.${allowedTitles.length > 0 ? ` Judul yang terdaftar pada akun Anda: "${allowedTitles.join(', ')}".` : ''}`,
+      allowedComicTitles: allowedTitles
+    };
+  };
+
+  // Auth Functions
+  const login = (username: string, password: string): { success: boolean; message: string; remainingAttempts?: number } => {
+    const targetUser = users.find(u => u.username.toLowerCase() === username.trim().toLowerCase());
+
+    if (!targetUser) {
+      addLog(username || 'anonymous', 'Login Gagal: User Tidak Ditemukan', 'login_failed', 'failed', 'Akun tidak terdaftar dalam database');
+      return { success: false, message: 'Username tidak ditemukan. Hubungi Admin untuk mendapatkan akun.' };
+    }
+
+    // 1. Check if user is locked
+    if (targetUser.status === 'locked' || targetUser.failedAttempts >= systemSettings.maxLoginAttempts) {
+      addLog(targetUser.username, 'Login Ditolak: Akun Terkunci', 'login_failed', 'failed', 'Akun dibekukan karena melebihi batas percobaan password.');
+      return { success: false, message: 'Akun Anda terkunci karena 3x gagal memasukkan password. Silakan hubungi Admin untuk membuka kunci.' };
+    }
+
+    // 2. Check if user is manually inactive
+    if (targetUser.status === 'inactive') {
+      addLog(targetUser.username, 'Login Ditolak: Akun Nonaktif', 'login_failed', 'warning', 'Akun dalam status nonaktif manual oleh Admin.');
+      return { success: false, message: 'Akun Anda saat ini berstatus nonaktif. Silakan hubungi Admin.' };
+    }
+
+    // 3. Check expiration if already logged in before
+    if (targetUser.firstLoginAt && targetUser.expiresAt && targetUser.role !== 'admin') {
+      const now = Date.now();
+      const expireTime = new Date(targetUser.expiresAt).getTime();
+      if (now > expireTime) {
+        // Auto-update to expired status
+        const updatedUser: User = { ...targetUser, status: 'expired' };
+        setUsers(prev => prev.map(u => u.id === targetUser.id ? updatedUser : u));
+        saveUserToFirestore(updatedUser);
+        addLog(targetUser.username, 'Login Ditolak: Masa Aktif Telah Habis', 'login_failed', 'warning', `Masa aktif ${targetUser.durationType} telah berakhir.`);
+        return { success: false, message: 'Masa aktif akun Anda telah berakhir. Silakan hubungi Admin untuk memperpanjang.' };
+      }
+    }
+
+    // 4. Verify password
+    if (targetUser.passwordHash !== password) {
+      const newAttempts = targetUser.failedAttempts + 1;
+      const isNowLocked = newAttempts >= systemSettings.maxLoginAttempts;
+      const newStatus = isNowLocked ? ('locked' as const) : targetUser.status;
+
+      const updatedUser: User = { ...targetUser, failedAttempts: newAttempts, status: newStatus };
+      setUsers(prev => prev.map(u => u.id === targetUser.id ? updatedUser : u));
+      saveUserToFirestore(updatedUser);
+
+      if (isNowLocked) {
+        addLog(targetUser.username, 'Akun Otomatis Terkunci: 3x Gagal Password', 'login_failed', 'failed', 'Akun terkunci otomatis setelah 3 kegagalan beruntun.');
+        return {
+          success: false,
+          message: 'Password salah 3 kali berturut-turut! Akun Anda telah otomatis TERKUNCI demi keamanan. Silakan hubungi Admin.',
+          remainingAttempts: 0
+        };
+      } else {
+        const remaining = systemSettings.maxLoginAttempts - newAttempts;
+        addLog(targetUser.username, `Login Gagal: Password Salah (Percobaan ${newAttempts}/${systemSettings.maxLoginAttempts})`, 'login_failed', 'warning', `Sisa ${remaining} kali percobaan sebelum akun terkunci.`);
+        return {
+          success: false,
+          message: `Password salah! Sisa percobaan: ${remaining} kali lagi sebelum akun terkunci.`,
+          remainingAttempts: remaining
+        };
+      }
+    }
+
+    // 5. Successful login
+    const now = new Date();
+    const isFirstTimeLogin = !targetUser.firstLoginAt && targetUser.role !== 'admin';
+    const firstLoginTime = targetUser.firstLoginAt || now.toISOString();
+    
+    // Calculate expiration timestamp starting from first login date if not set
+    let computedExpiresAt = targetUser.expiresAt;
+    if (isFirstTimeLogin) {
+      const durationMs = getDurationMs(targetUser.durationType);
+      computedExpiresAt = new Date(now.getTime() + durationMs).toISOString();
+    }
+
+    const updatedUser: User = {
+      ...targetUser,
+      failedAttempts: 0,
+      status: 'active',
+      firstLoginAt: firstLoginTime,
+      expiresAt: computedExpiresAt
+    };
+
+    setUsers(prev => prev.map(u => u.id === targetUser.id ? updatedUser : u));
+    saveUserToFirestore(updatedUser);
+    setCurrentUser(updatedUser);
+    setIsLoginModalOpen(false);
+    setLoginModalRedirectNotice(undefined);
+
+    addLog(
+      targetUser.username,
+      `Login Berhasil (${targetUser.role === 'admin' ? 'Admin' : 'User'})`,
+      'login_success',
+      'success',
+      isFirstTimeLogin ? `Login perdana. Masa aktif ${targetUser.durationType} mulai dihitung.` : 'Sesi aktif diperbarui'
+    );
+
+    return { success: true, message: `Selamat datang kembali, ${targetUser.username}!` };
+  };
+
+  const logout = () => {
+    if (currentUser) {
+      addLog(currentUser.username, 'Pengguna Logout', 'logout', 'info', 'Sesi diakhiri secara manual');
+    }
+    setCurrentUser(null);
+    if (isAdminView) {
+      setIsAdminView(false);
+    }
+  };
+
+  const loginWithGoogle = (customData?: { displayName?: string; email?: string; photoURL?: string }) => {
+    const defaultUser: GoogleAuthUser = {
+      uid: `google-${Date.now()}`,
+      displayName: customData?.displayName || 'Google Reader',
+      email: customData?.email || 'reader@gmail.com',
+      photoURL: customData?.photoURL || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120&auto=format&fit=crop&q=80'
+    };
+    setGoogleUser(defaultUser);
+    addLog(defaultUser.displayName, 'Login Google Masuk', 'login_success', 'success', `Pengguna Google (${defaultUser.email}) login untuk berkomentar`);
+  };
+
+  const logoutGoogle = () => {
+    setGoogleUser(null);
+    localStorage.removeItem(STORAGE_KEYS.GOOGLE_USER);
+  };
+
+  const openLoginModal = (notice?: string) => {
+    setLoginModalRedirectNotice(notice);
+    setIsLoginModalOpen(true);
+  };
+
+  const closeLoginModal = () => {
+    setIsLoginModalOpen(false);
+    setLoginModalRedirectNotice(undefined);
+  };
+
+  const selectComic = (comicId: string | null) => {
+    setSelectedComicId(comicId);
+    if (comicId) {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
+
+  const navigateToGenre = (genre: string) => {
+    setSelectedGenreFilter(genre);
+    setSelectedComicId(null);
+    setReadingChapterId(null);
+    setActiveTab('discover');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const startReading = (chapterId: string): boolean => {
+    // Find the comic this chapter belongs to
+    let targetComicId: string | null = null;
+    (Object.entries(chapters) as [string, Chapter[]][]).forEach(([cId, chList]) => {
+      if (Array.isArray(chList) && chList.some(ch => ch.id === chapterId)) {
+        targetComicId = cId;
+      }
+    });
+
+    if (targetComicId) {
+      const check = canUserReadComic(targetComicId, currentUser);
+      if (!check.allowed) {
+        openLoginModal(`🔒 ${check.message || 'Akses komik ini dibatasi untuk paket akun Anda.'}`);
+        return false;
+      }
+    } else if (!currentUser) {
+      openLoginModal('🔒 Fitur Baca Komik terkunci! Silakan login dengan akun pembaca Anda.');
+      return false;
+    }
+
+    setReadingChapterId(chapterId);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    return true;
+  };
+
+  const closeReader = () => {
+    setReadingChapterId(null);
+  };
+
+  const toggleMobileDeviceFrame = () => {
+    setIsMobileDeviceFrame(prev => !prev);
+  };
+
+  const setIsAdminView = (isAdmin: boolean) => {
+    if (isAdmin) {
+      if (!currentUser || currentUser.role !== 'admin') {
+        addLog(
+          currentUser?.username || 'tamu/reader',
+          'Percobaan Akses Panel Admin Ditolak',
+          'unauthorized_attempt',
+          'failed',
+          'Akses Ditolak: Hanya Super Admin yang diizinkan mengakses Dashboard Admin. Akun reader dibatasi di mode pembaca.'
+        );
+        openLoginModal('🔒 Akses Khusus Super Admin: Akun Anda adalah akun pembaca dan tidak memiliki izin mengakses Dashboard Admin. Silakan masuk menggunakan akun Super Admin.');
+        return;
+      }
+    }
+    setIsAdminViewState(isAdmin);
+  };
+
+  const toggleComicHomeVisibility = (comicId: string) => {
+    let updatedTitle = '';
+    let isNowVisible = true;
+
+    setComics(prev => prev.map(c => {
+      if (c.id === comicId) {
+        const nextVal = c.isVisibleOnHome === false || c.showOnHome === false ? true : false;
+        isNowVisible = nextVal;
+        updatedTitle = c.title;
+        const updated = { ...c, isVisibleOnHome: nextVal, showOnHome: nextVal };
+        saveComicToFirestore(updated);
+        return updated;
+      }
+      return c;
+    }));
+
+    addLog(
+      currentUser?.username || 'admin',
+      `${isNowVisible ? 'Tampilkan Komik ke Beranda' : 'Sembunyikan Komik dari Beranda'}: "${updatedTitle || comicId}"`,
+      'comic_update',
+      'info',
+      `Status visibilitas beranda diubah menjadi: ${isNowVisible ? 'TAMPIL (AKTIF)' : 'DISEMBUNYIKAN'}`
+    );
+  };
+
+  const batchToggleComicHomeVisibility = (comicIds: string[], isVisible: boolean) => {
+    if (!comicIds || comicIds.length === 0) return;
+
+    setComics(prev => prev.map(c => {
+      if (comicIds.includes(c.id)) {
+        const updated = { ...c, isVisibleOnHome: isVisible, showOnHome: isVisible };
+        saveComicToFirestore(updated);
+        return updated;
+      }
+      return c;
+    }));
+
+    addLog(
+      currentUser?.username || 'admin',
+      `Batch ${isVisible ? 'Tampilkan ke Beranda' : 'Tarik/Sembunyikan dari Beranda'}: ${comicIds.length} Komik`,
+      'comic_update',
+      'info',
+      `${comicIds.length} judul komik berhasil ${isVisible ? 'diaktifkan kembali di beranda' : 'ditarik & disembunyikan dari beranda'}`
+    );
+  };
+
+  // Comment Actions
+  const addComment = (data: { comicId: string; chapterId?: string; chapterNumber?: number; content: string; spoiler?: boolean; replyToId?: string }): Comment => {
+    const authorName = googleUser?.displayName || currentUser?.username || 'Pembaca Komik';
+    const authorAvatar = googleUser?.photoURL || (currentUser?.role === 'admin' ? 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80' : 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120&auto=format&fit=crop&q=80');
+    const isVip = !!currentUser && currentUser.role !== 'admin';
+
+    const newComment: Comment = {
+      id: `comment-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      comicId: data.comicId,
+      chapterId: data.chapterId,
+      chapterNumber: data.chapterNumber,
+      userId: googleUser?.uid || currentUser?.id || `user-guest-${Date.now()}`,
+      userName: authorName,
+      username: authorName,
+      userAvatar: authorAvatar,
+      isVip,
+      isAdmin: currentUser?.role === 'admin',
+      content: data.content,
+      createdAt: 'Baru saja',
+      likesCount: 0,
+      likes: 0,
+      likedBy: [],
+      isLiked: false,
+      spoiler: data.spoiler || false,
+      replyToId: data.replyToId
+    };
+
+    setComments(prev => [newComment, ...prev]);
+    return newComment;
+  };
+
+  const toggleLikeComment = (commentId: string) => {
+    setComments(prev => prev.map(c => {
+      if (c.id === commentId) {
+        const isLiked = !c.isLiked;
+        const likes = isLiked ? c.likes + 1 : Math.max(0, c.likes - 1);
+        return { ...c, isLiked, likes };
+      }
+      return c;
+    }));
+  };
+
+  const deleteComment = (commentId: string) => {
+    setComments(prev => prev.filter(c => c.id !== commentId && c.replyToId !== commentId));
+  };
+
+  // Content Management - Comics
+  const addComic = (comicData: Omit<Comic, 'id' | 'createdAt' | 'updatedAt' | 'rating' | 'ratingCount' | 'totalReaders' | 'totalChapters'> & { id?: string; createdAt?: string; updatedAt?: string; rating?: number; ratingCount?: number; totalReaders?: number; totalChapters?: number }) => {
+    const finalComicId = comicData.id || `comic-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    const now = new Date().toISOString().split('T')[0];
+
+    const newComic: Comic = {
+      ...comicData,
+      id: finalComicId,
+      rating: comicData.rating ?? 4.85,
+      ratingCount: comicData.ratingCount ?? Math.floor(Math.random() * 2000) + 500,
+      totalReaders: comicData.totalReaders ?? 0,
+      totalChapters: comicData.totalChapters ?? 1,
+      createdAt: comicData.createdAt || now,
+      updatedAt: comicData.updatedAt || now
+    };
+
+    setComics(prev => {
+      const filtered = prev.filter(c => c.id !== finalComicId);
+      return [newComic, ...filtered];
+    });
+
+    // Only create default first chapter if this comic doesn't already have chapters
+    setChapters(prev => {
+      if (prev[finalComicId] && prev[finalComicId].length > 0) {
+        return prev;
+      }
+      const firstChapter: Chapter = {
+        id: `ch-${finalComicId}-1`,
+        comicId: finalComicId,
+        chapterNumber: 1,
+        title: 'Prologue / Chapter 1',
+        releaseDate: 'Hari ini',
+        isNew: true,
+        isLocked: newComic.isFree === false,
+        sourceType: 'images',
+        pages: Array.from({ length: 8 }, (_, i) => ({
+          id: `page-${i + 1}`,
+          pageNumber: i + 1,
+          imageUrl: generateComicPageSvg('cyberpunk', i + 1, `${newComic.title} Ch. 1`),
+          caption: `Halaman ${i + 1}`
+        })),
+        viewsCount: 0
+      };
+      saveChapterToFirestore(firstChapter);
+      return {
+        ...prev,
+        [finalComicId]: [firstChapter]
+      };
+    });
+
+    saveComicToFirestore(newComic);
+
+    addLog(
+      currentUser?.username || 'admin',
+      `Tambah Komik: "${newComic.title}"`,
+      'comic_create',
+      'success',
+      `Komik (${(newComic.comicType || 'manga').toUpperCase()}) berhasil ditambahkan ke katalog`
+    );
+  };
+
+  // Direct High-Reliability Injection for Scraped Comics with all their chapters
+  const injectComicWithChapters = (comic: Comic, chaptersList: Chapter[]) => {
+    const finalComic: Comic = {
+      ...comic,
+      totalChapters: chaptersList.length > 0 ? chaptersList.length : (comic.totalChapters || 1),
+      updatedAt: new Date().toISOString().split('T')[0]
+    };
+
+    setComics(prev => {
+      const filtered = prev.filter(c => c.id !== finalComic.id && c.title.toLowerCase() !== finalComic.title.toLowerCase());
+      return [finalComic, ...filtered];
+    });
+
+    setChapters(prev => ({
+      ...prev,
+      [finalComic.id]: chaptersList
+    }));
+
+    // Persist to Firestore
+    saveComicToFirestore(finalComic);
+    chaptersList.forEach(ch => saveChapterToFirestore(ch));
+
+    addLog(
+      currentUser?.username || 'admin',
+      `Suntik Komik API: "${finalComic.title}"`,
+      'comic_create',
+      'success',
+      `Berhasil menyuntikkan komik ${finalComic.title} (${(finalComic.comicType || 'manga').toUpperCase()}) beserta ${chaptersList.length} chapter siap baca.`
+    );
+  };
+
+  // Batch inject multiple comics atomically
+  const batchInjectComicsWithChapters = (items: { comic: Comic; chapters: Chapter[] }[]) => {
+    if (!items || items.length === 0) return;
+
+    setComics(prev => {
+      const newComics = items.map(item => ({
+        ...item.comic,
+        totalChapters: item.chapters.length > 0 ? item.chapters.length : (item.comic.totalChapters || 1),
+        updatedAt: new Date().toISOString().split('T')[0]
+      }));
+
+      const incomingIds = new Set(newComics.map(c => c.id));
+      const incomingTitles = new Set(newComics.map(c => c.title.toLowerCase()));
+
+      const remaining = prev.filter(c => !incomingIds.has(c.id) && !incomingTitles.has(c.title.toLowerCase()));
+      return [...newComics, ...remaining];
+    });
+
+    setChapters(prev => {
+      const nextChapters = { ...prev };
+      items.forEach(item => {
+        nextChapters[item.comic.id] = item.chapters;
+      });
+      return nextChapters;
+    });
+
+    // Persist all to Firestore
+    items.forEach(item => {
+      saveComicToFirestore(item.comic);
+      item.chapters.forEach(ch => saveChapterToFirestore(ch));
+    });
+
+    addLog(
+      currentUser?.username || 'admin',
+      `Batch Injection: ${items.length} Komik`,
+      'comic_create',
+      'success',
+      `Berhasil menyuntikkan ${items.length} judul komik lengkap dengan chapter siap baca ke katalog.`
+    );
+  };
+
+  const updateComic = (id: string, updates: Partial<Comic>) => {
+    const updatedDate = new Date().toISOString().split('T')[0];
+    let updatedComic: Comic | null = null;
+
+    setComics(prev => prev.map(c => {
+      if (c.id === id) {
+        updatedComic = { ...c, ...updates, updatedAt: updatedDate };
+        return updatedComic;
+      }
+      return c;
+    }));
+
+    if (updatedComic) {
+      saveComicToFirestore(updatedComic);
+    }
+
+    addLog(
+      currentUser?.username || 'admin',
+      `Update Data Komik: "${updates.title || id}"`,
+      'comic_update',
+      'info',
+      `Perubahan atribut komik berhasil disimpan`
+    );
+  };
+
+  const deleteComic = (id: string, reason?: string) => {
+    const target = comics.find(c => c.id === id);
+    setComics(prev => prev.filter(c => c.id !== id));
+    deleteComicFromFirestore(id);
+
+    // Also delete chapters for this comic
+    const comicChapters = chapters[id] || [];
+    comicChapters.forEach(ch => deleteChapterFromFirestore(ch.id));
+
+    setChapters(prev => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+
+    addLog(
+      currentUser?.username || 'admin',
+      `Hapus Komik: "${target?.title || id}"`,
+      'comic_delete',
+      'warning',
+      `Komik dan seluruh chapter terkait telah dihapus permanen.${reason ? ` [Alasan Audit: ${reason}]` : ''}`
+    );
+  };
+
+  const batchDeleteComics = (ids: string[], reason?: string) => {
+    if (!ids || ids.length === 0) return;
+
+    const targetTitles = comics.filter(c => ids.includes(c.id)).map(c => `"${c.title}"`);
+    const idSet = new Set(ids);
+
+    setComics(prev => prev.filter(c => !idSet.has(c.id)));
+    ids.forEach(id => {
+      deleteComicFromFirestore(id);
+      const comicChapters = chapters[id] || [];
+      comicChapters.forEach(ch => deleteChapterFromFirestore(ch.id));
+    });
+
+    setChapters(prev => {
+      const next = { ...prev };
+      ids.forEach(id => {
+        delete next[id];
+      });
+      return next;
+    });
+
+    addLog(
+      currentUser?.username || 'admin',
+      `Batch Hapus Komik (${ids.length} Judul)`,
+      'comic_delete',
+      'warning',
+      `Menghapus ${ids.length} komik: ${targetTitles.slice(0, 5).join(', ')}${targetTitles.length > 5 ? ` (+${targetTitles.length - 5} lainnya)` : ''}.${reason ? ` [Alasan Audit: ${reason}]` : ''}`
+    );
+  };
+
+  // Content Management - Chapters
+  const addChapter = (
+    comicId: string, 
+    chapterData: { 
+      chapterNumber: number; 
+      title: string; 
+      sourceType?: ChapterSourceType;
+      pageCount?: number; 
+      customPages?: string[];
+      pdfUrl?: string;
+      pdfFileName?: string;
+      driveUrl?: string;
+      driveEmbedUrl?: string;
+      driveAccountId?: string;
+      driveNotes?: string;
+    }
+  ) => {
+    const targetComic = comics.find(c => c.id === comicId);
+    const existingChapters = chapters[comicId] || [];
+    const st: ChapterSourceType = chapterData.sourceType || 'images';
+
+    let generatedPages: ComicPage[] = [];
+    let driveEmbed = chapterData.driveEmbedUrl;
+
+    if (st === 'drive') {
+      const formatted = formatGoogleDriveEmbedUrl(chapterData.driveUrl || '');
+      driveEmbed = formatted;
+    } else if (st === 'pdf') {
+      generatedPages = [];
+    } else {
+      if (chapterData.customPages && chapterData.customPages.length > 0) {
+        generatedPages = chapterData.customPages.map((url, i) => ({
+          id: `page-${Date.now()}-${i + 1}`,
+          pageNumber: i + 1,
+          imageUrl: url,
+          caption: `Halaman ${i + 1}`
+        }));
+      } else {
+        const count = chapterData.pageCount || 8;
+        const theme = targetComic?.genres.includes('Martial Arts') ? 'martial_arts' :
+                      targetComic?.genres.includes('Romance') ? 'romance' :
+                      targetComic?.genres.includes('Horror') ? 'horror' :
+                      targetComic?.genres.includes('Mecha') ? 'mecha' : 'cyberpunk';
+        
+        generatedPages = Array.from({ length: count }, (_, i) => ({
+          id: `page-${i + 1}`,
+          pageNumber: i + 1,
+          imageUrl: generateComicPageSvg(theme, i + 1, `${targetComic?.title || 'Komik'} Ch. ${chapterData.chapterNumber}`),
+          caption: `Halaman ${i + 1}`
+        }));
+      }
+    }
+
+    const newChapter: Chapter = {
+      id: `ch-${comicId}-${chapterData.chapterNumber}-${Date.now()}`,
+      comicId,
+      chapterNumber: chapterData.chapterNumber,
+      title: chapterData.title,
+      releaseDate: 'Hari ini',
+      isNew: true,
+      isLocked: false,
+      sourceType: st,
+      ...(chapterData.pdfUrl ? { pdfUrl: chapterData.pdfUrl } : {}),
+      ...(chapterData.pdfFileName ? { pdfFileName: chapterData.pdfFileName } : {}),
+      ...(chapterData.driveUrl ? { driveUrl: chapterData.driveUrl } : {}),
+      ...(driveEmbed ? { driveEmbedUrl: driveEmbed } : {}),
+      ...(chapterData.driveAccountId ? { driveAccountId: chapterData.driveAccountId } : {}),
+      ...(chapterData.driveNotes ? { driveNotes: chapterData.driveNotes } : {}),
+      pages: generatedPages,
+      viewsCount: 0
+    };
+
+    const updatedList = [newChapter, ...existingChapters].sort((a, b) => b.chapterNumber - a.chapterNumber);
+
+    setChapters(prev => ({
+      ...prev,
+      [comicId]: updatedList
+    }));
+
+    saveChapterToFirestore(newChapter);
+
+    // Update totalChapters count on comic
+    setComics(prev => prev.map(c => {
+      if (c.id === comicId) {
+        const updated = { ...c, totalChapters: updatedList.length, updatedAt: new Date().toISOString().split('T')[0] };
+        saveComicToFirestore(updated);
+        return updated;
+      }
+      return c;
+    }));
+
+    const sourceLabel = st === 'pdf' ? 'Dokumen PDF' : st === 'drive' ? 'Google Drive Reader' : `${generatedPages.length} Halaman Gambar`;
+
+    addLog(
+      currentUser?.username || 'admin',
+      `Upload Chapter Baru (${(st || 'manual').toUpperCase()}): "${targetComic?.title || 'Komik'}" Ch. ${chapterData.chapterNumber}`,
+      'chapter_create',
+      'success',
+      `Judul: "${chapterData.title}" (${sourceLabel})`
+    );
+  };
+
+  const updateChapter = (comicId: string, chapterId: string, updates: Partial<Chapter>) => {
+    let enrichedUpdates = { ...updates };
+    if (updates.driveUrl) {
+      enrichedUpdates.driveEmbedUrl = formatGoogleDriveEmbedUrl(updates.driveUrl);
+    }
+
+    setChapters(prev => {
+      const list = prev[comicId] || [];
+      const updatedList = list.map(ch => {
+        if (ch.id === chapterId) {
+          const updated = { ...ch, ...enrichedUpdates };
+          saveChapterToFirestore(updated);
+          return updated;
+        }
+        return ch;
+      });
+      return {
+        ...prev,
+        [comicId]: updatedList
+      };
+    });
+
+    addLog(
+      currentUser?.username || 'admin',
+      `Update Chapter ID ${chapterId}`,
+      'chapter_create',
+      'info',
+      `Perubahan data chapter pada komik ID ${comicId}`
+    );
+  };
+
+  const deleteChapter = (comicId: string, chapterId: string, reason?: string) => {
+    deleteChapterFromFirestore(chapterId);
+    const targetChapter = (chapters[comicId] || []).find(ch => ch.id === chapterId);
+
+    setChapters(prev => {
+      const list = (prev[comicId] || []).filter(ch => ch.id !== chapterId);
+      return {
+        ...prev,
+        [comicId]: list
+      };
+    });
+
+    setComics(prev => prev.map(c => {
+      if (c.id === comicId) {
+        const remaining = (chapters[comicId] || []).filter(ch => ch.id !== chapterId).length;
+        const updated = { ...c, totalChapters: remaining };
+        saveComicToFirestore(updated);
+        return updated;
+      }
+      return c;
+    }));
+
+    const targetComic = comics.find(c => c.id === comicId);
+    addLog(
+      currentUser?.username || 'admin',
+      `Hapus Chapter: "${targetComic?.title || comicId}" Ch. ${targetChapter?.chapterNumber || chapterId}`,
+      'chapter_delete',
+      'warning',
+      `Chapter pada komik ${targetComic?.title || comicId} berhasil dihapus.${reason ? ` [Alasan Audit: ${reason}]` : ''}`
+    );
+  };
+
+  const batchDeleteChapters = (comicId: string, chapterIds: string[], reason?: string) => {
+    if (!chapterIds || chapterIds.length === 0) return;
+
+    const idSet = new Set(chapterIds);
+    chapterIds.forEach(chId => deleteChapterFromFirestore(chId));
+
+    setChapters(prev => {
+      const list = (prev[comicId] || []).filter(ch => !idSet.has(ch.id));
+      return {
+        ...prev,
+        [comicId]: list
+      };
+    });
+
+    setComics(prev => prev.map(c => {
+      if (c.id === comicId) {
+        const remaining = (chapters[comicId] || []).filter(ch => !idSet.has(ch.id)).length;
+        const updated = { ...c, totalChapters: remaining };
+        saveComicToFirestore(updated);
+        return updated;
+      }
+      return c;
+    }));
+
+    const targetComic = comics.find(c => c.id === comicId);
+    addLog(
+      currentUser?.username || 'admin',
+      `Batch Hapus Chapter (${chapterIds.length} Chapter): "${targetComic?.title || comicId}"`,
+      'chapter_delete',
+      'warning',
+      `${chapterIds.length} chapter pada komik "${targetComic?.title || comicId}" berhasil dihapus.${reason ? ` [Alasan Audit: ${reason}]` : ''}`
+    );
+  };
+
+  // Actions - Drive Storage Hub
+  const addDriveAccount = (accountData: Omit<DriveAccount, 'id' | 'createdAt'>) => {
+    const newAccount: DriveAccount = {
+      ...accountData,
+      id: `drive-acc-${Date.now()}`,
+      createdAt: new Date().toISOString().split('T')[0]
+    };
+    setDriveAccounts(prev => [newAccount, ...prev]);
+    saveDriveAccountToFirestore(newAccount);
+    addLog(
+      currentUser?.username || 'admin',
+      `Tambah Akun Google Drive: "${newAccount.name}"`,
+      'drive_account_update',
+      'success',
+      `Akun: ${newAccount.email} | Status: ${(newAccount.status || 'active').toUpperCase()}`
+    );
+  };
+
+  const updateDriveAccount = (id: string, updates: Partial<DriveAccount>) => {
+    setDriveAccounts(prev => prev.map(acc => {
+      if (acc.id === id) {
+        const updated = { ...acc, ...updates };
+        saveDriveAccountToFirestore(updated);
+        return updated;
+      }
+      return acc;
+    }));
+
+    addLog(
+      currentUser?.username || 'admin',
+      `Update Akun Google Drive (ID: ${id})`,
+      'drive_account_update',
+      'info',
+      'Konfigurasi akun drive dan pemetaan katalog berhasil disimpan.'
+    );
+  };
+
+  const deleteDriveAccount = (id: string) => {
+    const target = driveAccounts.find(a => a.id === id);
+    setDriveAccounts(prev => prev.filter(acc => acc.id !== id));
+    deleteDriveAccountFromFirestore(id);
+    addLog(
+      currentUser?.username || 'admin',
+      `Hapus Akun Google Drive: "${target?.name || id}"`,
+      'drive_account_update',
+      'warning',
+      `Akun Drive "${target?.name || id}" dihapus dari katalog.`
+    );
+  };
+
+  const updateChapterDriveLink = (comicId: string, chapterId: string, driveUrl: string, driveAccountId?: string, driveNotes?: string) => {
+    const embedUrl = formatGoogleDriveEmbedUrl(driveUrl);
+    setChapters(prev => {
+      const list = prev[comicId] || [];
+      return {
+        ...prev,
+        [comicId]: list.map(ch => {
+          if (ch.id === chapterId) {
+            const updated: Chapter = {
+              ...ch,
+              sourceType: 'drive' as const,
+              driveUrl: driveUrl.trim(),
+              driveEmbedUrl: embedUrl,
+              driveAccountId: driveAccountId !== undefined ? driveAccountId : ch.driveAccountId,
+              driveNotes: driveNotes !== undefined ? driveNotes : ch.driveNotes
+            };
+            saveChapterToFirestore(updated);
+            return updated;
+          }
+          return ch;
+        })
+      };
+    });
+    addLog(
+      currentUser?.username || 'admin',
+      `Update Link Drive Chapter ID: ${chapterId}`,
+      'drive_link_update',
+      'success',
+      `Tautan Google Drive berhasil dikaitkan dan diperbarui pada chapter.`
+    );
+  };
+
+  // User Management
+  const addUser = (userData: { 
+    username: string; 
+    password: string; 
+    durationType: DurationType; 
+    tier?: 'Free Tier' | 'Pro Member' | 'Premium';
+    planType?: PlanType;
+    accessType?: AccessType;
+    allowedComicIds?: string[];
+    priceNote?: string;
+  }): { success: boolean; message: string } => {
+    const cleanUsername = userData.username.trim();
+    if (!cleanUsername) {
+      return { success: false, message: 'Username tidak boleh kosong!' };
+    }
+    if (userData.password.length < 6) {
+      return { success: false, message: 'Password minimal 6 karakter sesuai rekomendasi keamanan.' };
+    }
+    const exists = users.some(u => u.username.toLowerCase() === cleanUsername.toLowerCase());
+    if (exists) {
+      return { success: false, message: 'Username tersebut sudah terdaftar! Pilih username lain.' };
+    }
+
+    const assignedPlan = userData.planType || (userData.accessType === 'specific' ? 'plan_5k_single' : 'plan_15k_all');
+    const assignedAccess = userData.accessType || (assignedPlan === 'plan_5k_single' ? 'specific' : 'all');
+    const defaultPriceNote = assignedPlan === 'plan_15k_all' 
+      ? 'Rp 15.000 / VIP All Access' 
+      : assignedPlan === 'plan_5k_single' 
+      ? 'Rp 5.000 / 1 Judul' 
+      : (userData.priceNote || 'Custom Plan');
+
+    const newUser: User = {
+      id: `user-${Date.now()}`,
+      username: cleanUsername,
+      passwordHash: userData.password,
+      role: 'reader',
+      status: 'active',
+      createdAt: new Date().toISOString(),
+      firstLoginAt: null, // Starts when they first log in!
+      expiresAt: null,
+      durationType: userData.durationType,
+      failedAttempts: 0,
+      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+      tier: userData.tier || (assignedPlan === 'plan_15k_all' ? 'Premium' : 'Pro Member'),
+      planType: assignedPlan,
+      accessType: assignedAccess,
+      allowedComicIds: userData.allowedComicIds || [],
+      priceNote: userData.priceNote || defaultPriceNote,
+      bio: `Reader Member (${userData.durationType.replace('_', ' ')})`,
+      stats: {
+        comicsRead: 0,
+        chaptersRead: 0,
+        daysActive: 0
+      }
+    };
+
+    setUsers(prev => [newUser, ...prev]);
+    saveUserToFirestore(newUser);
+
+    const planLabel = assignedPlan === 'plan_15k_all' ? 'Paket 15k (All Access)' : `Paket 5k (${(newUser.allowedComicIds || []).length} Judul)`;
+
+    addLog(
+      currentUser?.username || 'admin',
+      `Buat Akun Pembaca Baru: "${newUser.username}" (${planLabel})`,
+      'user_create',
+      'success',
+      `Durasi masa aktif: ${newUser.durationType.replace('_', ' ')}. Tipe Akses: ${assignedAccess}. Tersimpan di Firebase Firestore.`
+    );
+
+    return { success: true, message: `Akun pembaca "${newUser.username}" (${planLabel}) berhasil dibuat!` };
+  };
+
+  const updateUser = (id: string, updates: Partial<User>) => {
+    setUsers(prev => prev.map(u => {
+      if (u.id === id) {
+        // If durationType changed, recompute expiresAt if firstLoginAt exists
+        let newExpiresAt = u.expiresAt;
+        if (updates.durationType && updates.durationType !== u.durationType && u.firstLoginAt) {
+          const firstLoginTime = new Date(u.firstLoginAt).getTime();
+          newExpiresAt = new Date(firstLoginTime + getDurationMs(updates.durationType)).toISOString();
+        }
+        const updatedUser: User = { ...u, ...updates, expiresAt: newExpiresAt || u.expiresAt };
+        saveUserToFirestore(updatedUser);
+        if (currentUser && currentUser.id === id) {
+          setCurrentUser(updatedUser);
+        }
+        return updatedUser;
+      }
+      return u;
+    }));
+
+    addLog(
+      currentUser?.username || 'admin',
+      `Update Akun Pengguna: ID ${id}`,
+      'user_update',
+      'info',
+      'Data profil, paket akses, atau status pengguna diperbarui oleh Admin di Firestore.'
+    );
+  };
+
+  const updateUserProfile = (userId: string, updates: { avatar?: string; displayName?: string; bio?: string }) => {
+    setUsers(prev => prev.map(u => {
+      if (u.id === userId) {
+        const updatedUser: User = { ...u, ...updates };
+        saveUserToFirestore(updatedUser);
+        if (currentUser && currentUser.id === userId) {
+          setCurrentUser(updatedUser);
+        }
+        return updatedUser;
+      }
+      return u;
+    }));
+
+    if (currentUser && currentUser.id === userId) {
+      setCurrentUser(prev => prev ? { ...prev, ...updates } : null);
+    }
+
+    addLog(
+      currentUser?.username || 'user',
+      `Ganti Foto Profil / Bio Pengguna`,
+      'user_update',
+      'info',
+      'Pengguna berhasil memperbarui foto profil avatar dan biodata'
+    );
+  };
+
+  const unlockUser = (id: string) => {
+    setUsers(prev => prev.map(u => {
+      if (u.id === id) {
+        const updated: User = { ...u, failedAttempts: 0, status: 'active' as const };
+        saveUserToFirestore(updated);
+        return updated;
+      }
+      return u;
+    }));
+
+    const target = users.find(u => u.id === id);
+    addLog(
+      currentUser?.username || 'admin',
+      `Buka Kunci Akun: "${target?.username}"`,
+      'user_unlock',
+      'success',
+      'Hitungan kegagalan password direset ke 0 dan status akun dipulihkan AKTIF.'
+    );
+  };
+
+  const toggleUserStatus = (id: string) => {
+    setUsers(prev => prev.map(u => {
+      if (u.id === id) {
+        const nextStatus = u.status === 'active' ? 'inactive' : 'active';
+        const updated: User = { ...u, status: nextStatus, failedAttempts: 0 };
+        saveUserToFirestore(updated);
+        return updated;
+      }
+      return u;
+    }));
+
+    const target = users.find(u => u.id === id);
+    addLog(
+      currentUser?.username || 'admin',
+      `Ubah Status Akun: "${target?.username}"`,
+      'user_deactivate',
+      'info',
+      `Status akun diubah oleh admin.`
+    );
+  };
+
+  const deleteUser = (id: string) => {
+    const target = users.find(u => u.id === id);
+    if (target?.role === 'admin') return; // Cannot delete admin
+    setUsers(prev => prev.filter(u => u.id !== id));
+    deleteUserFromFirestore(id);
+    addLog(
+      currentUser?.username || 'admin',
+      `Hapus Akun Pengguna: "${target?.username}"`,
+      'user_update',
+      'warning',
+      'Akun dihapus dari Firestore database'
+    );
+  };
+
+  const changeAdminPassword = (oldPassword: string, newPassword: string): { success: boolean; message: string } => {
+    if (!currentUser || currentUser.role !== 'admin') {
+      return { success: false, message: 'Hanya Super Admin yang berwenang mengubah kata sandi akun Admin!' };
+    }
+
+    if (!oldPassword.trim() || !newPassword.trim()) {
+      return { success: false, message: 'Password lama dan password baru wajib diisi!' };
+    }
+
+    if (newPassword.length < 6) {
+      return { success: false, message: 'Password baru minimal 6 karakter demi keamanan akun!' };
+    }
+
+    const adminUser = users.find(u => u.id === currentUser.id || (u.role === 'admin' && u.username === currentUser.username));
+    const currentStoredPassword = adminUser ? adminUser.passwordHash : currentUser.passwordHash;
+
+    if (oldPassword !== currentStoredPassword) {
+      addLog(
+        currentUser.username,
+        'Percobaan Ganti Password Admin Gagal (Password Lama Salah)',
+        'user_update',
+        'warning',
+        'Upaya pergantian kata sandi ditolak karena verifikasi password saat ini tidak cocok.'
+      );
+      return { success: false, message: 'Password saat ini / password lama yang Anda masukkan salah!' };
+    }
+
+    if (oldPassword === newPassword) {
+      return { success: false, message: 'Password baru tidak boleh sama persis dengan password lama!' };
+    }
+
+    // Update in users state & Firestore
+    setUsers(prev => prev.map(u => {
+      if (u.id === currentUser.id || (u.role === 'admin' && u.username === currentUser.username)) {
+        const updated: User = { ...u, passwordHash: newPassword };
+        saveUserToFirestore(updated);
+        return updated;
+      }
+      return u;
+    }));
+
+    // Update in currentUser state
+    setCurrentUser(prev => prev ? { ...prev, passwordHash: newPassword } : null);
+
+    addLog(
+      currentUser.username,
+      'Pergantian Password Super Admin Berhasil',
+      'user_update',
+      'success',
+      'Password utama akun Super Admin telah berhasil diperbarui dan tersimpan di Firebase Firestore.'
+    );
+
+    return { success: true, message: 'Password Super Admin berhasil diganti! Gunakan password baru untuk login berikutnya.' };
+  };
+
+  // Banner Management
+  const addBanner = (bannerData: Omit<Banner, 'id'>) => {
+    const newBanner: Banner = {
+      ...bannerData,
+      id: `banner-${Date.now()}`
+    };
+    setBanners(prev => [...prev, newBanner]);
+    saveBannerToFirestore(newBanner);
+    addLog(
+      currentUser?.username || 'admin',
+      `Tambah Banner Hero: "${newBanner.title}"`,
+      'banner_update',
+      'success',
+      'Banner carousel beranda diperbarui'
+    );
+  };
+
+  const updateBanner = (id: string, updates: Partial<Banner>) => {
+    setBanners(prev => prev.map(b => {
+      if (b.id === id) {
+        const updated = { ...b, ...updates };
+        saveBannerToFirestore(updated);
+        return updated;
+      }
+      return b;
+    }));
+  };
+
+  const deleteBanner = (id: string) => {
+    setBanners(prev => prev.filter(b => b.id !== id));
+    deleteBannerFromFirestore(id);
+  };
+
+  const updateSettings = (settings: Partial<SystemSettings>) => {
+    setSystemSettings(prev => {
+      const updated = { ...prev, ...settings };
+      saveSettingsToFirestore(updated);
+      return updated;
+    });
+    addLog(
+      currentUser?.username || 'admin',
+      'Perubahan Pengaturan Sistem (System Settings)',
+      'system_settings',
+      'info',
+      'Preferensi keamanan dan default reader diperbarui di Firestore'
+    );
+  };
+
+  // Bookmarks & History
+  const toggleBookmark = (comicId: string) => {
+    setBookmarks(prev => {
+      const exists = prev.some(b => b.comicId === comicId);
+      if (exists) {
+        return prev.filter(b => b.comicId !== comicId);
+      } else {
+        return [...prev, { comicId, addedAt: new Date().toISOString() }];
+      }
+    });
+  };
+
+  const isBookmarked = (comicId: string) => {
+    return bookmarks.some(b => b.comicId === comicId);
+  };
+
+  const saveReadingProgress = (comicId: string, chapterId: string, chapterNumber: number, pageNumber: number, totalPages: number) => {
+    setReadingHistory(prev => {
+      const filtered = prev.filter(h => h.comicId !== comicId);
+      const newEntry: ReadingHistory = {
+        comicId,
+        chapterId,
+        chapterNumber,
+        pageNumber,
+        totalPages,
+        updatedAt: new Date().toISOString()
+      };
+      return [newEntry, ...filtered];
+    });
+
+    // Also update user stats if logged in
+    if (currentUser) {
+      setCurrentUser(prev => {
+        if (!prev) return null;
+        const updated: User = {
+          ...prev,
+          stats: {
+            ...prev.stats,
+            chaptersRead: prev.stats.chaptersRead + 1
+          }
+        };
+        saveUserToFirestore(updated);
+        return updated;
+      });
+    }
+  };
+
+  const clearActivityLogs = (reason?: string) => {
+    const adminName = currentUser?.username || 'admin';
+    const auditNotice: ActivityLog = {
+      id: `log-audit-reset-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      username: adminName,
+      ipAddress: '127.0.0.1 (Authorized Admin)',
+      action: 'Pembersihan Log Aktivitas Sistem (ISO/IEC 27001 Audit)',
+      type: 'system_settings',
+      status: 'warning',
+      details: `Riwayat log aktivitas sebelumnya telah dibersihkan atas persetujuan otentikasi Super Admin.${reason ? ` [Alasan Audit: ${reason}]` : ''}`
+    };
+
+    setActivityLogs([auditNotice]);
+    safeSetItem(STORAGE_KEYS.LOGS, [auditNotice]);
+    saveActivityLogToFirestore(auditNotice);
+  };
+
+  const getReadingProgress = (comicId: string) => {
+    return readingHistory.find(h => h.comicId === comicId);
+  };
+
+  return (
+    <AppContext.Provider
+      value={{
+        currentUser,
+        googleUser,
+        comics,
+        chapters,
+        users,
+        banners,
+        activityLogs,
+        systemSettings,
+        driveAccounts,
+        bookmarks,
+        readingHistory,
+        comments,
+        selectedGenreFilter,
+        activeTab,
+        selectedComicId,
+        readingChapterId,
+        isAdminView,
+        adminActiveMenu,
+        isLoginModalOpen,
+        loginModalRedirectNotice,
+        isMobileDeviceFrame,
+        login,
+        logout,
+        loginWithGoogle,
+        logoutGoogle,
+        openLoginModal,
+        closeLoginModal,
+        canUserReadComic,
+        setActiveTab,
+        selectComic,
+        setSelectedGenreFilter,
+        navigateToGenre,
+        startReading,
+        closeReader,
+        setIsAdminView,
+        setAdminActiveMenu,
+        toggleMobileDeviceFrame,
+        addComic,
+        injectComicWithChapters,
+        batchInjectComicsWithChapters,
+        updateComic,
+        deleteComic,
+        batchDeleteComics,
+        toggleComicHomeVisibility,
+        batchToggleComicHomeVisibility,
+        addChapter,
+        updateChapter,
+        deleteChapter,
+        batchDeleteChapters,
+        updateChapterDriveLink,
+        addComment,
+        toggleLikeComment,
+        deleteComment,
+        addDriveAccount,
+        updateDriveAccount,
+        deleteDriveAccount,
+        addUser,
+        updateUser,
+        updateUserProfile,
+        unlockUser,
+        toggleUserStatus,
+        deleteUser,
+        changeAdminPassword,
+        addBanner,
+        updateBanner,
+        deleteBanner,
+        updateSettings,
+        addActivityLog: (type: string, message: string) => addLog(currentUser?.username || 'admin', message, type as any, 'info'),
+        clearActivityLogs,
+        toggleBookmark,
+        isBookmarked,
+        saveReadingProgress,
+        getReadingProgress
+      }}
+    >
+      {children}
+    </AppContext.Provider>
+  );
+};
+
+export const useApp = () => {
+  const context = useContext(AppContext);
+  if (!context) {
+    throw new Error('useApp must be used within an AppProvider');
+  }
+  return context;
+};

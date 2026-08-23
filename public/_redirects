@@ -1,0 +1,11 @@
+# Netlify redirects for API functions and SPA routing
+/api/mangadex/search             /.netlify/functions/mangadex-proxy?action=search   200
+/api/mangadex/chapters/:mangaId  /.netlify/functions/mangadex-proxy?action=chapters&mangaId=:mangaId  200
+/api/mangadex/pages/:chapterId   /.netlify/functions/mangadex-proxy?action=pages&chapterId=:chapterId   200
+/api/komikcast/search            /.netlify/functions/komikcast-proxy?action=search  200
+/api/komikcast/detail            /.netlify/functions/komikcast-proxy?action=detail  200
+/api/komikcast/chapter           /.netlify/functions/komikcast-proxy?action=chapter 200
+/api/jikan/search                /.netlify/functions/jikan-proxy                    200
+/api/drive/download-pdf          /.netlify/functions/drive-proxy                    200
+/api/proxy-image                 /.netlify/functions/image-proxy                    200
+/*                               /index.html                                        200

@@ -1,0 +1,6 @@
+{
+  "name": "AntiTimpa",
+  "description": "Platform Baca Komik Digital Mobile-First dengan Mode Reader Interaktif, Proteksi Google Drive Anti-Leak, Captcha On-Demand, dan Manajemen Admin Terintegrasi.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
