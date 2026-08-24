@@ -1,21 +1,26 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useApp } from '../../context/AppContext';
 import { Home, Compass, Bookmark, User, BookOpen } from 'lucide-react';
 
 export const BottomNav: React.FC = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
   const { 
     activeTab, 
     setActiveTab, 
     selectComic, 
-    selectedComicId, 
     readingChapterId, 
     bookmarks,
     currentUser,
-    openLoginModal
+    openLoginModal,
+    comics
   } = useApp();
 
   const [isVisible, setIsVisible] = useState(true);
   const lastScrollYRef = useRef(0);
+
+  const pathname = location.pathname;
 
   useEffect(() => {
     const handleScroll = () => {
@@ -34,13 +39,22 @@ export const BottomNav: React.FC = () => {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-  // Hide bottom nav if reader is actively open (for full immersive comic reading experience)
-  if (readingChapterId) return null;
+  // Hide bottom nav if reader is actively open or on reader page
+  if (readingChapterId || pathname.startsWith('/read/')) return null;
 
-  const handleTabClick = (tab: 'home' | 'discover' | 'library' | 'profile') => {
+  const handleTabClick = (tab: 'home' | 'discover' | 'library' | 'profile', path: string) => {
     selectComic(null);
     setActiveTab(tab);
+    navigate(path);
     window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleQuickRead = () => {
+    const featuredComic = comics[0];
+    if (featuredComic) {
+      selectComic(featuredComic.id);
+      navigate(`/comic/${featuredComic.slug || featuredComic.id}`);
+    }
   };
 
   return (
@@ -52,9 +66,9 @@ export const BottomNav: React.FC = () => {
       <div className="max-w-md mx-auto flex items-center justify-around relative">
         {/* Home */}
         <button
-          onClick={() => handleTabClick('home')}
-          className={`flex flex-col items-center gap-1 py-1 px-3 transition-colors ${
-            activeTab === 'home' && !selectedComicId ? 'text-[#ff5b14] font-bold' : 'hover:text-slate-200'
+          onClick={() => handleTabClick('home', '/')}
+          className={`flex flex-col items-center gap-1 py-1 px-3 transition-colors cursor-pointer ${
+            pathname === '/' ? 'text-[#ff5b14] font-bold' : 'hover:text-slate-200'
           }`}
         >
           <Home className="w-5 h-5" />
@@ -63,9 +77,9 @@ export const BottomNav: React.FC = () => {
 
         {/* Discover / Search */}
         <button
-          onClick={() => handleTabClick('discover')}
-          className={`flex flex-col items-center gap-1 py-1 px-3 transition-colors ${
-            activeTab === 'discover' && !selectedComicId ? 'text-[#ff5b14] font-bold' : 'hover:text-slate-200'
+          onClick={() => handleTabClick('discover', '/discover')}
+          className={`flex flex-col items-center gap-1 py-1 px-3 transition-colors cursor-pointer ${
+            pathname.startsWith('/discover') ? 'text-[#ff5b14] font-bold' : 'hover:text-slate-200'
           }`}
         >
           <Compass className="w-5 h-5" />
@@ -75,11 +89,8 @@ export const BottomNav: React.FC = () => {
         {/* Floating Quick Action Reader / Trending */}
         <div className="relative -top-3">
           <button
-            onClick={() => {
-              // Open first trending comic or start reading
-              selectComic('comic-1');
-            }}
-            className="w-12 h-12 rounded-full bg-gradient-to-tr from-[#ff5b14] to-[#f97316] text-white flex items-center justify-center shadow-lg shadow-[#ff5b14]/30 hover:scale-105 active:scale-95 transition-all"
+            onClick={handleQuickRead}
+            className="w-12 h-12 rounded-full bg-gradient-to-tr from-[#ff5b14] to-[#f97316] text-white flex items-center justify-center shadow-lg shadow-[#ff5b14]/30 hover:scale-105 active:scale-95 transition-all cursor-pointer"
             title="Baca Komik Pilihan"
           >
             <BookOpen className="w-5 h-5" />
@@ -88,9 +99,9 @@ export const BottomNav: React.FC = () => {
 
         {/* Library / Koleksi */}
         <button
-          onClick={() => handleTabClick('library')}
-          className={`flex flex-col items-center gap-1 py-1 px-3 relative transition-colors ${
-            activeTab === 'library' && !selectedComicId ? 'text-[#ff5b14] font-bold' : 'hover:text-slate-200'
+          onClick={() => handleTabClick('library', '/library')}
+          className={`flex flex-col items-center gap-1 py-1 px-3 relative transition-colors cursor-pointer ${
+            pathname.startsWith('/library') ? 'text-[#ff5b14] font-bold' : 'hover:text-slate-200'
           }`}
         >
           <div className="relative">
@@ -110,11 +121,11 @@ export const BottomNav: React.FC = () => {
             if (!currentUser) {
               openLoginModal();
             } else {
-              handleTabClick('profile');
+              handleTabClick('profile', '/profile');
             }
           }}
-          className={`flex flex-col items-center gap-1 py-1 px-3 transition-colors ${
-            activeTab === 'profile' && !selectedComicId ? 'text-[#ff5b14] font-bold' : 'hover:text-slate-200'
+          className={`flex flex-col items-center gap-1 py-1 px-3 transition-colors cursor-pointer ${
+            pathname.startsWith('/profile') ? 'text-[#ff5b14] font-bold' : 'hover:text-slate-200'
           }`}
         >
           <User className="w-5 h-5" />

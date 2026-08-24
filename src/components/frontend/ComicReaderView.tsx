@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import { useApp } from '../../context/AppContext';
 import { ComicPage } from '../../types';
 import { downloadDrivePdf, convertImagesToPdf } from '../../utils/pdfConverter';
@@ -26,6 +27,8 @@ import {
 } from 'lucide-react';
 
 export const ComicReaderView: React.FC = () => {
+  const params = useParams<{ comicId?: string; chapterId?: string }>();
+  const navigate = useNavigate();
   const { 
     readingChapterId, 
     closeReader, 
@@ -56,6 +59,55 @@ export const ComicReaderView: React.FC = () => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const lastScrollTopRef = useRef<number>(0);
 
+  // Target chapter ID resolution from router params or state
+  const effectiveChapterId = params.chapterId || readingChapterId;
+  const effectiveComicId = params.comicId;
+
+  // Find active comic and chapter
+  let activeComic = comics.find(c => {
+    if (effectiveComicId && (c.id === effectiveComicId || c.slug === effectiveComicId)) return true;
+    const list = chapters[c.id] || [];
+    return list.some(ch => ch.id === effectiveChapterId);
+  }) || comics.find(c => {
+    const list = chapters[c.id] || [];
+    return list.some(ch => ch.id === effectiveChapterId);
+  });
+
+  let activeChapter = activeComic ? (chapters[activeComic.id] || []).find(ch => ch.id === effectiveChapterId) : null;
+  if (!activeChapter && effectiveChapterId) {
+    for (const c of comics) {
+      const found = (chapters[c.id] || []).find(ch => ch.id === effectiveChapterId);
+      if (found) {
+        activeComic = c;
+        activeChapter = found;
+        break;
+      }
+    }
+  }
+
+  // Ensure state matches router on mount
+  useEffect(() => {
+    if (effectiveChapterId && effectiveChapterId !== readingChapterId) {
+      startReading(effectiveChapterId);
+    }
+  }, [effectiveChapterId]);
+
+  const handleClose = () => {
+    closeReader();
+    if (activeComic) {
+      navigate(`/comic/${activeComic.slug || activeComic.id}`);
+    } else {
+      navigate('/');
+    }
+  };
+
+  const handleNavigateChapter = (newChapterId: string) => {
+    startReading(newChapterId);
+    if (activeComic) {
+      navigate(`/read/${activeComic.id}/${newChapterId}`);
+    }
+  };
+
   // Auto-hide HUD on scroll handler
   const handleScroll = () => {
     if (!scrollContainerRef.current) return;
@@ -68,16 +120,9 @@ export const ComicReaderView: React.FC = () => {
     }
   };
 
-  // Find active comic and chapter
-  let activeComic = comics.find(c => {
-    const list = chapters[c.id] || [];
-    return list.some(ch => ch.id === readingChapterId);
-  });
-
-  let activeChapter = activeComic ? (chapters[activeComic.id] || []).find(ch => ch.id === readingChapterId) : null;
   const comicChaptersList = activeComic ? [...(chapters[activeComic.id] || [])].sort((a, b) => a.chapterNumber - b.chapterNumber) : [];
 
-  const currentChapterIndexInSorted = comicChaptersList.findIndex(ch => ch.id === readingChapterId);
+  const currentChapterIndexInSorted = comicChaptersList.findIndex(ch => ch.id === effectiveChapterId);
   const prevChapter = currentChapterIndexInSorted > 0 ? comicChaptersList[currentChapterIndexInSorted - 1] : null;
   const nextChapter = currentChapterIndexInSorted < comicChaptersList.length - 1 ? comicChaptersList[currentChapterIndexInSorted + 1] : null;
 
@@ -384,7 +429,7 @@ export const ComicReaderView: React.FC = () => {
       >
         <div className="flex items-center gap-3">
           <button
-            onClick={closeReader}
+            onClick={handleClose}
             className="p-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-white/10 transition-colors"
             title="Tutup Reader"
           >
@@ -583,7 +628,7 @@ export const ComicReaderView: React.FC = () => {
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      startReading(nextChapter.id);
+                      handleNavigateChapter(nextChapter.id);
                     }}
                     className="px-4 py-2 bg-[#ff5b14] text-white font-bold text-xs rounded-xl shadow-md flex items-center gap-1.5"
                   >
@@ -594,7 +639,7 @@ export const ComicReaderView: React.FC = () => {
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    closeReader();
+                    handleClose();
                   }}
                   className="px-4 py-2 bg-[#1c1c28] text-slate-300 font-semibold text-xs rounded-xl border border-[#2a2a3e]"
                 >
@@ -839,7 +884,7 @@ export const ComicReaderView: React.FC = () => {
                     <button
                       key={ch.id}
                       onClick={() => {
-                        startReading(ch.id);
+                        handleNavigateChapter(ch.id);
                         setShowChapterDrawer(false);
                       }}
                       className={`w-full p-2.5 rounded-xl text-left text-xs font-semibold flex items-center justify-between transition-all ${

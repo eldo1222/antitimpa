@@ -3,12 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React from 'react';
+import React, { useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { AppProvider, useApp } from './context/AppContext';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { Header } from './components/common/Header';
 import { Footer } from './components/common/Footer';
 import { BottomNav } from './components/common/BottomNav';
+import { RouteLoadingBar } from './components/common/RouteLoadingBar';
 import { HomeView } from './components/frontend/HomeView';
 import { DiscoverView } from './components/frontend/DiscoverView';
 import { LibraryView } from './components/frontend/LibraryView';
@@ -20,64 +22,66 @@ import { LoginModal } from './components/auth/LoginModal';
 import { OfflineGuard } from './components/common/OfflineGuard';
 import { Smartphone } from 'lucide-react';
 
-const MainAppContent: React.FC = () => {
-  const { 
-    currentUser,
-    isAdminView, 
-    setIsAdminView,
-    activeTab, 
-    selectedComicId, 
-    readingChapterId, 
-    isMobileDeviceFrame,
-    toggleMobileDeviceFrame 
-  } = useApp();
+// Sync current URL path with AppContext activeTab and selected items
+const RouteSynchronizer: React.FC = () => {
+  const location = useLocation();
+  const { setActiveTab } = useApp();
 
-  // If Admin View is active, verify Super Admin permission
-  if (isAdminView) {
-    if (currentUser?.role === 'admin') {
-      return (
-        <div id="antitimpa-admin-root" className="min-h-screen bg-[#0b0b0e]">
-          <ErrorBoundary>
-            <AdminDashboard />
-            <LoginModal />
-          </ErrorBoundary>
-        </div>
-      );
-    } else {
-      // Reader or unauthenticated user trying to access admin view: kick back
-      setIsAdminView(false);
+  useEffect(() => {
+    const path = location.pathname;
+    if (path === '/') {
+      setActiveTab('home');
+    } else if (path.startsWith('/discover')) {
+      setActiveTab('discover');
+    } else if (path.startsWith('/library')) {
+      setActiveTab('library');
+    } else if (path.startsWith('/profile')) {
+      setActiveTab('profile');
     }
+  }, [location.pathname]);
+
+  return null;
+};
+
+// Protected Admin View wrapper
+const AdminRouteWrapper: React.FC = () => {
+  const { currentUser, openLoginModal } = useApp();
+
+  if (currentUser?.role !== 'admin') {
+    return (
+      <div className="min-h-[80vh] flex flex-col items-center justify-center p-6 text-center">
+        <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 mb-4">
+          <span className="text-2xl font-black">🔒</span>
+        </div>
+        <h2 className="text-xl font-bold text-white mb-2">Akses Khusus Super Admin</h2>
+        <p className="text-xs text-slate-400 max-w-sm mb-6">
+          Halaman Admin Console memerlukan otentikasi akun Super Admin AntiTimpa.
+        </p>
+        <button
+          onClick={() => openLoginModal('Silakan login dengan akun Super Admin.')}
+          className="px-5 py-2.5 bg-[#ff5b14] hover:bg-[#e04e0e] text-white font-bold text-xs rounded-xl shadow-lg transition-all"
+        >
+          Login Super Admin
+        </button>
+      </div>
+    );
   }
 
-  // Mobile Content Switcher with fallback protection
-  const renderMobileContent = () => {
-    try {
-      if (readingChapterId) {
-        return <ComicReaderView />;
-      }
-      if (selectedComicId) {
-        return <ComicDetailView />;
-      }
-      switch (activeTab) {
-        case 'home':
-          return <HomeView />;
-        case 'discover':
-          return <DiscoverView />;
-        case 'library':
-          return <LibraryView />;
-        case 'profile':
-          return <ProfileView />;
-        default:
-          return <HomeView />;
-      }
-    } catch (err) {
-      console.error('Error rendering view, falling back to HomeView:', err);
-      return <HomeView />;
-    }
-  };
+  return <AdminDashboard />;
+};
+
+const MainAppContent: React.FC = () => {
+  const location = useLocation();
+  const { isMobileDeviceFrame, toggleMobileDeviceFrame } = useApp();
+
+  const isReadingRoute = location.pathname.startsWith('/read/');
+  const isAdminRoute = location.pathname.startsWith('/admin');
 
   return (
     <div id="komikyuk-app-root" className="min-h-screen bg-[#07070a] text-slate-100 flex flex-col items-center justify-start">
+      <RouteLoadingBar />
+      <RouteSynchronizer />
+
       {isMobileDeviceFrame ? (
         /* Realistic Mobile Phone Frame Mockup on Desktop */
         <div className="py-6 px-4 w-full flex flex-col items-center">
@@ -103,12 +107,21 @@ const MainAppContent: React.FC = () => {
             {/* Mobile Inner Viewport */}
             <div className="flex-1 overflow-y-auto relative flex flex-col bg-[#0c0c10]">
               <ErrorBoundary>
-                <Header />
+                {!isReadingRoute && !isAdminRoute && <Header />}
                 <main className="flex-1">
-                  {renderMobileContent()}
+                  <Routes>
+                    <Route path="/" element={<HomeView />} />
+                    <Route path="/discover" element={<DiscoverView />} />
+                    <Route path="/library" element={<LibraryView />} />
+                    <Route path="/profile" element={<ProfileView />} />
+                    <Route path="/comic/:comicId" element={<ComicDetailView />} />
+                    <Route path="/read/:comicId/:chapterId" element={<ComicReaderView />} />
+                    <Route path="/admin" element={<AdminRouteWrapper />} />
+                    <Route path="*" element={<Navigate to="/" replace />} />
+                  </Routes>
                 </main>
-                {!readingChapterId && <Footer />}
-                <BottomNav />
+                {!isReadingRoute && !isAdminRoute && <Footer />}
+                {!isReadingRoute && !isAdminRoute && <BottomNav />}
               </ErrorBoundary>
             </div>
           </div>
@@ -117,12 +130,21 @@ const MainAppContent: React.FC = () => {
         /* Standard Responsive View: Full-width on Desktop, optimized on Mobile */
         <div className="w-full min-h-screen flex flex-col bg-[#09090d] text-slate-100 relative">
           <ErrorBoundary>
-            <Header />
+            {!isReadingRoute && !isAdminRoute && <Header />}
             <main className="flex-1 w-full">
-              {renderMobileContent()}
+              <Routes>
+                <Route path="/" element={<HomeView />} />
+                <Route path="/discover" element={<DiscoverView />} />
+                <Route path="/library" element={<LibraryView />} />
+                <Route path="/profile" element={<ProfileView />} />
+                <Route path="/comic/:comicId" element={<ComicDetailView />} />
+                <Route path="/read/:comicId/:chapterId" element={<ComicReaderView />} />
+                <Route path="/admin" element={<AdminRouteWrapper />} />
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Routes>
             </main>
-            {!readingChapterId && <Footer />}
-            <BottomNav />
+            {!isReadingRoute && !isAdminRoute && <Footer />}
+            {!isReadingRoute && !isAdminRoute && <BottomNav />}
           </ErrorBoundary>
         </div>
       )}
@@ -138,7 +160,9 @@ export default function App() {
     <ErrorBoundary>
       <OfflineGuard>
         <AppProvider>
-          <MainAppContent />
+          <BrowserRouter>
+            <MainAppContent />
+          </BrowserRouter>
         </AppProvider>
       </OfflineGuard>
     </ErrorBoundary>

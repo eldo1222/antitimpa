@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useApp } from '../../context/AppContext';
 import { AvatarEditModal } from '../common/AvatarEditModal';
 import { 
@@ -23,6 +24,7 @@ import {
 } from 'lucide-react';
 
 export const ProfileView: React.FC = () => {
+  const navigate = useNavigate();
   const { 
     currentUser, 
     logout, 
@@ -216,7 +218,7 @@ export const ProfileView: React.FC = () => {
       {/* 5. Menu List Items (Image 25.png) */}
       <div className="bg-[#14141d] rounded-2xl border border-[#222232] divide-y divide-[#1f1f2e] text-xs font-semibold overflow-hidden shadow">
         <button
-          onClick={() => setActiveTab('library')}
+          onClick={() => navigate('/library')}
           className="w-full p-3.5 flex items-center justify-between text-slate-200 hover:bg-[#1b1b26] transition-colors"
         >
           <div className="flex items-center gap-3">
@@ -227,7 +229,7 @@ export const ProfileView: React.FC = () => {
         </button>
 
         <button
-          onClick={() => setActiveTab('library')}
+          onClick={() => navigate('/library')}
           className="w-full p-3.5 flex items-center justify-between text-slate-200 hover:bg-[#1b1b26] transition-colors"
         >
           <div className="flex items-center gap-3">
@@ -239,7 +241,10 @@ export const ProfileView: React.FC = () => {
 
         {currentUser.role === 'admin' && (
           <button
-            onClick={() => setIsAdminView(true)}
+            onClick={() => {
+              setIsAdminView(true);
+              navigate('/admin');
+            }}
             className="w-full p-3.5 flex items-center justify-between text-purple-300 bg-purple-500/10 hover:bg-purple-500/20 transition-colors"
           >
             <div className="flex items-center gap-3">

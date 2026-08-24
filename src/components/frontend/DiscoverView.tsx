@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useApp } from '../../context/AppContext';
 import { PRESET_GENRES, comicHasGenre } from '../../data/genres';
 import { 
@@ -16,6 +17,7 @@ import {
 } from 'lucide-react';
 
 export const DiscoverView: React.FC = () => {
+  const navigate = useNavigate();
   const { comics, selectComic, chapters, selectedGenreFilter, setSelectedGenreFilter } = useApp();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedGenre, setSelectedGenre] = useState(selectedGenreFilter || 'All');
@@ -235,7 +237,10 @@ export const DiscoverView: React.FC = () => {
             return (
               <div
                 key={comic.id}
-                onClick={() => selectComic(comic.id)}
+                onClick={() => {
+                  selectComic(comic.id);
+                  navigate(`/comic/${comic.slug || comic.id}`);
+                }}
                 className="p-3 bg-[#13131c] hover:bg-[#191924] border border-[#222232] rounded-2xl flex gap-3 cursor-pointer group transition-all"
               >
                 <img 

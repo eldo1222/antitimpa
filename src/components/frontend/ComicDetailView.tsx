@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import { useApp } from '../../context/AppContext';
 import { getSimilarComics } from '../../data/genres';
 import { CommentSection } from '../CommentSection';
@@ -28,6 +29,8 @@ import {
 import { AdBanner } from './AdBanner';
 
 export const ComicDetailView: React.FC = () => {
+  const params = useParams<{ comicId?: string }>();
+  const navigate = useNavigate();
   const { 
     selectedComicId, 
     selectComic, 
@@ -50,7 +53,8 @@ export const ComicDetailView: React.FC = () => {
   const [chapterSearch, setChapterSearch] = useState('');
   const [copiedLinkNotice, setCopiedLinkNotice] = useState(false);
 
-  const comic = comics.find(c => c.id === selectedComicId);
+  const targetId = params.comicId || selectedComicId;
+  const comic = comics.find(c => c.id === targetId || c.slug === targetId);
   if (!comic) {
     return (
       <div className="min-h-[500px] flex flex-col items-center justify-center p-6 text-center text-slate-100">
@@ -64,7 +68,7 @@ export const ComicDetailView: React.FC = () => {
         <button
           onClick={() => {
             selectComic(null);
-            setActiveTab('home');
+            navigate('/');
           }}
           className="px-5 py-2.5 bg-[#ff5b14] hover:bg-[#e04e0e] text-white font-bold text-xs rounded-xl shadow-lg cursor-pointer transition-all active:scale-95 flex items-center gap-2"
         >
@@ -123,10 +127,12 @@ export const ComicDetailView: React.FC = () => {
     if (readingProgress) {
       triggerPopunder();
       startReading(readingProgress.chapterId);
+      navigate(`/read/${comic.id}/${readingProgress.chapterId}`);
     } else if (rawChaptersList.length > 0) {
       const ch1 = rawChaptersList.find(c => c.chapterNumber === 1) || rawChaptersList[rawChaptersList.length - 1];
       triggerPopunder();
       startReading(ch1.id);
+      navigate(`/read/${comic.id}/${ch1.id}`);
     }
   };
 
@@ -141,6 +147,7 @@ export const ComicDetailView: React.FC = () => {
     }
     triggerPopunder();
     startReading(chapterId);
+    navigate(`/read/${comic.id}/${chapterId}`);
   };
 
   return (
@@ -149,7 +156,10 @@ export const ComicDetailView: React.FC = () => {
       <div className="sticky top-0 z-30 bg-[#0f0f14]/95 backdrop-blur-md px-4 sm:px-6 lg:px-8 py-3 border-b border-[#222232]">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <button
-            onClick={() => selectComic(null)}
+            onClick={() => {
+              selectComic(null);
+              navigate(-1);
+            }}
             className="p-2 -ml-1 text-slate-300 hover:text-white rounded-xl hover:bg-white/5 active:scale-95 transition-all flex items-center gap-1.5 text-xs font-semibold cursor-pointer"
           >
             <ArrowLeft className="w-4 h-4" />

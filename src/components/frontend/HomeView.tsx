@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useApp } from '../../context/AppContext';
 import { PRESET_GENRES, comicHasGenre } from '../../data/genres';
 import { 
@@ -29,6 +30,7 @@ import { AdBanner } from './AdBanner';
 const ITEMS_PER_PAGE = 24;
 
 export const HomeView: React.FC = () => {
+  const navigate = useNavigate();
   const { 
     comics, 
     banners, 
@@ -39,6 +41,12 @@ export const HomeView: React.FC = () => {
     setActiveTab,
     triggerPopunder
   } = useApp();
+
+  const handleOpenComic = (comicId: string) => {
+    selectComic(comicId);
+    const comic = comics.find(c => c.id === comicId);
+    navigate(`/comic/${comic?.slug || comicId}`);
+  };
 
   const [currentBannerIndex, setCurrentBannerIndex] = useState(0);
   const [selectedTypeTab, setSelectedTypeTab] = useState<'all' | 'manga' | 'manhwa' | 'manhua' | '18plus'>('all');
@@ -171,7 +179,7 @@ export const HomeView: React.FC = () => {
 
                 <div className="flex items-center gap-3">
                   <button
-                    onClick={() => selectComic(currentBanner.targetComicId)}
+                    onClick={() => handleOpenComic(currentBanner.targetComicId)}
                     className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#ff5b14] to-[#f97316] hover:opacity-95 active:scale-95 text-white text-xs sm:text-sm font-black flex items-center gap-2 shadow-xl shadow-[#ff5b14]/30 transition-all cursor-pointer"
                   >
                     <Play className="w-4 h-4 fill-white" />
@@ -179,7 +187,7 @@ export const HomeView: React.FC = () => {
                   </button>
 
                   <button
-                    onClick={() => selectComic(currentBanner.targetComicId)}
+                    onClick={() => handleOpenComic(currentBanner.targetComicId)}
                     className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 text-slate-200 text-xs sm:text-sm font-bold backdrop-blur-md border border-white/10 transition-all cursor-pointer"
                   >
                     Detail Komik
@@ -221,7 +229,7 @@ export const HomeView: React.FC = () => {
                 </h3>
               </div>
               <button
-                onClick={() => setActiveTab('discover')}
+                onClick={() => navigate('/discover')}
                 className="text-[11px] font-bold text-[#ff5b14] hover:text-[#ff7a3d] flex items-center gap-0.5 cursor-pointer"
               >
                 <span>Semua</span>
@@ -243,7 +251,7 @@ export const HomeView: React.FC = () => {
                 return (
                   <div
                     key={comic.id}
-                    onClick={() => selectComic(comic.id)}
+                    onClick={() => handleOpenComic(comic.id)}
                     className="p-2 rounded-xl bg-[#171722] hover:bg-[#1d1d2b] border border-[#232334] hover:border-[#ff5b14]/40 transition-all flex items-center gap-3 cursor-pointer group"
                   >
                     {/* Rank Badge */}
@@ -583,7 +591,7 @@ export const HomeView: React.FC = () => {
                   return (
                     <div
                       key={comic.id}
-                      onClick={() => selectComic(comic.id)}
+                      onClick={() => handleOpenComic(comic.id)}
                       className="group relative bg-[#12121a] hover:bg-[#161622] rounded-2xl overflow-hidden border border-[#222232] hover:border-[#ff5b14]/60 hover:shadow-xl hover:shadow-[#ff5b14]/10 transition-all duration-300 cursor-pointer flex flex-col justify-between"
                     >
                       {/* Thumbnail Cover Area */}

@@ -1,1 +1,30 @@
 @import "tailwindcss";
+
+/* NProgress Custom Top Loading Bar */
+#nprogress {
+  pointer-events: none;
+  z-index: 999999;
+  position: relative;
+}
+
+#nprogress .bar {
+  background: linear-gradient(90deg, #ff5b14, #ff8c38, #f43f5e);
+  position: fixed;
+  z-index: 999999;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 3px;
+  box-shadow: 0 0 10px #ff5b14, 0 0 5px #ff8c38;
+}
+
+#nprogress .peg {
+  display: block;
+  position: absolute;
+  right: 0px;
+  width: 100px;
+  height: 100%;
+  box-shadow: 0 0 10px #ff5b14, 0 0 5px #ff5b14;
+  opacity: 1.0;
+  transform: rotate(3deg) translate(0px, -4px);
+}

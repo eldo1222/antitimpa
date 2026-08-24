@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useApp } from '../../context/AppContext';
 import { 
   Bell, 
@@ -22,6 +23,8 @@ import {
 } from 'lucide-react';
 
 export const Header: React.FC = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
   const { 
     currentUser, 
     isAdminView, 
@@ -41,6 +44,8 @@ export const Header: React.FC = () => {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
 
+  const pathname = location.pathname;
+
   return (
     <>
       <header className="sticky top-0 z-40 bg-[#0c0c12]/95 backdrop-blur-md border-b border-[#1f1f2e] text-slate-100">
@@ -57,7 +62,12 @@ export const Header: React.FC = () => {
 
             {/* Logo */}
             <button 
-              onClick={() => { selectComic(null); setActiveTab('home'); setIsAdminView(false); }}
+              onClick={() => { 
+                selectComic(null); 
+                setActiveTab('home'); 
+                setIsAdminView(false); 
+                navigate('/');
+              }}
               className="flex items-center gap-2 focus:outline-none group text-left cursor-pointer"
             >
               <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-[#ff5b14] to-[#f97316] hidden sm:flex items-center justify-center text-white font-black text-sm shadow-md shadow-[#ff5b14]/30 group-hover:scale-105 transition-transform">
@@ -76,9 +86,9 @@ export const Header: React.FC = () => {
             {/* Desktop Navigation Links (Visible on md and larger screens) */}
             <nav className="hidden md:flex items-center gap-1 ml-4 lg:ml-6">
               <button
-                onClick={() => { selectComic(null); setActiveTab('home'); setIsAdminView(false); }}
+                onClick={() => { selectComic(null); setActiveTab('home'); setIsAdminView(false); navigate('/'); }}
                 className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
-                  activeTab === 'home' && !isAdminView && !selectedComicId
+                  pathname === '/' && !isAdminView
                     ? 'bg-[#ff5b14] text-white shadow-md shadow-[#ff5b14]/25'
                     : 'text-slate-300 hover:text-white hover:bg-[#181824]'
                 }`}
@@ -88,9 +98,9 @@ export const Header: React.FC = () => {
               </button>
 
               <button
-                onClick={() => { selectComic(null); setActiveTab('discover'); setIsAdminView(false); }}
+                onClick={() => { selectComic(null); setActiveTab('discover'); setIsAdminView(false); navigate('/discover'); }}
                 className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
-                  activeTab === 'discover' && !isAdminView && !selectedComicId
+                  pathname.startsWith('/discover') && !isAdminView
                     ? 'bg-[#ff5b14] text-white shadow-md shadow-[#ff5b14]/25'
                     : 'text-slate-300 hover:text-white hover:bg-[#181824]'
                 }`}
@@ -100,9 +110,9 @@ export const Header: React.FC = () => {
               </button>
 
               <button
-                onClick={() => { selectComic(null); setActiveTab('library'); setIsAdminView(false); }}
+                onClick={() => { selectComic(null); setActiveTab('library'); setIsAdminView(false); navigate('/library'); }}
                 className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer relative ${
-                  activeTab === 'library' && !isAdminView && !selectedComicId
+                  pathname.startsWith('/library') && !isAdminView
                     ? 'bg-[#ff5b14] text-white shadow-md shadow-[#ff5b14]/25'
                     : 'text-slate-300 hover:text-white hover:bg-[#181824]'
                 }`}
@@ -118,8 +128,12 @@ export const Header: React.FC = () => {
 
               {currentUser?.role === 'admin' && (
                 <button
-                  onClick={() => setIsAdminView(true)}
-                  className="px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 text-amber-300 hover:text-amber-200 bg-amber-500/10 border border-amber-500/30 hover:bg-amber-500/20 cursor-pointer ml-1"
+                  onClick={() => { setIsAdminView(true); navigate('/admin'); }}
+                  className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ml-1 ${
+                    pathname.startsWith('/admin')
+                      ? 'bg-amber-500 text-slate-950 shadow-md font-extrabold'
+                      : 'text-amber-300 hover:text-amber-200 bg-amber-500/10 border border-amber-500/30 hover:bg-amber-500/20'
+                  }`}
                 >
                   <ShieldCheck className="w-4 h-4 text-amber-400" />
                   <span>Panel Admin</span>
@@ -294,24 +308,24 @@ export const Header: React.FC = () => {
               {/* Navigation Links */}
               <nav className="space-y-1.5 text-sm">
                 <button
-                  onClick={() => { setActiveTab('home'); selectComic(null); setIsAdminView(false); setIsDrawerOpen(false); }}
-                  className="w-full px-3 py-2.5 rounded-xl hover:bg-[#1f1f2c] flex items-center gap-3 text-slate-300 hover:text-white transition-colors"
+                  onClick={() => { setActiveTab('home'); selectComic(null); setIsAdminView(false); setIsDrawerOpen(false); navigate('/'); }}
+                  className="w-full px-3 py-2.5 rounded-xl hover:bg-[#1f1f2c] flex items-center gap-3 text-slate-300 hover:text-white transition-colors cursor-pointer"
                 >
                   <BookOpen className="w-4 h-4 text-[#ff5b14]" />
                   <span>Katalog Beranda</span>
                 </button>
 
                 <button
-                  onClick={() => { setActiveTab('discover'); selectComic(null); setIsAdminView(false); setIsDrawerOpen(false); }}
-                  className="w-full px-3 py-2.5 rounded-xl hover:bg-[#1f1f2c] flex items-center gap-3 text-slate-300 hover:text-white transition-colors"
+                  onClick={() => { setActiveTab('discover'); selectComic(null); setIsAdminView(false); setIsDrawerOpen(false); navigate('/discover'); }}
+                  className="w-full px-3 py-2.5 rounded-xl hover:bg-[#1f1f2c] flex items-center gap-3 text-slate-300 hover:text-white transition-colors cursor-pointer"
                 >
                   <Flame className="w-4 h-4 text-amber-400" />
                   <span>Jelajah & Genre</span>
                 </button>
 
                 <button
-                  onClick={() => { setActiveTab('library'); selectComic(null); setIsAdminView(false); setIsDrawerOpen(false); }}
-                  className="w-full px-3 py-2.5 rounded-xl hover:bg-[#1f1f2c] flex items-center gap-3 text-slate-300 hover:text-white transition-colors"
+                  onClick={() => { setActiveTab('library'); selectComic(null); setIsAdminView(false); setIsDrawerOpen(false); navigate('/library'); }}
+                  className="w-full px-3 py-2.5 rounded-xl hover:bg-[#1f1f2c] flex items-center gap-3 text-slate-300 hover:text-white transition-colors cursor-pointer"
                 >
                   <Layers className="w-4 h-4 text-purple-400" />
                   <span>Koleksi & Riwayat</span>
@@ -320,14 +334,14 @@ export const Header: React.FC = () => {
                 {currentUser?.role === 'admin' && (
                   <div className="pt-2 border-t border-[#222230] my-2">
                     <button
-                      onClick={() => { setIsAdminView(true); setIsDrawerOpen(false); }}
-                      className="w-full px-3 py-2.5 rounded-xl bg-[#7c3aed]/10 border border-[#7c3aed]/30 hover:bg-[#7c3aed]/20 flex items-center justify-between text-purple-300 font-semibold transition-colors"
+                      onClick={() => { setIsAdminView(true); setIsDrawerOpen(false); navigate('/admin'); }}
+                      className="w-full px-3 py-2.5 rounded-xl bg-amber-500/15 border border-amber-500/30 hover:bg-amber-500/25 flex items-center justify-between text-amber-300 font-semibold transition-colors cursor-pointer"
                     >
                       <div className="flex items-center gap-3">
-                        <ShieldCheck className="w-4 h-4 text-purple-400" />
+                        <ShieldCheck className="w-4 h-4 text-amber-400" />
                         <span>Admin Console</span>
                       </div>
-                      <ExternalLink className="w-3.5 h-3.5 text-purple-400" />
+                      <ExternalLink className="w-3.5 h-3.5 text-amber-400" />
                     </button>
                   </div>
                 )}

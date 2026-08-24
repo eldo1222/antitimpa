@@ -1,4 +1,5 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useApp } from '../../context/AppContext';
 import { 
   Menu, 
@@ -18,6 +19,7 @@ export const AdminHeader: React.FC<AdminHeaderProps> = ({
   onQuickAction,
   quickActionLabel
 }) => {
+  const navigate = useNavigate();
   const { adminActiveMenu, setIsAdminView } = useApp();
 
   const getMenuTitle = () => {
@@ -68,7 +70,10 @@ export const AdminHeader: React.FC<AdminHeaderProps> = ({
         )}
 
         <button
-          onClick={() => setIsAdminView(false)}
+          onClick={() => {
+            setIsAdminView(false);
+            navigate('/');
+          }}
           className="px-3 py-1.5 bg-[#161622] hover:bg-[#202030] text-slate-300 hover:text-white border border-[#27273a] text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer"
           title="Pratinjau antarmuka pembaca mobile"
         >

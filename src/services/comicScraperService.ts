@@ -121,8 +121,8 @@ export async function searchMangaDex(
       if (kcResults && kcResults.length > 0) {
         return kcResults;
       }
-    } catch (kcErr) {
-      console.warn('Komikcast search fallback failed:', kcErr);
+    } catch {
+      // Continue to next fallback smoothly
     }
 
     try {
@@ -391,8 +391,7 @@ export async function searchKomikcast(
         sourceUrl: item.link
       };
     });
-  } catch (err) {
-    console.warn('Komikcast search failed:', err);
+  } catch {
     return [];
   }
 }

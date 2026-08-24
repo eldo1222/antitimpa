@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useApp } from '../../context/AppContext';
 import { 
   Bookmark, 
@@ -12,6 +13,7 @@ import {
 } from 'lucide-react';
 
 export const LibraryView: React.FC = () => {
+  const navigate = useNavigate();
   const { 
     bookmarks, 
     readingHistory, 
@@ -72,7 +74,10 @@ export const LibraryView: React.FC = () => {
               return (
                 <div
                   key={comic.id}
-                  onClick={() => selectComic(comic.id)}
+                  onClick={() => {
+                    selectComic(comic.id);
+                    navigate(`/comic/${comic.slug || comic.id}`);
+                  }}
                   className="bg-[#12121a] hover:bg-[#161622] border border-[#222232] hover:border-[#ff5b14]/50 rounded-2xl overflow-hidden cursor-pointer group flex flex-col justify-between transition-all duration-300 shadow-lg"
                 >
                   <div className="relative aspect-[3/4] bg-[#181824] overflow-hidden">
@@ -140,7 +145,13 @@ export const LibraryView: React.FC = () => {
               return (
                 <div
                   key={`${hist.comicId}-${hist.chapterId}-${hist.updatedAt || index}`}
-                  onClick={() => selectComic(comic.id)}
+                  onClick={() => {
+                    if (hist.chapterId) {
+                      navigate(`/read/${comic.slug || comic.id}/${hist.chapterId}`);
+                    } else {
+                      navigate(`/comic/${comic.slug || comic.id}`);
+                    }
+                  }}
                   className="p-3 bg-[#12121a] hover:bg-[#161622] border border-[#222232] hover:border-[#ff5b14]/40 rounded-2xl flex gap-3.5 cursor-pointer group transition-all"
                 >
                   <img 
