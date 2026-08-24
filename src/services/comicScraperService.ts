@@ -52,11 +52,7 @@ export async function searchMangaDex(
       params.append('rating', '18plus');
     }
 
-    let proxyRes = await fetch(`/api/mangadex/search?${params.toString()}`);
-    if (!proxyRes.ok) {
-      // Fallback directly to Netlify serverless function
-      proxyRes = await fetch(`/.netlify/functions/mangadex-proxy?action=search&${params.toString()}`);
-    }
+    const proxyRes = await fetch(`/api/mangadex/search?${params.toString()}`);
     if (proxyRes.ok) {
       const data = await proxyRes.json();
       if (data.data && Array.isArray(data.data) && data.data.length > 0) {
@@ -214,7 +210,13 @@ function mapMangaDexItems(items: any[], isAdultIntent: boolean): ScrapedComicRes
     else if (rawOriginalLang === 'zh' || rawOriginalLang === 'zh-hk') comicType = 'manhua';
     else if (isAdult) comicType = 'webtoon';
 
-    const totalChapters = attributes.lastChapter ? parseInt(attributes.lastChapter, 10) || 30 : 40;
+    let totalChapters = 0;
+    if (attributes.lastChapter) {
+      const parsed = parseFloat(attributes.lastChapter);
+      if (!isNaN(parsed) && parsed > 0) {
+        totalChapters = Math.floor(parsed);
+      }
+    }
 
     return {
       title: typeof title === 'string' ? title : String(title),
@@ -279,10 +281,7 @@ export async function searchJikanManga(query: string = '', limit: number = 16): 
     // Try internal server proxy first or Netlify Function to prevent CORS / Rate limits
     let json: any = null;
     try {
-      let proxyRes = await fetch(`/api/jikan/search?q=${encodeURIComponent(qStr)}&limit=${limit}`);
-      if (!proxyRes.ok) {
-        proxyRes = await fetch(`/.netlify/functions/jikan-proxy?q=${encodeURIComponent(qStr)}&limit=${limit}`);
-      }
+      const proxyRes = await fetch(`/api/jikan/search?q=${encodeURIComponent(qStr)}&limit=${limit}`);
       if (proxyRes.ok) {
         json = await proxyRes.json();
       }
@@ -357,10 +356,7 @@ export async function searchKomikcast(
     }
     params.append('order', order);
 
-    let res = await fetch(`/api/komikcast/search?${params.toString()}`);
-    if (!res.ok) {
-      res = await fetch(`/.netlify/functions/komikcast-proxy?action=search&${params.toString()}`);
-    }
+    const res = await fetch(`/api/komikcast/search?${params.toString()}`);
     if (!res.ok) return [];
 
     const json = await res.json();
@@ -404,10 +400,7 @@ export async function searchKomikcast(
 // 5. Fetch Full Detail + Chapters from Komikcast
 export async function getKomikcastDetail(slug: string): Promise<ScrapedComicResult | null> {
   try {
-    let res = await fetch(`/api/komikcast/detail?slug=${encodeURIComponent(slug)}`);
-    if (!res.ok) {
-      res = await fetch(`/.netlify/functions/komikcast-proxy?action=detail&slug=${encodeURIComponent(slug)}`);
-    }
+    const res = await fetch(`/api/komikcast/detail?slug=${encodeURIComponent(slug)}`);
     if (!res.ok) return null;
     const json = await res.json();
     if (!json.data) return null;
@@ -448,10 +441,7 @@ export async function getKomikcastDetail(slug: string): Promise<ScrapedComicResu
 // 6. Fetch Chapter Pages from Komikcast
 export async function getKomikcastChapterPages(chapterSlug: string): Promise<{ id: string; pageNumber: number; imageUrl: string }[]> {
   try {
-    let res = await fetch(`/api/komikcast/chapter?slug=${encodeURIComponent(chapterSlug)}`);
-    if (!res.ok) {
-      res = await fetch(`/.netlify/functions/komikcast-proxy?action=chapter&slug=${encodeURIComponent(chapterSlug)}`);
-    }
+    const res = await fetch(`/api/komikcast/chapter?slug=${encodeURIComponent(chapterSlug)}`);
     if (!res.ok) return [];
     const json = await res.json();
     return json.pages || [];
@@ -940,11 +930,9 @@ export const SAMPLE_PAGE_SETS = MANGA_ACTION_PAGES;
 
 // Fetch real chapters from MangaDex API
 export async function fetchMangaDexChapters(mangaId: string): Promise<any[]> {
+  // Attempt 1: Express Server API Proxy
   try {
-    let res = await fetch(`/api/mangadex/chapters/${mangaId}`);
-    if (!res.ok) {
-      res = await fetch(`/.netlify/functions/mangadex-proxy?action=chapters&mangaId=${encodeURIComponent(mangaId)}`);
-    }
+    const res = await fetch(`/api/mangadex/chapters/${mangaId}`);
     if (res.ok) {
       const data = await res.json();
       if (data.chapters && Array.isArray(data.chapters) && data.chapters.length > 0) {
@@ -952,25 +940,64 @@ export async function fetchMangaDexChapters(mangaId: string): Promise<any[]> {
       }
     }
   } catch (err) {
-    console.warn('Failed to fetch real MangaDex chapters via proxy:', err);
+    console.warn('Failed to fetch real MangaDex chapters via Express proxy:', err);
   }
 
-  // Fallback to direct MangaDex feed
+  // Attempt 2: Netlify Function Proxy (for deployed Netlify static/serverless hosting)
   try {
-    const directUrl = `https://api.mangadex.org/manga/${mangaId}/feed?limit=96&order[chapter]=asc`;
+    const netlifyRes = await fetch(`/.netlify/functions/mangadex-proxy?action=chapters&mangaId=${mangaId}`);
+    if (netlifyRes.ok) {
+      const data = await netlifyRes.json();
+      if (data.chapters && Array.isArray(data.chapters) && data.chapters.length > 0) {
+        return data.chapters;
+      }
+    }
+  } catch (err) {
+    console.warn('Failed to fetch real MangaDex chapters via Netlify proxy:', err);
+  }
+
+  // Attempt 3: Fallback to direct MangaDex feed
+  try {
+    const directUrl = `https://api.mangadex.org/manga/${mangaId}/feed?limit=100&order[chapter]=asc&includes[]=scanlation_group`;
     const directRes = await fetch(directUrl, { headers: { 'Accept': 'application/json' } });
     if (directRes.ok) {
       const json = await directRes.json();
-      if (json.data && Array.isArray(json.data)) {
-        return json.data.map((ch: any, idx: number) => {
+      if (json.data && Array.isArray(json.data) && json.data.length > 0) {
+        const chapterMap = new Map<string, any>();
+        
+        for (const item of json.data) {
+          const chNumStr = item.attributes?.chapter || '1';
+          const itemLang = item.attributes?.translatedLanguage || '';
+          const existing = chapterMap.get(chNumStr);
+          if (!existing) {
+            chapterMap.set(chNumStr, item);
+          } else {
+            // Prioritize Indonesian ('id') > English ('en') > others
+            if (itemLang === 'id') {
+              chapterMap.set(chNumStr, item);
+            } else if (itemLang === 'en' && existing.attributes?.translatedLanguage !== 'id') {
+              chapterMap.set(chNumStr, item);
+            }
+          }
+        }
+
+        const deduplicated = Array.from(chapterMap.values()).sort((a, b) => {
+          const numA = parseFloat(a.attributes?.chapter || '0');
+          const numB = parseFloat(b.attributes?.chapter || '0');
+          return numA - numB;
+        });
+
+        return deduplicated.map((ch: any, idx: number) => {
           const chNum = parseFloat(ch.attributes?.chapter || String(idx + 1)) || (idx + 1);
           const rawTitle = ch.attributes?.title || '';
           return {
             id: ch.id,
             chapterNumber: chNum,
-            title: rawTitle ? `Chapter ${chNum}: ${rawTitle}` : `Chapter ${chNum}`,
+            title: rawTitle.trim() ? `Chapter ${chNum}: ${rawTitle.trim()}` : `Chapter ${chNum}`,
             pagesCount: ch.attributes?.pages || 8,
-            releaseDate: (ch.attributes?.publishAt || new Date().toISOString()).split('T')[0]
+            releaseDate: (ch.attributes?.publishAt || ch.attributes?.readableAt || new Date().toISOString()).split('T')[0],
+            translatedLanguage: ch.attributes?.translatedLanguage || 'en',
+            externalUrl: ch.attributes?.externalUrl || null,
           };
         });
       }
@@ -1056,14 +1083,14 @@ export function buildComicFromScrape(
 
   const isShortDoujin = isDoujinshiOrOneshot(scraped);
 
-  // Determine realistic chapter count based on comic type:
+  // Determine genuine chapter count based on comic type:
   // - Doujinshi / Oneshot: 1 to 3 chapters
-  // - Manhwa / Manga / Manhua: 15 to 30+ chapters
+  // - Manhwa / Manga / Manhua: Exact chapters count from source API (no artificial 15 chapter floor)
   let totalChaptersCount: number;
   if (isShortDoujin) {
     totalChaptersCount = Math.min(Math.max(scraped.totalChapters || 1, 1), 3);
   } else {
-    totalChaptersCount = Math.max(15, Math.min(scraped.totalChapters || 20, 30));
+    totalChaptersCount = Math.max(1, scraped.totalChapters || 1);
   }
 
   const comic: Comic = {
@@ -1181,11 +1208,11 @@ export async function buildComicFromScrapeAsync(
         ? ADULT_VIP_PAGES 
         : (comicType === 'manhwa' ? MANHWA_WEBTOON_PAGES : MANGA_ACTION_PAGES);
 
-      // Limit to 30 chapters for performance, or 1-3 if doujin
+      // Use all real chapters fetched from MangaDex
       const isShort = isDoujinshiOrOneshot(scraped);
       const selectedMdChapters = isShort 
         ? rawMangaDexChapters.slice(0, 3) 
-        : rawMangaDexChapters.slice(0, 25);
+        : rawMangaDexChapters;
 
       const comic: Comic = {
         id: comicId,

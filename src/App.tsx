@@ -17,6 +17,7 @@ import { ComicDetailView } from './components/frontend/ComicDetailView';
 import { ComicReaderView } from './components/frontend/ComicReaderView';
 import { AdminDashboard } from './components/admin/AdminDashboard';
 import { LoginModal } from './components/auth/LoginModal';
+import { OfflineGuard } from './components/common/OfflineGuard';
 import { Smartphone } from 'lucide-react';
 
 const MainAppContent: React.FC = () => {
@@ -135,9 +136,11 @@ const MainAppContent: React.FC = () => {
 export default function App() {
   return (
     <ErrorBoundary>
-      <AppProvider>
-        <MainAppContent />
-      </AppProvider>
+      <OfflineGuard>
+        <AppProvider>
+          <MainAppContent />
+        </AppProvider>
+      </OfflineGuard>
     </ErrorBoundary>
   );
 }

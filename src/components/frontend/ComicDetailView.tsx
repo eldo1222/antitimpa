@@ -25,6 +25,7 @@ import {
   Unlock,
   Crown
 } from 'lucide-react';
+import { AdBanner } from './AdBanner';
 
 export const ComicDetailView: React.FC = () => {
   const { 
@@ -40,7 +41,8 @@ export const ComicDetailView: React.FC = () => {
     getReadingProgress,
     canUserReadComic,
     setActiveTab,
-    navigateToGenre
+    navigateToGenre,
+    triggerPopunder
   } = useApp();
 
   const [isSynopsisExpanded, setIsSynopsisExpanded] = useState(false);
@@ -119,9 +121,11 @@ export const ComicDetailView: React.FC = () => {
     }
 
     if (readingProgress) {
+      triggerPopunder();
       startReading(readingProgress.chapterId);
     } else if (rawChaptersList.length > 0) {
       const ch1 = rawChaptersList.find(c => c.chapterNumber === 1) || rawChaptersList[rawChaptersList.length - 1];
+      triggerPopunder();
       startReading(ch1.id);
     }
   };
@@ -135,6 +139,7 @@ export const ComicDetailView: React.FC = () => {
       openLoginModal(`🔒 ${accessCheck.message || 'Akses dibatasi untuk paket akun Anda.'}`);
       return;
     }
+    triggerPopunder();
     startReading(chapterId);
   };
 
@@ -365,6 +370,9 @@ export const ComicDetailView: React.FC = () => {
 
           {/* RIGHT COLUMN: Title, Genre Pills, Synopsis, Chapters & Comments */}
           <div className="lg:col-span-8 space-y-5">
+            {/* Ad Banner: Atas Detail Komik */}
+            <AdBanner position="detail_top" />
+
             {/* Header Title & Tags */}
             <div className="bg-[#12121a] rounded-2xl border border-[#222232] p-5 sm:p-6 shadow-xl space-y-4">
               <div className="space-y-2">
@@ -525,6 +533,9 @@ export const ComicDetailView: React.FC = () => {
                 })}
               </div>
             </div>
+
+            {/* Ad Banner: Bawah Daftar Chapter */}
+            <AdBanner position="detail_bottom" />
 
             {/* Threaded Comment Section */}
             <div className="bg-[#12121a] rounded-2xl border border-[#222232] p-5 sm:p-6 shadow-xl">

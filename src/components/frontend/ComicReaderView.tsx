@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useApp } from '../../context/AppContext';
 import { ComicPage } from '../../types';
 import { downloadDrivePdf, convertImagesToPdf } from '../../utils/pdfConverter';
+import { AdBanner } from './AdBanner';
 import { 
   ArrowLeft, 
   ChevronLeft, 
@@ -516,6 +517,9 @@ export const ComicReaderView: React.FC = () => {
               </div>
               <h4 className="font-extrabold text-xs text-white">Chapter {activeChapter.chapterNumber} (Google Drive Mode)</h4>
               
+              {/* Ad Banner: Bawah Chapter */}
+              <AdBanner position="reader_bottom_nav" className="my-2" />
+
               <div className="flex flex-wrap gap-2 justify-center pt-1">
                 {nextChapter && (
                   <button
@@ -571,6 +575,9 @@ export const ComicReaderView: React.FC = () => {
               </div>
               <h4 className="font-extrabold text-sm text-white">Chapter {activeChapter.chapterNumber} (PDF Mode)</h4>
               
+              {/* Ad Banner: Bawah Chapter */}
+              <AdBanner position="reader_bottom_nav" className="my-2" />
+
               <div className="flex flex-wrap gap-2 justify-center pt-2">
                 {nextChapter && (
                   <button
@@ -634,6 +641,9 @@ export const ComicReaderView: React.FC = () => {
                 <h4 className="font-extrabold text-base text-white">Chapter {activeChapter.chapterNumber} Selesai!</h4>
                 <p className="text-xs text-slate-400 mt-1">Kamu telah menyelesaikan membaca chapter ini.</p>
               </div>
+
+              {/* Ad Banner: Bawah Chapter */}
+              <AdBanner position="reader_bottom_nav" className="my-2" />
 
               <div className="flex flex-col sm:flex-row gap-2 justify-center pt-2">
                 {nextChapter ? (

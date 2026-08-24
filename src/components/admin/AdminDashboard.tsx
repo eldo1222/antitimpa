@@ -8,6 +8,7 @@ import { AdminScraperTab } from './AdminScraperTab';
 import { AdminChaptersTab } from './AdminChaptersTab';
 import { AdminReadersTab } from './AdminReadersTab';
 import { AdminBannersTab } from './AdminBannersTab';
+import { AdminAdsTab } from './AdminAdsTab';
 import { AdminDriveCatalogTab } from './AdminDriveCatalogTab';
 import { AdminLogsTab } from './AdminLogsTab';
 import { AdminDatabaseTab } from './AdminDatabaseTab';
@@ -33,6 +34,8 @@ export const AdminDashboard: React.FC = () => {
         return <AdminReadersTab />;
       case 'banners':
         return <AdminBannersTab />;
+      case 'ads':
+        return <AdminAdsTab />;
       case 'database':
         return <AdminDatabaseTab />;
       case 'logs':

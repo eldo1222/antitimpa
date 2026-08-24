@@ -16,6 +16,7 @@ import {
   KeyRound,
   Download,
   Camera,
+  Megaphone,
   LucideIcon
 } from 'lucide-react';
 import { AdminPasswordModal } from './AdminPasswordModal';
@@ -27,7 +28,7 @@ interface AdminSidebarProps {
 }
 
 interface MenuItem {
-  id: 'dashboard' | 'comics' | 'scraper' | 'chapters' | 'drives' | 'readers' | 'banners' | 'database' | 'logs' | 'settings';
+  id: 'dashboard' | 'comics' | 'scraper' | 'chapters' | 'drives' | 'readers' | 'banners' | 'ads' | 'database' | 'logs' | 'settings';
   label: string;
   icon: LucideIcon;
   count?: number;
@@ -40,6 +41,7 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({ isOpenMobile, onClos
     chapters, 
     users, 
     banners, 
+    ads,
     driveAccounts,
     activityLogs, 
     adminActiveMenu, 
@@ -62,6 +64,7 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({ isOpenMobile, onClos
     { id: 'drives', label: 'Katalog Google Drive', icon: HardDrive, count: driveAccounts.length },
     { id: 'readers', label: 'Akun Pembaca', icon: Users, count: readerCount },
     { id: 'banners', label: 'Banner & Promo', icon: ImageIcon, count: banners.length },
+    { id: 'ads', label: 'Manajemen Iklan', icon: Megaphone, count: ads.length },
     { id: 'database', label: 'Database Explorer', icon: Database },
     { id: 'logs', label: 'Log Aktivitas', icon: Activity, count: activityLogs.length },
     { id: 'settings', label: 'Pengaturan Sistem', icon: Settings }

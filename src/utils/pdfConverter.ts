@@ -18,10 +18,7 @@ export async function downloadDrivePdf(
     }
     params.append('title', title);
 
-    let res = await fetch(`/api/drive/download-pdf?${params.toString()}`);
-    if (!res.ok) {
-      res = await fetch(`/.netlify/functions/drive-proxy?${params.toString()}`);
-    }
+    const res = await fetch(`/api/drive/download-pdf?${params.toString()}`);
     if (!res.ok) {
       throw new Error(`Server returned ${res.status}`);
     }

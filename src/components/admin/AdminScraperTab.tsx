@@ -7,6 +7,7 @@ import {
   getKomikcastDetail,
   PRESET_SCRAPE_FEEDS, 
   buildComicFromScrape, 
+  buildComicFromScrapeAsync,
   ScrapedComicResult 
 } from '../../services/comicScraperService';
 import { downloadDrivePdf, convertImagesToPdf } from '../../utils/pdfConverter';
@@ -181,7 +182,8 @@ export const AdminScraperTab: React.FC = () => {
     const finalContentType = overrideOptions?.contentType ?? itemToUse.contentType ?? defaultContentType;
     const isNormal = finalContentType === 'normal';
     
-    const { comic, chapters: comicChaps } = buildComicFromScrape(itemToUse, {
+    setBatchStatus(`⏳ Menarik data & chapter asli "${itemToUse.title}"...`);
+    const { comic, chapters: comicChaps } = await buildComicFromScrapeAsync(itemToUse, {
       contentType: finalContentType,
       comicType: overrideOptions?.comicType ?? itemToUse.comicType,
       isFree: isNormal ? true : defaultIsFree,
@@ -192,13 +194,13 @@ export const AdminScraperTab: React.FC = () => {
     injectComicWithChapters(comic, comicChaps);
 
     setImportedSlugs(prev => ({ ...prev, [item.slug || item.title]: true }));
-    addActivityLog('comic_create', `Admin mengimpor "${comic.title}" (${(comic.comicType || 'manga').toUpperCase()}) dari ${item.sourceApi} dengan ${comicChaps.length} chapter`);
-    setBatchStatus(`✅ Berhasil mengimpor "${comic.title}" ke katalog web!`);
+    addActivityLog('comic_create', `Admin mengimpor "${comic.title}" (${(comic.comicType || 'manga').toUpperCase()}) dari ${item.sourceApi} dengan ${comicChaps.length} chapter asli`);
+    setBatchStatus(`✅ Berhasil mengimpor "${comic.title}" (${comicChaps.length} chapter asli) ke katalog web!`);
     setTimeout(() => setBatchStatus(null), 3500);
   };
 
   // 5. Tarik Komik Cepat (Batch Pull & Auto-Hide from Home)
-  const handleBatchPullAndHideCategory = (targetCategory: 'manga' | 'manhwa' | 'manhua' | '18plus' | 'all') => {
+  const handleBatchPullAndHideCategory = async (targetCategory: 'manga' | 'manhwa' | 'manhua' | '18plus' | 'all') => {
     let targets: ScrapedComicResult[] = [];
     if (targetCategory === 'all') {
       targets = PRESET_SCRAPE_FEEDS;
@@ -208,25 +210,30 @@ export const AdminScraperTab: React.FC = () => {
       targets = PRESET_SCRAPE_FEEDS.filter(p => p.comicType === targetCategory && p.contentType !== '18plus');
     }
 
-    const itemsToInject = targets
-      .filter(item => !comics.some(c => c.title.toLowerCase() === item.title.toLowerCase()) && !importedSlugs[item.slug || item.title])
-      .map(item => {
+    const filteredTargets = targets
+      .filter(item => !comics.some(c => c.title.toLowerCase() === item.title.toLowerCase()) && !importedSlugs[item.slug || item.title]);
+
+    if (filteredTargets.length === 0) {
+      setBatchStatus(`Semua judul pada kategori ${targetCategory.toUpperCase()} sudah ada di katalog admin!`);
+      setTimeout(() => setBatchStatus(null), 3000);
+      return;
+    }
+
+    setBatchStatus(`⏳ Memproses penarikan ${filteredTargets.length} judul komik beserta chapter...`);
+
+    const itemsToInject = await Promise.all(
+      filteredTargets.map(item => {
         const finalContentType = item.contentType ?? (targetCategory === '18plus' ? '18plus' : 'normal');
         const isNormal = finalContentType === 'normal';
-        return buildComicFromScrape(item, {
+        return buildComicFromScrapeAsync(item, {
           contentType: finalContentType,
           comicType: item.comicType,
           isFree: isNormal ? true : defaultIsFree,
           isVisibleOnHome: false, // Tarik cepat: Otomatis disembunyikan dari beranda sampai admin mengaktifkan kembali
           primaryDriveAccountId: defaultDriveAccountId
         });
-      });
-
-    if (itemsToInject.length === 0) {
-      setBatchStatus(`Semua judul pada kategori ${targetCategory.toUpperCase()} sudah ada di katalog admin!`);
-      setTimeout(() => setBatchStatus(null), 3000);
-      return;
-    }
+      })
+    );
 
     batchInjectComicsWithChapters(itemsToInject);
 
@@ -250,25 +257,30 @@ export const AdminScraperTab: React.FC = () => {
         })
       : searchResults;
 
-    const itemsToInject = currentList
-      .filter(item => !comics.some(c => c.title.toLowerCase() === item.title.toLowerCase()) && !importedSlugs[item.slug || item.title])
-      .map(item => {
+    const filteredList = currentList
+      .filter(item => !comics.some(c => c.title.toLowerCase() === item.title.toLowerCase()) && !importedSlugs[item.slug || item.title]);
+
+    if (filteredList.length === 0) {
+      setBatchStatus('Semua komik pada tampilan saat ini sudah ada di katalog website!');
+      setTimeout(() => setBatchStatus(null), 3000);
+      return;
+    }
+
+    setBatchStatus(`⏳ Memproses impor ${filteredList.length} judul komik...`);
+
+    const itemsToInject = await Promise.all(
+      filteredList.map(item => {
         const finalContentType = item.contentType ?? defaultContentType;
         const isNormal = finalContentType === 'normal';
-        return buildComicFromScrape(item, {
+        return buildComicFromScrapeAsync(item, {
           contentType: finalContentType,
           comicType: item.comicType,
           isFree: isNormal ? true : defaultIsFree,
           isVisibleOnHome: defaultIsVisibleOnHome,
           primaryDriveAccountId: defaultDriveAccountId
         });
-      });
-
-    if (itemsToInject.length === 0) {
-      setBatchStatus('Semua komik pada tampilan saat ini sudah ada di katalog website!');
-      setTimeout(() => setBatchStatus(null), 3000);
-      return;
-    }
+      })
+    );
 
     batchInjectComicsWithChapters(itemsToInject);
 
@@ -278,26 +290,29 @@ export const AdminScraperTab: React.FC = () => {
     });
     setImportedSlugs(prev => ({ ...prev, ...newSlugs }));
 
-    setBatchStatus(`✅ Berhasil menyuntikkan ${itemsToInject.length} judul komik beserta chapter siap baca ke katalog!`);
+    setBatchStatus(`✅ Berhasil menyuntikkan ${itemsToInject.length} judul komik beserta chapter asli ke katalog!`);
     setTimeout(() => setBatchStatus(null), 4500);
   };
 
   // 7. Custom JSON Importer
-  const handleImportCustomJson = () => {
+  const handleImportCustomJson = async () => {
     try {
       const parsed = JSON.parse(customJson);
       const items: ScrapedComicResult[] = Array.isArray(parsed) ? parsed : [parsed];
-      const itemsToInject = items.map(item => {
-        const finalContentType = item.contentType ?? defaultContentType;
-        const isNormal = finalContentType === 'normal';
-        return buildComicFromScrape(item, {
-          contentType: finalContentType,
-          comicType: item.comicType || 'manga',
-          isFree: isNormal ? true : defaultIsFree,
-          isVisibleOnHome: defaultIsVisibleOnHome,
-          primaryDriveAccountId: defaultDriveAccountId
-        });
-      });
+      setBatchStatus(`⏳ Memproses impor ${items.length} komik dari custom JSON...`);
+      const itemsToInject = await Promise.all(
+        items.map(item => {
+          const finalContentType = item.contentType ?? defaultContentType;
+          const isNormal = finalContentType === 'normal';
+          return buildComicFromScrapeAsync(item, {
+            contentType: finalContentType,
+            comicType: item.comicType || 'manga',
+            isFree: isNormal ? true : defaultIsFree,
+            isVisibleOnHome: defaultIsVisibleOnHome,
+            primaryDriveAccountId: defaultDriveAccountId
+          });
+        })
+      );
 
       batchInjectComicsWithChapters(itemsToInject);
       setBatchStatus(`✅ Berhasil mengimpor ${itemsToInject.length} komik dari data JSON custom ke web!`);

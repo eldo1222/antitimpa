@@ -25,10 +25,11 @@ import {
 } from 'lucide-react';
 
 export const AdminReadersTab: React.FC = () => {
-  const { users, comics, addUser, updateUser, unlockUser, toggleUserStatus, deleteUser } = useApp();
+  const { users, comics, addUser, updateUser, unlockUser, unlockAllUsers, toggleUserStatus, deleteUser } = useApp();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [filterPlan, setFilterPlan] = useState<'all' | '15k' | '5k' | 'locked' | 'expired'>('all');
+  const [bulkUnlockMessage, setBulkUnlockMessage] = useState<string | null>(null);
   
   // Modals
   const [showAddModal, setShowAddModal] = useState(false);
@@ -304,6 +305,37 @@ export const AdminReadersTab: React.FC = () => {
           <p className="text-[10px] text-slate-400">Semua pembaca terdaftar</p>
         </div>
       </div>
+
+      {/* Bulk Unlock Alert Banner if any users are locked */}
+      {totalLocked > 0 && (
+        <div className="p-3.5 rounded-xl bg-red-500/15 border border-red-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-2.5 text-red-200">
+            <Lock className="w-4 h-4 text-red-400 shrink-0" />
+            <div>
+              <span className="font-bold text-red-300">Peringatan: Terdapat {totalLocked} akun pembaca yang terkunci!</span>
+              <p className="text-[11px] text-red-300/80">Akun terkunci otomatis setelah 3x salah memasukkan password.</p>
+            </div>
+          </div>
+          <button
+            onClick={() => {
+              const res = unlockAllUsers();
+              setBulkUnlockMessage(`Berhasil membuka kunci untuk ${res.count} akun pembaca!`);
+              setTimeout(() => setBulkUnlockMessage(null), 4000);
+            }}
+            className="px-3.5 py-1.5 bg-red-600 hover:bg-red-500 text-white font-bold rounded-lg text-xs flex items-center justify-center gap-1.5 transition-colors self-start sm:self-auto shrink-0 shadow-md shadow-red-600/30"
+          >
+            <Unlock className="w-3.5 h-3.5" />
+            <span>Buka Kunci Semua ({totalLocked})</span>
+          </button>
+        </div>
+      )}
+
+      {bulkUnlockMessage && (
+        <div className="p-3 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center gap-2 text-xs text-emerald-200 animate-in fade-in">
+          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+          <p>{bulkUnlockMessage}</p>
+        </div>
+      )}
 
       {/* Search & Filter Bar */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 bg-[#12121a] p-3 rounded-xl border border-[#1f1f2e]">

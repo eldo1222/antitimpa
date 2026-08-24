@@ -24,6 +24,7 @@ import {
   Filter
 } from 'lucide-react';
 import { ComicCategoryType } from '../../types';
+import { AdBanner } from './AdBanner';
 
 const ITEMS_PER_PAGE = 24;
 
@@ -35,7 +36,8 @@ export const HomeView: React.FC = () => {
     toggleBookmark, 
     isBookmarked,
     chapters,
-    setActiveTab
+    setActiveTab,
+    triggerPopunder
   } = useApp();
 
   const [currentBannerIndex, setCurrentBannerIndex] = useState(0);
@@ -50,7 +52,9 @@ export const HomeView: React.FC = () => {
   const catalogSectionRef = useRef<HTMLDivElement>(null);
 
   const genresList = ['All', ...PRESET_GENRES];
-  const activeBanners = banners.filter(b => b.isActive);
+  const activeBanners = banners.filter(b => 
+    b.isActive && (!b.targetComicId || comics.some(c => c.id === b.targetComicId && c.isVisibleOnHome !== false && c.showOnHome !== false))
+  );
 
   // Auto slide banner every 5s
   useEffect(() => {
@@ -293,6 +297,9 @@ export const HomeView: React.FC = () => {
         </div>
       </section>
 
+      {/* Ad Banner: Bawah Carousel Hero */}
+      <AdBanner position="home_hero_bottom" className="my-1" />
+
       {/* 2. Quick Metrics / Category Ribbon (like Admin Stats Cards) */}
       <section className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 sm:gap-3.5">
         {/* Total Catalog */}
@@ -400,6 +407,9 @@ export const HomeView: React.FC = () => {
           </div>
         </button>
       </section>
+
+      {/* Ad Banner: Antara Kategori dan Pencarian */}
+      <AdBanner position="home_between_sections" className="my-1" />
 
       {/* 3. Search & Filter Bar */}
       <section className="bg-[#12121a] rounded-2xl border border-[#222232] p-4 sm:p-5 space-y-4 shadow-xl">
@@ -822,6 +832,9 @@ export const HomeView: React.FC = () => {
           </div>
         )}
       </section>
+
+      {/* Ad Banner: Footer Beranda */}
+      <AdBanner position="home_footer" className="mt-6 mb-2" />
 
       {/* Modal Lompat Halaman (Page Jump Modal) */}
       {showJumpModal && (

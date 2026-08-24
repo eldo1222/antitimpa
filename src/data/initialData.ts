@@ -1,4 +1,4 @@
-import { Comic, Chapter, User, Banner, ActivityLog, SystemSettings, ComicPage, DriveAccount, Comment } from '../types';
+import { Comic, Chapter, User, Banner, ActivityLog, SystemSettings, ComicPage, DriveAccount, Comment, AdItem, AdSettings } from '../types';
 
 // Helper to generate dynamic SVG comic page panels for genuine visual reading experience
 export const generateComicPageSvg = (
@@ -1122,5 +1122,94 @@ export const initialComments: Comment[] = [
     likedBy: [],
     spoiler: false,
     replyToId: 'comm-2'
+  }
+];
+
+export const initialAdSettings: AdSettings = {
+  adsEnabled: true,
+  hideAdsForVip: true,
+  popunderEnabled: true,
+  popunderCooldownHours: 12,
+  floatingBottomEnabled: true
+};
+
+export const initialAds: AdItem[] = [
+  {
+    id: 'ad-home-bottom-vip',
+    title: 'Banner Upgrade Member VIP AntiTimpa',
+    type: 'banner_image',
+    position: 'home_bottom',
+    isActive: true,
+    imageUrl: 'https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?w=1200&auto=format&fit=crop&q=80',
+    targetUrl: 'https://wa.me/6289514441988?text=Halo%20Admin%20AntiTimpa,%20saya%20mau%20order%20paket%20VIP%20Uncensored',
+    altText: 'Beli Akses VIP 15rb Semua Judul Uncensored',
+    badgeLabel: 'PROMO VIP',
+    showForVip: false,
+    notes: 'Banner promosi pembelian paket VIP via WhatsApp di bagian bawah beranda.',
+    createdAt: new Date(Date.now() - 86400000 * 5).toISOString(),
+    clickCount: 142,
+    viewCount: 2890
+  },
+  {
+    id: 'ad-detail-bottom-sponsor',
+    title: 'Banner Rekomendasi Sponsor (Detail Komik)',
+    type: 'banner_image',
+    position: 'comic_detail_bottom',
+    isActive: true,
+    imageUrl: 'https://images.unsplash.com/photo-1578632767115-351597cf2477?w=1200&auto=format&fit=crop&q=80',
+    targetUrl: 'https://wa.me/6289514441988?text=Halo%20Admin,%20saya%20tertarik%20dengan%20komik%20eksklusif%20AntiTimpa',
+    altText: 'Baca Ribuan Chapter Tanpa Batas',
+    badgeLabel: 'SPONSOR',
+    showForVip: false,
+    notes: 'Ditempatkan di bawah daftar chapter komik, tidak mengganggu sinopsis.',
+    createdAt: new Date(Date.now() - 86400000 * 3).toISOString(),
+    clickCount: 88,
+    viewCount: 1740
+  },
+  {
+    id: 'ad-reader-end-sponsor',
+    title: 'Banner Akhir Chapter Komik',
+    type: 'banner_image',
+    position: 'reader_end',
+    isActive: true,
+    imageUrl: 'https://images.unsplash.com/photo-1563089145-599997674d42?w=1200&auto=format&fit=crop&q=80',
+    targetUrl: 'https://wa.me/6289514441988?text=Halo%20Admin,%20mau%20tanya%20jadwal%20update%20chapter%20selanjutnya',
+    altText: 'Dukung Komik Favoritmu & Dapatkan Update Lebih Cepat',
+    badgeLabel: 'SUPPORT TRANSLATOR',
+    showForVip: false,
+    notes: 'Hanya muncul setelah semua gambar komik selesai dibaca (sebelum tombol Next Chapter).',
+    createdAt: new Date(Date.now() - 86400000 * 2).toISOString(),
+    clickCount: 215,
+    viewCount: 4320
+  },
+  {
+    id: 'ad-floating-bottom-bar',
+    title: 'Sticky Floating Mini Bar',
+    type: 'banner_image',
+    position: 'floating_bottom',
+    isActive: true,
+    imageUrl: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop&q=80',
+    targetUrl: 'https://wa.me/6289514441988?text=Halo%20Admin,%20mau%20daftar%20member%20VIP',
+    altText: 'Diskon Spesial VIP AntiTimpa',
+    badgeLabel: 'HOT DEAL',
+    showForVip: false,
+    notes: 'Banner melayang di bawah layar dengan tombol close (X).',
+    createdAt: new Date(Date.now() - 86400000).toISOString(),
+    clickCount: 95,
+    viewCount: 2100
+  },
+  {
+    id: 'ad-popunder-safe',
+    title: 'Direct Link Popunder (Anti-Spam Capping)',
+    type: 'popunder_direct',
+    position: 'popunder_global',
+    isActive: false, // Default false for safe UX, can be turned on by admin anytime
+    popunderUrl: 'https://wa.me/6289514441988?text=Halo%20Admin%20AntiTimpa',
+    frequencyHours: 12, // Hanya muncul 1x per 12 jam per perangkat
+    showForVip: false,
+    notes: 'Popunder ramah pembaca: hanya aktif 1x per 12 jam menggunakan proteksi browser storage.',
+    createdAt: new Date(Date.now() - 86400000).toISOString(),
+    clickCount: 30,
+    viewCount: 420
   }
 ];

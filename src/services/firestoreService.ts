@@ -18,7 +18,9 @@ import {
   ActivityLog, 
   SystemSettings, 
   DriveAccount,
-  Comment
+  Comment,
+  AdItem,
+  AdSettings
 } from '../types';
 import { 
   initialComics, 
@@ -28,7 +30,9 @@ import {
   initialActivityLogs, 
   initialSystemSettings, 
   initialDriveAccounts,
-  initialComments
+  initialComments,
+  initialAds,
+  initialAdSettings
 } from '../data/initialData';
 
 // Helper to recursively remove all undefined values from objects/arrays so Firestore setDoc / writeBatch never fails
@@ -62,108 +66,117 @@ const BANNERS_COLLECTION = 'banners';
 const LOGS_COLLECTION = 'activityLogs';
 const SETTINGS_COLLECTION = 'systemSettings';
 const COMMENTS_COLLECTION = 'comments';
+const ADS_COLLECTION = 'ads';
+const AD_SETTINGS_COLLECTION = 'adSettings';
+const SYSTEM_METADATA_COLLECTION = 'systemMetadata';
 
-// Initialize and seed collections if empty
+// Initialize and seed collections ONLY ONCE on project creation
+// NEVER re-seed if the admin intentionally deleted mock/junk data!
 export async function initializeFirestoreDatabase(): Promise<void> {
   try {
-    // Check if comics collection has data
-    const comicsSnap = await getDocs(collection(db, COMICS_COLLECTION));
-    if (comicsSnap.empty) {
-      console.log('Firebase: Seeding initial comics...');
-      const batch = writeBatch(db);
-      for (const comic of initialComics) {
-        batch.set(doc(db, COMICS_COLLECTION, comic.id), sanitizeForFirestore(comic));
-      }
-      await batch.commit();
-    }
+    const initDocRef = doc(db, SYSTEM_METADATA_COLLECTION, 'init_status');
+    const initSnap = await getDocs(collection(db, SYSTEM_METADATA_COLLECTION));
+    
+    const alreadyInitialized = !initSnap.empty;
 
-    // Check if chapters collection has data
-    const chaptersSnap = await getDocs(collection(db, CHAPTERS_COLLECTION));
-    if (chaptersSnap.empty) {
-      console.log('Firebase: Seeding initial chapters...');
-      // Flatten all chapters into array
-      const allChapters: Chapter[] = [];
-      Object.values(initialChapters).forEach(chList => {
-        allChapters.push(...chList);
-      });
-
-      // Commit in chunks if necessary
-      for (let i = 0; i < allChapters.length; i += 400) {
+    if (!alreadyInitialized) {
+      console.log('Firebase: First-time database initialization...');
+      
+      // 1. Seed initial admin user if no users exist
+      const usersSnap = await getDocs(collection(db, USERS_COLLECTION));
+      if (usersSnap.empty) {
         const batch = writeBatch(db);
-        const chunk = allChapters.slice(i, i + 400);
-        chunk.forEach(ch => {
-          batch.set(doc(db, CHAPTERS_COLLECTION, ch.id), sanitizeForFirestore(ch));
-        });
+        for (const u of initialUsers) {
+          batch.set(doc(db, USERS_COLLECTION, u.id), sanitizeForFirestore(u));
+        }
         await batch.commit();
       }
-    }
 
-    // Check users collection
-    const usersSnap = await getDocs(collection(db, USERS_COLLECTION));
-    if (usersSnap.empty) {
-      console.log('Firebase: Seeding initial users...');
-      const batch = writeBatch(db);
-      for (const u of initialUsers) {
-        batch.set(doc(db, USERS_COLLECTION, u.id), sanitizeForFirestore(u));
+      // 2. Seed initial system settings
+      const settingsSnap = await getDocs(collection(db, SETTINGS_COLLECTION));
+      if (settingsSnap.empty) {
+        await setDoc(doc(db, SETTINGS_COLLECTION, 'global'), sanitizeForFirestore(initialSystemSettings));
       }
-      await batch.commit();
-    }
 
-    // Check drive accounts collection
-    const drivesSnap = await getDocs(collection(db, DRIVES_COLLECTION));
-    if (drivesSnap.empty) {
-      console.log('Firebase: Seeding initial drive accounts...');
-      const batch = writeBatch(db);
-      for (const d of initialDriveAccounts) {
-        batch.set(doc(db, DRIVES_COLLECTION, d.id), sanitizeForFirestore(d));
+      // 3. Seed initial drives
+      const drivesSnap = await getDocs(collection(db, DRIVES_COLLECTION));
+      if (drivesSnap.empty) {
+        const batch = writeBatch(db);
+        for (const d of initialDriveAccounts) {
+          batch.set(doc(db, DRIVES_COLLECTION, d.id), sanitizeForFirestore(d));
+        }
+        await batch.commit();
       }
-      await batch.commit();
-    }
 
-    // Check banners collection
-    const bannersSnap = await getDocs(collection(db, BANNERS_COLLECTION));
-    if (bannersSnap.empty) {
-      console.log('Firebase: Seeding initial banners...');
-      const batch = writeBatch(db);
-      for (const b of initialBanners) {
-        batch.set(doc(db, BANNERS_COLLECTION, b.id), sanitizeForFirestore(b));
+      // 4. Seed initial ads & adSettings
+      const adsSnap = await getDocs(collection(db, ADS_COLLECTION));
+      if (adsSnap.empty) {
+        const batch = writeBatch(db);
+        for (const ad of initialAds) {
+          batch.set(doc(db, ADS_COLLECTION, ad.id), sanitizeForFirestore(ad));
+        }
+        await batch.commit();
       }
-      await batch.commit();
-    }
-
-    // Check activity logs
-    const logsSnap = await getDocs(collection(db, LOGS_COLLECTION));
-    if (logsSnap.empty) {
-      const batch = writeBatch(db);
-      for (const l of initialActivityLogs) {
-        batch.set(doc(db, LOGS_COLLECTION, l.id), sanitizeForFirestore(l));
+      const adSettingsSnap = await getDocs(collection(db, AD_SETTINGS_COLLECTION));
+      if (adSettingsSnap.empty) {
+        await setDoc(doc(db, AD_SETTINGS_COLLECTION, 'global'), sanitizeForFirestore(initialAdSettings));
       }
-      await batch.commit();
-    }
 
-    // Check system settings
-    const settingsDoc = doc(db, SETTINGS_COLLECTION, 'global');
-    const settingsSnap = await getDocs(collection(db, SETTINGS_COLLECTION));
-    if (settingsSnap.empty) {
-      await setDoc(settingsDoc, sanitizeForFirestore(initialSystemSettings));
-    }
-
-    // Check comments
-    const commentsSnap = await getDocs(collection(db, COMMENTS_COLLECTION));
-    if (commentsSnap.empty && initialComments && initialComments.length > 0) {
-      console.log('Firebase: Seeding initial comments...');
-      const batch = writeBatch(db);
-      for (const c of initialComments) {
-        batch.set(doc(db, COMMENTS_COLLECTION, c.id), sanitizeForFirestore(c));
-      }
-      await batch.commit();
+      // 5. Mark database as permanently initialized so deletions are never undone by other devices
+      await setDoc(initDocRef, {
+        isInitialized: true,
+        initializedAt: new Date().toISOString(),
+        version: '2.0.0'
+      });
+      console.log('Firebase: Initial setup completed.');
     }
   } catch (error) {
-    console.warn('Firebase init warning (proceeding with local fallback):', error);
+    console.warn('Firebase init warning (proceeding with realtime sync):', error);
   }
 }
 
-// Subscribe to Firestore updates
+// Direct fetch user for 100% reliable login across different browsers / devices
+export async function fetchUserFromFirestore(username: string): Promise<User | null> {
+  try {
+    const cleanName = username.trim().toLowerCase();
+    const usersSnap = await getDocs(collection(db, USERS_COLLECTION));
+    const matchedUsers: User[] = [];
+    usersSnap.forEach(docSnap => {
+      const u = docSnap.data() as User;
+      const uName = (u.username || '').trim().toLowerCase();
+      if (uName === cleanName) {
+        matchedUsers.push({ ...u, id: docSnap.id });
+      }
+    });
+
+    if (matchedUsers.length > 0) {
+      if (cleanName === 'admin') {
+        const adminDoc = matchedUsers.find(u => u.id === 'user-admin') || matchedUsers.find(u => u.role === 'admin') || matchedUsers[0];
+        return adminDoc;
+      }
+      return matchedUsers[0];
+    }
+    return null;
+  } catch (err) {
+    console.warn('Direct Firestore user fetch error:', err);
+    return null;
+  }
+}
+
+// Direct fetch all comics from Firestore
+export async function fetchComicsFromFirestore(): Promise<Comic[]> {
+  try {
+    const snap = await getDocs(collection(db, COMICS_COLLECTION));
+    const list: Comic[] = [];
+    snap.forEach(docSnap => list.push(docSnap.data() as Comic));
+    return list;
+  } catch (err) {
+    console.warn('Direct Firestore comics fetch error:', err);
+    return [];
+  }
+}
+
+// Subscribe to Firestore updates (Realtime Single Source of Truth)
 export function subscribeToFirestore(callbacks: {
   onComics: (comics: Comic[]) => void;
   onChapters: (chapters: Record<string, Chapter[]>) => void;
@@ -173,82 +186,77 @@ export function subscribeToFirestore(callbacks: {
   onLogs: (logs: ActivityLog[]) => void;
   onSettings: (settings: SystemSettings) => void;
   onComments?: (comments: Comment[]) => void;
+  onAds?: (ads: AdItem[]) => void;
+  onAdSettings?: (settings: AdSettings) => void;
 }): () => void {
   const unsubscribers: Unsubscribe[] = [];
 
   try {
-    // Comics listener
+    // 1. Comics listener (Always emit current state, even empty array [] when comics are deleted)
     const unsubComics = onSnapshot(collection(db, COMICS_COLLECTION), (snap) => {
-      if (!snap.empty) {
-        const list: Comic[] = [];
-        snap.forEach(docSnap => list.push(docSnap.data() as Comic));
-        callbacks.onComics(list);
-      }
+      const list: Comic[] = [];
+      snap.forEach(docSnap => list.push(docSnap.data() as Comic));
+      callbacks.onComics(list);
     }, (err) => console.warn('Firestore comics sync error:', err));
     unsubscribers.push(unsubComics);
 
-    // Chapters listener
+    // 2. Chapters listener (Always emit current state grouped by comicId)
     const unsubChapters = onSnapshot(collection(db, CHAPTERS_COLLECTION), (snap) => {
-      if (!snap.empty) {
-        const grouped: Record<string, Chapter[]> = {};
-        snap.forEach(docSnap => {
-          const ch = docSnap.data() as Chapter;
+      const grouped: Record<string, Chapter[]> = {};
+      snap.forEach(docSnap => {
+        const ch = docSnap.data() as Chapter;
+        if (ch && ch.comicId) {
           if (!grouped[ch.comicId]) {
             grouped[ch.comicId] = [];
           }
           grouped[ch.comicId].push(ch);
-        });
-        // Sort each comic's chapters by chapterNumber descending
-        Object.keys(grouped).forEach(cId => {
-          grouped[cId].sort((a, b) => b.chapterNumber - a.chapterNumber);
-        });
-        callbacks.onChapters(grouped);
-      }
+        }
+      });
+      // Sort each comic's chapters by chapterNumber descending
+      Object.keys(grouped).forEach(cId => {
+        grouped[cId].sort((a, b) => b.chapterNumber - a.chapterNumber);
+      });
+      callbacks.onChapters(grouped);
     }, (err) => console.warn('Firestore chapters sync error:', err));
     unsubscribers.push(unsubChapters);
 
-    // Users listener
+    // 3. Users listener (Always emit latest users including password updates)
     const unsubUsers = onSnapshot(collection(db, USERS_COLLECTION), (snap) => {
-      if (!snap.empty) {
-        const list: User[] = [];
-        snap.forEach(docSnap => list.push(docSnap.data() as User));
-        callbacks.onUsers(list);
-      }
+      const list: User[] = [];
+      snap.forEach(docSnap => {
+        const data = docSnap.data() as User;
+        list.push({ ...data, id: docSnap.id });
+      });
+      callbacks.onUsers(list);
     }, (err) => console.warn('Firestore users sync error:', err));
     unsubscribers.push(unsubUsers);
 
-    // Drives listener
+    // 4. Drives listener
     const unsubDrives = onSnapshot(collection(db, DRIVES_COLLECTION), (snap) => {
-      if (!snap.empty) {
-        const list: DriveAccount[] = [];
-        snap.forEach(docSnap => list.push(docSnap.data() as DriveAccount));
-        callbacks.onDrives(list);
-      }
+      const list: DriveAccount[] = [];
+      snap.forEach(docSnap => list.push(docSnap.data() as DriveAccount));
+      callbacks.onDrives(list);
     }, (err) => console.warn('Firestore drives sync error:', err));
     unsubscribers.push(unsubDrives);
 
-    // Banners listener
+    // 5. Banners listener
     const unsubBanners = onSnapshot(collection(db, BANNERS_COLLECTION), (snap) => {
-      if (!snap.empty) {
-        const list: Banner[] = [];
-        snap.forEach(docSnap => list.push(docSnap.data() as Banner));
-        callbacks.onBanners(list);
-      }
+      const list: Banner[] = [];
+      snap.forEach(docSnap => list.push(docSnap.data() as Banner));
+      callbacks.onBanners(list);
     }, (err) => console.warn('Firestore banners sync error:', err));
     unsubscribers.push(unsubBanners);
 
-    // Activity logs listener
+    // 6. Activity logs listener
     const unsubLogs = onSnapshot(collection(db, LOGS_COLLECTION), (snap) => {
-      if (!snap.empty) {
-        const list: ActivityLog[] = [];
-        snap.forEach(docSnap => list.push(docSnap.data() as ActivityLog));
-        list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-        callbacks.onLogs(list);
-      }
+      const list: ActivityLog[] = [];
+      snap.forEach(docSnap => list.push(docSnap.data() as ActivityLog));
+      list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+      callbacks.onLogs(list);
     }, (err) => console.warn('Firestore logs sync error:', err));
     unsubscribers.push(unsubLogs);
 
-    // System settings listener
+    // 7. System settings listener
     const unsubSettings = onSnapshot(doc(db, SETTINGS_COLLECTION, 'global'), (docSnap) => {
       if (docSnap.exists()) {
         callbacks.onSettings(docSnap.data() as SystemSettings);
@@ -256,17 +264,36 @@ export function subscribeToFirestore(callbacks: {
     }, (err) => console.warn('Firestore settings sync error:', err));
     unsubscribers.push(unsubSettings);
 
-    // Comments listener
+    // 8. Comments listener
     if (callbacks.onComments) {
       const unsubComments = onSnapshot(collection(db, COMMENTS_COLLECTION), (snap) => {
-        if (!snap.empty) {
-          const list: Comment[] = [];
-          snap.forEach(docSnap => list.push(docSnap.data() as Comment));
-          list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-          callbacks.onComments!(list);
-        }
+        const list: Comment[] = [];
+        snap.forEach(docSnap => list.push(docSnap.data() as Comment));
+        list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        callbacks.onComments!(list);
       }, (err) => console.warn('Firestore comments sync error:', err));
       unsubscribers.push(unsubComments);
+    }
+
+    // 9. Ads listener
+    if (callbacks.onAds) {
+      const unsubAds = onSnapshot(collection(db, ADS_COLLECTION), (snap) => {
+        const list: AdItem[] = [];
+        snap.forEach(docSnap => list.push(docSnap.data() as AdItem));
+        list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        callbacks.onAds!(list);
+      }, (err) => console.warn('Firestore ads sync error:', err));
+      unsubscribers.push(unsubAds);
+    }
+
+    // 10. Ad Settings listener
+    if (callbacks.onAdSettings) {
+      const unsubAdSettings = onSnapshot(doc(db, AD_SETTINGS_COLLECTION, 'global'), (docSnap) => {
+        if (docSnap.exists()) {
+          callbacks.onAdSettings!(docSnap.data() as AdSettings);
+        }
+      }, (err) => console.warn('Firestore ad settings sync error:', err));
+      unsubscribers.push(unsubAdSettings);
     }
 
   } catch (err) {
@@ -297,9 +324,201 @@ export async function saveComicToFirestore(comic: Comic): Promise<void> {
 export async function deleteComicFromFirestore(comicId: string): Promise<void> {
   try {
     await deleteDoc(doc(db, COMICS_COLLECTION, comicId));
+
+    // Cascade delete all chapters belonging to this comic in Firestore
+    try {
+      const chSnap = await getDocs(collection(db, CHAPTERS_COLLECTION));
+      const batch = writeBatch(db);
+      let count = 0;
+      chSnap.forEach(docSnap => {
+        const ch = docSnap.data() as Chapter;
+        if (ch && ch.comicId === comicId) {
+          batch.delete(docSnap.ref);
+          count++;
+        }
+      });
+      if (count > 0) {
+        await batch.commit();
+      }
+    } catch (chErr) {
+      console.warn('Error deleting cascade chapters from Firestore:', chErr);
+    }
+
+    // Cascade delete comments for this comic
+    try {
+      const comSnap = await getDocs(collection(db, COMMENTS_COLLECTION));
+      const batch = writeBatch(db);
+      let count = 0;
+      comSnap.forEach(docSnap => {
+        const com = docSnap.data() as Comment;
+        if (com && com.comicId === comicId) {
+          batch.delete(docSnap.ref);
+          count++;
+        }
+      });
+      if (count > 0) {
+        await batch.commit();
+      }
+    } catch (comErr) {
+      console.warn('Error deleting cascade comments from Firestore:', comErr);
+    }
+
+    // Cascade delete banners targeting this comic
+    try {
+      const banSnap = await getDocs(collection(db, BANNERS_COLLECTION));
+      const batch = writeBatch(db);
+      let count = 0;
+      banSnap.forEach(docSnap => {
+        const ban = docSnap.data() as Banner;
+        if (ban && ban.targetComicId === comicId) {
+          batch.delete(docSnap.ref);
+          count++;
+        }
+      });
+      if (count > 0) {
+        await batch.commit();
+      }
+    } catch (banErr) {
+      console.warn('Error deleting cascade banners from Firestore:', banErr);
+    }
+
   } catch (e) {
     console.error('Failed to delete comic from Firestore:', e);
   }
+}
+
+export async function batchDeleteComicsFromFirestore(comicIds: string[]): Promise<void> {
+  if (!comicIds || comicIds.length === 0) return;
+  const idSet = new Set(comicIds);
+
+  try {
+    const batch = writeBatch(db);
+    comicIds.forEach(id => {
+      batch.delete(doc(db, COMICS_COLLECTION, id));
+    });
+    await batch.commit();
+
+    // Cascade delete chapters
+    const chSnap = await getDocs(collection(db, CHAPTERS_COLLECTION));
+    const chBatch = writeBatch(db);
+    let chCount = 0;
+    chSnap.forEach(docSnap => {
+      const ch = docSnap.data() as Chapter;
+      if (ch && idSet.has(ch.comicId)) {
+        chBatch.delete(docSnap.ref);
+        chCount++;
+      }
+    });
+    if (chCount > 0) {
+      await chBatch.commit();
+    }
+
+    // Cascade delete comments
+    const comSnap = await getDocs(collection(db, COMMENTS_COLLECTION));
+    const comBatch = writeBatch(db);
+    let comCount = 0;
+    comSnap.forEach(docSnap => {
+      const com = docSnap.data() as Comment;
+      if (com && idSet.has(com.comicId)) {
+        comBatch.delete(docSnap.ref);
+        comCount++;
+      }
+    });
+    if (comCount > 0) {
+      await comBatch.commit();
+    }
+
+    // Cascade delete banners
+    const banSnap = await getDocs(collection(db, BANNERS_COLLECTION));
+    const banBatch = writeBatch(db);
+    let banCount = 0;
+    banSnap.forEach(docSnap => {
+      const ban = docSnap.data() as Banner;
+      if (ban && idSet.has(ban.targetComicId)) {
+        banBatch.delete(docSnap.ref);
+        banCount++;
+      }
+    });
+    if (banCount > 0) {
+      await banBatch.commit();
+    }
+
+  } catch (e) {
+    console.error('Failed to batch delete comics from Firestore:', e);
+  }
+}
+
+export async function batchDeleteChaptersFromFirestore(chapterIds: string[]): Promise<void> {
+  if (!chapterIds || chapterIds.length === 0) return;
+  try {
+    const batch = writeBatch(db);
+    chapterIds.forEach(id => {
+      batch.delete(doc(db, CHAPTERS_COLLECTION, id));
+    });
+    await batch.commit();
+  } catch (e) {
+    console.error('Failed to batch delete chapters from Firestore:', e);
+  }
+}
+
+// Sanity Cleaner: Cleans up any orphan chapters whose comic is no longer in Firestore
+export async function cleanOrphanDataFromFirestore(): Promise<{ deletedChapters: number; deletedComments: number; deletedBanners: number }> {
+  let deletedChapters = 0;
+  let deletedComments = 0;
+  let deletedBanners = 0;
+
+  try {
+    const comicsSnap = await getDocs(collection(db, COMICS_COLLECTION));
+    const validComicIds = new Set<string>();
+    comicsSnap.forEach(d => validComicIds.add(d.id));
+
+    // 1. Orphan Chapters
+    const chSnap = await getDocs(collection(db, CHAPTERS_COLLECTION));
+    const chBatch = writeBatch(db);
+    chSnap.forEach(docSnap => {
+      const ch = docSnap.data() as Chapter;
+      if (!ch || !ch.comicId || !validComicIds.has(ch.comicId)) {
+        chBatch.delete(docSnap.ref);
+        deletedChapters++;
+      }
+    });
+    if (deletedChapters > 0) {
+      await chBatch.commit();
+    }
+
+    // 2. Orphan Comments
+    const comSnap = await getDocs(collection(db, COMMENTS_COLLECTION));
+    const comBatch = writeBatch(db);
+    comSnap.forEach(docSnap => {
+      const com = docSnap.data() as Comment;
+      if (!com || !com.comicId || !validComicIds.has(com.comicId)) {
+        comBatch.delete(docSnap.ref);
+        deletedComments++;
+      }
+    });
+    if (deletedComments > 0) {
+      await comBatch.commit();
+    }
+
+    // 3. Orphan Banners
+    const banSnap = await getDocs(collection(db, BANNERS_COLLECTION));
+    const banBatch = writeBatch(db);
+    banSnap.forEach(docSnap => {
+      const ban = docSnap.data() as Banner;
+      if (ban && ban.targetComicId && !validComicIds.has(ban.targetComicId)) {
+        banBatch.delete(docSnap.ref);
+        deletedBanners++;
+      }
+    });
+    if (deletedBanners > 0) {
+      await banBatch.commit();
+    }
+
+  } catch (e) {
+    console.error('Error cleaning orphan data from Firestore:', e);
+  }
+
+  return { deletedChapters, deletedComments, deletedBanners };
 }
 
 export async function saveChapterToFirestore(chapter: Chapter): Promise<void> {
@@ -404,3 +623,30 @@ export async function deleteCommentFromFirestore(commentId: string): Promise<voi
     console.error('Failed to delete comment from Firestore:', e);
   }
 }
+
+export async function saveAdToFirestore(ad: AdItem): Promise<void> {
+  try {
+    const cleaned = sanitizeForFirestore(ad);
+    await setDoc(doc(db, ADS_COLLECTION, ad.id), cleaned);
+  } catch (e) {
+    console.error('Failed to save ad to Firestore:', e);
+  }
+}
+
+export async function deleteAdFromFirestore(adId: string): Promise<void> {
+  try {
+    await deleteDoc(doc(db, ADS_COLLECTION, adId));
+  } catch (e) {
+    console.error('Failed to delete ad from Firestore:', e);
+  }
+}
+
+export async function saveAdSettingsToFirestore(settings: AdSettings): Promise<void> {
+  try {
+    const cleaned = sanitizeForFirestore(settings);
+    await setDoc(doc(db, AD_SETTINGS_COLLECTION, 'global'), cleaned);
+  } catch (e) {
+    console.error('Failed to save ad settings to Firestore:', e);
+  }
+}
+

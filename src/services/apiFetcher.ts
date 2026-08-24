@@ -28,14 +28,10 @@ export async function searchMangaDexApi(
     params.append('rating', ratingFilter);
     if (originLang) params.append('origin', originLang);
 
-    // Call our server proxy endpoint with Netlify Function fallback
+    // Call our server proxy endpoint
     let data;
     try {
-      let res = await fetch(`/api/mangadex/search?${params.toString()}`);
-      if (!res.ok) {
-        // Fallback to Netlify serverless function path directly
-        res = await fetch(`/.netlify/functions/mangadex-proxy?action=search&${params.toString()}`);
-      }
+      const res = await fetch(`/api/mangadex/search?${params.toString()}`);
       if (res.ok) {
         data = await res.json();
       }

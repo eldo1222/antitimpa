@@ -181,6 +181,76 @@ export interface Banner {
   isActive: boolean;
 }
 
+export type AdSlotPosition = 
+  | 'home_hero_bottom'       // Bagian atas beranda (di bawah banner hero)
+  | 'home_between_sections'  // Di sela-sela kategori/bagian beranda
+  | 'home_footer'            // Bagian bawah beranda (di bawah katalog komik)
+  | 'detail_top'             // Bagian atas halaman detail komik
+  | 'detail_bottom'          // Di bawah daftar chapter pada halaman detail
+  | 'reader_top_bar'         // Bagian atas saat membaca komik
+  | 'reader_bottom_nav'      // Di akhir chapter pembaca sebelum tombol next
+  | 'popunder'               // Popunder / Direct link on click
+  | 'home_top'               // Alias backward compat
+  | 'home_bottom'            // Alias backward compat
+  | 'comic_detail_bottom'    // Alias backward compat
+  | 'reader_end'             // Alias backward compat
+  | 'floating_bottom'        // Sticky banner melayang
+  | 'popunder_global';       // Alias backward compat
+
+export type AdType = 
+  | 'banner'                 // Banner gambar kustom + Link tujuan
+  | 'native_text'            // Kartu native dengan teks promosi & tombol
+  | 'html_code'              // Kode embed script / HTML iklan
+  | 'popunder'               // Direct popunder link
+  | 'banner_image'           // Alias
+  | 'html_script'            // Alias
+  | 'popunder_direct';       // Alias
+
+export interface AdItem {
+  id: string;
+  title: string;
+  type: AdType;
+  position: AdSlotPosition;
+  isActive: boolean;
+  
+  // Banner / Native fields
+  imageUrl?: string;
+  targetUrl?: string;
+  altText?: string;
+  badgeLabel?: string;
+  sponsorName?: string;
+  headline?: string;
+  description?: string;
+  ctaText?: string;
+  
+  // Script / HTML embed fields
+  htmlCode?: string;
+  scriptCode?: string;
+  
+  // Popunder fields
+  popunderUrl?: string;
+  frequencyHours?: number;
+  
+  // Proteksi & Pengaturan
+  showForVip?: boolean; // false = Otomatis disembunyikan untuk member VIP/berbayar
+  maxClicksPerDay?: number;
+  clickCount?: number;
+  viewCount?: number;
+  notes?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface AdSettings {
+  adsEnabled: boolean; // Saklar master iklan aktif/nonaktif
+  hideAdsForVip: boolean; // Sembunyikan iklan otomatis untuk member VIP/berbayar
+  popunderEnabled: boolean; // Saklar master popunder
+  popunderCooldownMinutes?: number; // Jeda popunder dalam menit (default 15 menit)
+  popunderCooldownHours?: number; // Jeda popunder dalam jam (opsional)
+  floatingBottomEnabled?: boolean; // Saklar master floating banner
+  showAdLabel?: boolean; // Tampilkan label "Sponsor" untuk transparansi
+}
+
 export type ActivityType = 
   | 'login_success'
   | 'login_failed'
@@ -196,6 +266,10 @@ export type ActivityType =
   | 'user_unlock'
   | 'user_deactivate'
   | 'banner_update'
+  | 'ad_create'
+  | 'ad_update'
+  | 'ad_delete'
+  | 'ad_toggle'
   | 'drive_account_update'
   | 'drive_link_update'
   | 'system_settings';

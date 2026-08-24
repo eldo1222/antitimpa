@@ -35,7 +35,8 @@ export const AdminDatabaseTab: React.FC = () => {
     driveAccounts, 
     banners, 
     activityLogs, 
-    systemSettings 
+    systemSettings,
+    cleanOrphanData
   } = useApp();
 
   const [selectedCollection, setSelectedCollection] = useState<CollectionName>('comics');
@@ -43,6 +44,25 @@ export const AdminDatabaseTab: React.FC = () => {
   const [selectedDocJson, setSelectedDocJson] = useState<{ id: string; data: any } | null>(null);
   const [copiedDocId, setCopiedDocId] = useState<string | null>(null);
   const [copiedUrl, setCopiedUrl] = useState(false);
+  const [isCleaning, setIsCleaning] = useState(false);
+  const [cleanResult, setCleanResult] = useState<{ deletedChapters: number; deletedComments: number; deletedBanners: number } | null>(null);
+
+  const handleCleanOrphans = async () => {
+    if (!window.confirm('Bersihkan seluruh chapter, komentar, atau banner orphan (yang komiknya sudah dihapus) di Firestore?')) {
+      return;
+    }
+    setIsCleaning(true);
+    try {
+      const res = await cleanOrphanData();
+      setCleanResult(res);
+      setTimeout(() => setCleanResult(null), 8000);
+    } catch (e) {
+      console.error(e);
+      alert('Gagal membersihkan data orphan Firestore');
+    } finally {
+      setIsCleaning(false);
+    }
+  };
 
   const projectId = firebaseConfigJson.projectId || 'gen-lang-client-0256082852';
   const databaseId = firebaseConfigJson.firestoreDatabaseId || 'ai-studio-komikyuk-6f02fa55-fee7-4f9b-abff-67fecf326e55';
@@ -137,6 +157,15 @@ export const AdminDatabaseTab: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              onClick={handleCleanOrphans}
+              disabled={isCleaning}
+              className="px-3.5 py-2 rounded-xl bg-[#222234] hover:bg-rose-950/40 text-rose-300 border border-rose-900/40 font-bold text-xs flex items-center gap-1.5 transition-all hover:scale-102 disabled:opacity-50"
+              title="Pindai dan bersihkan chapter/data yang komiknya sudah dihapus dari Firestore"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isCleaning ? 'animate-spin text-rose-400' : 'text-rose-400'}`} />
+              <span>{isCleaning ? 'Membersihkan Data...' : 'Bersihkan Data Sampah / Orphan'}</span>
+            </button>
             <a
               href={consoleUrl}
               target="_blank"
@@ -149,6 +178,21 @@ export const AdminDatabaseTab: React.FC = () => {
             </a>
           </div>
         </div>
+
+        {/* Clean Result Alert Banner */}
+        {cleanResult && (
+          <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-300 text-xs flex items-center justify-between animate-in fade-in">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span>
+                <strong>Pembersihan Selesai:</strong> {cleanResult.deletedChapters} chapter sampah, {cleanResult.deletedComments} komentar tidak valid, dan {cleanResult.deletedBanners} banner orphan berhasil dihapus dari cloud Firestore.
+              </span>
+            </div>
+            <button onClick={() => setCleanResult(null)} className="text-emerald-400 hover:text-white text-xs font-bold px-2 py-0.5">
+              ✕
+            </button>
+          </div>
+        )}
 
         {/* Database Connection Specs Pill Box */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2 border-t border-[#1f1f30] text-xs">
