@@ -215,8 +215,14 @@ export const Header: React.FC = () => {
             {/* User Avatar or Login Button */}
             {currentUser ? (
               <button
-                onClick={() => { selectComic(null); setActiveTab('profile'); }}
+                onClick={() => { 
+                  selectComic(null); 
+                  setActiveTab('profile'); 
+                  setIsAdminView(false);
+                  navigate('/profile');
+                }}
                 className="flex items-center gap-2 p-1.5 pl-2.5 bg-[#161622] border border-[#252536] rounded-xl hover:border-[#ff5b14]/50 transition-all cursor-pointer"
+                title="Buka Halaman Profil"
               >
                 <div className="text-left hidden sm:block">
                   <div className="text-xs font-bold text-white max-w-[90px] truncate leading-tight">

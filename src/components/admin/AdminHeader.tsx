@@ -20,7 +20,7 @@ export const AdminHeader: React.FC<AdminHeaderProps> = ({
   quickActionLabel
 }) => {
   const navigate = useNavigate();
-  const { adminActiveMenu, setIsAdminView } = useApp();
+  const { adminActiveMenu, setIsAdminView, currentUser, selectComic, setActiveTab } = useApp();
 
   const getMenuTitle = () => {
     switch (adminActiveMenu) {
@@ -72,6 +72,8 @@ export const AdminHeader: React.FC<AdminHeaderProps> = ({
         <button
           onClick={() => {
             setIsAdminView(false);
+            selectComic(null);
+            setActiveTab('home');
             navigate('/');
           }}
           className="px-3 py-1.5 bg-[#161622] hover:bg-[#202030] text-slate-300 hover:text-white border border-[#27273a] text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer"
@@ -80,6 +82,26 @@ export const AdminHeader: React.FC<AdminHeaderProps> = ({
           <ExternalLink className="w-3.5 h-3.5 text-[#ff5b14]" />
           <span className="hidden sm:inline">Buka Reader</span>
         </button>
+
+        {currentUser && (
+          <button
+            onClick={() => {
+              setIsAdminView(false);
+              selectComic(null);
+              setActiveTab('profile');
+              navigate('/profile');
+            }}
+            className="flex items-center gap-2 p-1.5 pl-2.5 bg-[#161622] border border-[#27273a] hover:border-[#ff5b14]/50 rounded-xl transition-all cursor-pointer"
+            title="Buka Halaman Profil"
+          >
+            <span className="text-xs font-bold text-slate-200 hidden sm:inline max-w-[90px] truncate">{currentUser.username}</span>
+            <img 
+              src={currentUser.avatar} 
+              alt={currentUser.username} 
+              className="w-6 h-6 rounded-lg object-cover ring-1 ring-[#ff5b14]/50" 
+            />
+          </button>
+        )}
       </div>
     </header>
   );

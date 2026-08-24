@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useApp } from '../../context/AppContext';
 import { Chapter } from '../../types';
 import { 
@@ -35,6 +36,7 @@ interface MenuItem {
 }
 
 export const AdminSidebar: React.FC<AdminSidebarProps> = ({ isOpenMobile, onCloseMobile }) => {
+  const navigate = useNavigate();
   const { 
     currentUser, 
     comics, 
@@ -47,6 +49,8 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({ isOpenMobile, onClos
     adminActiveMenu, 
     setAdminActiveMenu, 
     setIsAdminView, 
+    selectComic,
+    setActiveTab,
     logout 
   } = useApp();
 
@@ -142,7 +146,13 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({ isOpenMobile, onClos
       <div className="p-3 border-t border-[#1c1c2b] space-y-2.5 bg-[#0a0a0f]">
         {/* Switch to Mobile Reader button */}
         <button
-          onClick={() => setIsAdminView(false)}
+          onClick={() => {
+            setIsAdminView(false);
+            selectComic(null);
+            setActiveTab('home');
+            navigate('/');
+            if (onCloseMobile) onCloseMobile();
+          }}
           className="w-full py-2 px-3 rounded-xl bg-[#181824] hover:bg-[#202032] border border-[#27273a] text-slate-200 text-xs font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer"
         >
           <Smartphone className="w-4 h-4 text-[#ff5b14]" />
