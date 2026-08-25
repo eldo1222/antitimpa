@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../../context/AppContext';
-import { AvatarEditModal } from '../common/AvatarEditModal';
+import { ProfileSettingsModal } from '../common/ProfileSettingsModal';
 import { 
   User, 
   Crown, 
@@ -20,7 +20,8 @@ import {
   CreditCard,
   Sparkles,
   AlertTriangle,
-  Camera
+  Camera,
+  KeyRound
 } from 'lucide-react';
 
 export const ProfileView: React.FC = () => {
@@ -39,7 +40,8 @@ export const ProfileView: React.FC = () => {
 
   const [showHelpModal, setShowHelpModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
-  const [showAvatarModal, setShowAvatarModal] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [profileModalTab, setProfileModalTab] = useState<'profile' | 'password' | 'account'>('profile');
 
   if (!currentUser) {
     return (
@@ -84,8 +86,11 @@ export const ProfileView: React.FC = () => {
             className="w-16 h-16 rounded-full object-cover border-2 border-[#ff5b14] ring-2 ring-[#ff5b14]/20 shadow"
           />
           <button
-            onClick={() => setShowAvatarModal(true)}
-            className="absolute inset-0 bg-black/60 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-white text-[10px] font-bold"
+            onClick={() => {
+              setProfileModalTab('profile');
+              setShowProfileModal(true);
+            }}
+            className="absolute inset-0 bg-black/60 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-white text-[10px] font-bold cursor-pointer"
             title="Ganti Foto Profil"
           >
             <Camera className="w-4 h-4" />
@@ -274,19 +279,36 @@ export const ProfileView: React.FC = () => {
         )}
 
         <button
-          onClick={() => setShowSettingsModal(true)}
-          className="w-full p-3.5 flex items-center justify-between text-slate-200 hover:bg-[#1b1b26] transition-colors"
+          onClick={() => {
+            setProfileModalTab('password');
+            setShowProfileModal(true);
+          }}
+          className="w-full p-3.5 flex items-center justify-between text-slate-200 hover:bg-[#1b1b26] transition-colors cursor-pointer"
+        >
+          <div className="flex items-center gap-3">
+            <KeyRound className="w-4 h-4 text-amber-400" />
+            <span>Ganti Password Akun</span>
+          </div>
+          <ChevronRight className="w-4 h-4 text-slate-500" />
+        </button>
+
+        <button
+          onClick={() => {
+            setProfileModalTab('profile');
+            setShowProfileModal(true);
+          }}
+          className="w-full p-3.5 flex items-center justify-between text-slate-200 hover:bg-[#1b1b26] transition-colors cursor-pointer"
         >
           <div className="flex items-center gap-3">
             <Settings className="w-4 h-4 text-slate-400" />
-            <span>Pengaturan Akun & Tampilan</span>
+            <span>Pengaturan Akun & Profil</span>
           </div>
           <ChevronRight className="w-4 h-4 text-slate-500" />
         </button>
 
         <button
           onClick={() => setShowHelpModal(true)}
-          className="w-full p-3.5 flex items-center justify-between text-slate-200 hover:bg-[#1b1b26] transition-colors"
+          className="w-full p-3.5 flex items-center justify-between text-slate-200 hover:bg-[#1b1b26] transition-colors cursor-pointer"
         >
           <div className="flex items-center gap-3">
             <HelpCircle className="w-4 h-4 text-blue-400" />
@@ -299,7 +321,7 @@ export const ProfileView: React.FC = () => {
       {/* 6. Logout Button Card */}
       <button
         onClick={logout}
-        className="w-full p-3.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 rounded-2xl text-red-400 text-xs font-bold flex items-center justify-center gap-2 transition-all active:scale-98 shadow"
+        className="w-full p-3.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 rounded-2xl text-red-400 text-xs font-bold flex items-center justify-center gap-2 transition-all active:scale-98 shadow cursor-pointer"
       >
         <LogOut className="w-4 h-4" />
         <span>Keluar dari Akun ({currentUser.username})</span>
@@ -322,7 +344,7 @@ export const ProfileView: React.FC = () => {
               </h3>
               <button 
                 onClick={() => setShowHelpModal(false)} 
-                className="text-slate-400 hover:text-white"
+                className="text-slate-400 hover:text-white cursor-pointer"
               >
                 ✕
               </button>
@@ -349,7 +371,7 @@ export const ProfileView: React.FC = () => {
 
             <button
               onClick={() => setShowHelpModal(false)}
-              className="w-full py-2.5 bg-[#ff5b14] text-white text-xs font-bold rounded-xl shadow"
+              className="w-full py-2.5 bg-[#ff5b14] text-white text-xs font-bold rounded-xl shadow cursor-pointer"
             >
               Tutup
             </button>
@@ -374,7 +396,7 @@ export const ProfileView: React.FC = () => {
               </h3>
               <button 
                 onClick={() => setShowSettingsModal(false)} 
-                className="text-slate-400 hover:text-white"
+                className="text-slate-400 hover:text-white cursor-pointer"
               >
                 ✕
               </button>
@@ -405,11 +427,12 @@ export const ProfileView: React.FC = () => {
         </div>
       )}
 
-      {/* Avatar & Profile Edit Modal */}
-      <AvatarEditModal
-        isOpen={showAvatarModal}
-        onClose={() => setShowAvatarModal(false)}
+      {/* Profile & Password Settings Modal */}
+      <ProfileSettingsModal
+        isOpen={showProfileModal}
+        onClose={() => setShowProfileModal(false)}
         targetUser={currentUser}
+        defaultTab={profileModalTab}
       />
     </div>
   );

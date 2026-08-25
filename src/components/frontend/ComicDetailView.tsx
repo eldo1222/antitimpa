@@ -18,10 +18,14 @@ import {
   ShieldCheck, 
   ChevronRight,
   ArrowUpDown,
-  Tag
+  Tag,
+  Globe,
+  ExternalLink,
+  Tv
 } from 'lucide-react';
 import { CommentSection } from '../CommentSection';
 import { AdBanner } from './AdBanner';
+import { WhereToReadModal } from '../common/WhereToReadModal';
 import { Chapter } from '../../types';
 
 export const ComicDetailView: React.FC = () => {
@@ -51,6 +55,10 @@ export const ComicDetailView: React.FC = () => {
   const [chapterSearch, setChapterSearch] = useState('');
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
   const [copiedLinkNotice, setCopiedLinkNotice] = useState(false);
+
+  // Where to Read / Watch Modal State (MAL Style Gateway)
+  const [isWhereToReadOpen, setIsWhereToReadOpen] = useState(false);
+  const [selectedGatewayChapter, setSelectedGatewayChapter] = useState<Chapter | null>(null);
 
   // Scroll to top upon opening
   useEffect(() => {
@@ -103,6 +111,14 @@ export const ComicDetailView: React.FC = () => {
   // Similar Comics based on tags (deduplicated)
   const similarComics = getSimilarComics(comic, comics, 6);
 
+  // Check if series has external sources / gateway links
+  const hasExternalSources = 
+    (comic.externalLinks && comic.externalLinks.length > 0) || 
+    (comic.whereToRead && comic.whereToRead.length > 0) || 
+    !!comic.sourceUrl || 
+    !!comic.mangaDexId ||
+    rawChaptersList.some(ch => ch.sourceType === 'external' || !!ch.externalUrl);
+
   const handleShare = () => {
     if (navigator.clipboard) {
       navigator.clipboard.writeText(window.location.href);
@@ -111,7 +127,18 @@ export const ComicDetailView: React.FC = () => {
     }
   };
 
-  const handleChapterClick = (chapterId: string) => {
+  const openWhereToRead = (targetChapter?: Chapter | null) => {
+    setSelectedGatewayChapter(targetChapter || null);
+    setIsWhereToReadOpen(true);
+  };
+
+  const handleChapterClick = (chapter: Chapter) => {
+    // If chapter is an external link, open the Where to Read gateway modal immediately
+    if (chapter.sourceType === 'external' || chapter.externalUrl || (chapter.externalSources && chapter.externalSources.length > 0)) {
+      openWhereToRead(chapter);
+      return;
+    }
+
     if (!currentUser) {
       openLoginModal('🔒 Anda harus masuk/login akun terlebih dahulu untuk mulai membaca.');
       return;
@@ -122,12 +149,20 @@ export const ComicDetailView: React.FC = () => {
       return;
     }
 
-    startReading(chapterId);
-    navigate(`/read/${comic.id}/${chapterId}`);
+    startReading(chapter.id);
+    navigate(`/read/${comic.id}/${chapter.id}`);
   };
 
   return (
     <div className="min-h-screen pb-24 text-slate-100 animate-in fade-in">
+      {/* Where to Read / Watch Modal */}
+      <WhereToReadModal
+        isOpen={isWhereToReadOpen}
+        onClose={() => setIsWhereToReadOpen(false)}
+        comic={comic}
+        chapter={selectedGatewayChapter}
+      />
+
       {/* Top Floating Action Bar */}
       <div className="sticky top-0 z-30 bg-[#0f0f14]/95 backdrop-blur-md px-4 sm:px-6 lg:px-8 py-3 border-b border-[#222232]">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
@@ -247,13 +282,21 @@ export const ComicDetailView: React.FC = () => {
                 </div>
               </div>
 
-              {/* Action Buttons: Baca Sekarang / Lanjut Baca */}
+              {/* Action Buttons: Baca Sekarang / Lanjut Baca / Where to Read */}
               <div className="space-y-2 pt-2 border-t border-[#1f1f2e]">
-                {currentUser ? (
+                {rawChaptersList.length === 0 ? (
+                  <button
+                    onClick={() => openWhereToRead(null)}
+                    className="w-full py-3 px-4 bg-gradient-to-r from-[#ff5b14] to-[#f97316] hover:opacity-95 text-white font-extrabold text-xs sm:text-sm rounded-xl shadow-lg shadow-[#ff5b14]/30 flex items-center justify-center gap-2 transition-all active:scale-98 cursor-pointer"
+                  >
+                    <Globe className="w-4 h-4" />
+                    <span>Where to Read & Watch (Penyedia Link)</span>
+                  </button>
+                ) : currentUser ? (
                   isAccessAllowed ? (
                     <button
                       onClick={() => {
-                        const targetCh = readingProgress?.chapterId || rawChaptersList[0]?.id;
+                        const targetCh = rawChaptersList.find(c => c.id === readingProgress?.chapterId) || rawChaptersList[0];
                         if (targetCh) {
                           handleChapterClick(targetCh);
                         }
@@ -283,6 +326,17 @@ export const ComicDetailView: React.FC = () => {
                   >
                     <Lock className="w-4 h-4" />
                     <span>Login untuk Membaca</span>
+                  </button>
+                )}
+
+                {/* Where to Read Secondary Gateway Button (MAL Style) */}
+                {hasExternalSources && (
+                  <button
+                    onClick={() => openWhereToRead(null)}
+                    className="w-full py-2.5 rounded-xl border border-[#ff5b14]/40 bg-[#ff5b14]/10 hover:bg-[#ff5b14]/20 text-[#ff7a3d] font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm active:scale-98"
+                  >
+                    <Globe className="w-3.5 h-3.5" />
+                    <span>Where to Watch / Read (Sumber Mitra)</span>
                   </button>
                 )}
 
@@ -380,100 +434,143 @@ export const ComicDetailView: React.FC = () => {
                   </span>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={chapterSearch}
-                    onChange={(e) => setChapterSearch(e.target.value)}
-                    placeholder="Cari chapter #..."
-                    className="px-3 py-1.5 bg-[#171722] border border-[#28283c] rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#ff5b14] w-36"
-                  />
+                {rawChaptersList.length > 0 && (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={chapterSearch}
+                      onChange={(e) => setChapterSearch(e.target.value)}
+                      placeholder="Cari chapter #..."
+                      className="px-3 py-1.5 bg-[#171722] border border-[#28283c] rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#ff5b14] w-36"
+                    />
 
+                    <button
+                      onClick={() => setSortOrder(prev => prev === 'desc' ? 'asc' : 'desc')}
+                      className="px-3 py-1.5 bg-[#171722] border border-[#28283c] rounded-xl text-xs font-semibold text-slate-300 hover:text-white flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+                    >
+                      <ArrowUpDown className="w-3.5 h-3.5 text-[#ff5b14]" />
+                      <span className="hidden sm:inline">{sortOrder === 'desc' ? 'Terbaru' : 'Terlama'}</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* If 0 local chapters exist (e.g. from Jikan / MAL API Scrape) */}
+              {rawChaptersList.length === 0 ? (
+                <div className="p-6 bg-[#161622] rounded-xl border border-[#28283c] text-center space-y-3">
+                  <div className="w-12 h-12 rounded-2xl bg-[#ff5b14]/20 border border-[#ff5b14]/40 flex items-center justify-center text-[#ff5b14] mx-auto">
+                    <Globe className="w-6 h-6" />
+                  </div>
+                  <div className="space-y-1 max-w-md mx-auto">
+                    <h4 className="font-extrabold text-sm sm:text-base text-white">
+                      Direktori Portal & Where to Read (Model MAL)
+                    </h4>
+                    <p className="text-xs text-slate-400 leading-relaxed">
+                      Judul ini terindeks di AntiTimpa sebagai direktori penyedia link. Klik tombol di bawah untuk memilih platform resmi, partner, dan scanlation yang menyediakan komik/anime ini.
+                    </p>
+                  </div>
                   <button
-                    onClick={() => setSortOrder(prev => prev === 'desc' ? 'asc' : 'desc')}
-                    className="px-3 py-1.5 bg-[#171722] border border-[#28283c] rounded-xl text-xs font-semibold text-slate-300 hover:text-white flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+                    onClick={() => openWhereToRead(null)}
+                    className="px-6 py-2.5 bg-gradient-to-r from-[#ff5b14] to-[#f97316] hover:opacity-95 text-white font-extrabold text-xs rounded-xl shadow-lg flex items-center justify-center gap-2 mx-auto transition-all active:scale-95 cursor-pointer"
                   >
-                    <ArrowUpDown className="w-3.5 h-3.5 text-[#ff5b14]" />
-                    <span className="hidden sm:inline">{sortOrder === 'desc' ? 'Terbaru' : 'Terlama'}</span>
+                    <ExternalLink className="w-4 h-4" />
+                    <span>Buka Platform Penyedia (Where to Read & Watch)</span>
                   </button>
                 </div>
-              </div>
+              ) : (
+                /* Chapters List */
+                <div className="space-y-2 max-h-[600px] overflow-y-auto pr-1">
+                  {chaptersList.map((chapter) => {
+                    const isCurrentReading = readingProgress?.chapterId === chapter.id;
+                    const isExternalChapter = chapter.sourceType === 'external' || !!chapter.externalUrl || (chapter.externalSources && chapter.externalSources.length > 0);
 
-              {/* Chapters List */}
-              <div className="space-y-2 max-h-[600px] overflow-y-auto pr-1">
-                {chaptersList.map((chapter) => {
-                  const isCurrentReading = readingProgress?.chapterId === chapter.id;
-
-                  return (
-                    <div
-                      key={chapter.id}
-                      onClick={() => handleChapterClick(chapter.id)}
-                      className={`p-3.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between group ${
-                        isCurrentReading 
-                          ? 'bg-[#ff5b14]/10 border-[#ff5b14]/40 shadow-sm' 
-                          : 'bg-[#171722] hover:bg-[#1f1f2e] border-[#252538]'
-                      }`}
-                    >
-                      <div className="flex items-center gap-3.5 min-w-0 flex-1 pr-2">
-                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-xs shrink-0 ${
+                    return (
+                      <div
+                        key={chapter.id}
+                        onClick={() => handleChapterClick(chapter)}
+                        className={`p-3.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between group ${
                           isCurrentReading 
-                            ? 'bg-[#ff5b14] text-white shadow-md shadow-[#ff5b14]/30' 
-                            : 'bg-[#222232] text-slate-300 group-hover:bg-[#ff5b14] group-hover:text-white transition-colors'
-                        }`}>
-                          #{chapter.chapterNumber}
-                        </div>
-
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2">
-                            <h4 className="font-bold text-xs sm:text-sm text-slate-200 truncate group-hover:text-[#ff5b14] transition-colors" title={chapter.title}>
-                              {chapter.title}
-                            </h4>
-                            {chapter.mangadexChapterId && (
-                              <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shrink-0">
-                                MangaDex
-                              </span>
-                            )}
-                            {chapter.isNew && (
-                              <span className="px-1.5 py-0.2 rounded text-[9px] font-black bg-[#ff5b14] text-white uppercase shrink-0">
-                                NEW
-                              </span>
-                            )}
+                            ? 'bg-[#ff5b14]/10 border-[#ff5b14]/40 shadow-sm' 
+                            : isExternalChapter
+                            ? 'bg-[#181826] hover:bg-[#202034] border-[#2f2f45]'
+                            : 'bg-[#171722] hover:bg-[#1f1f2e] border-[#252538]'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3.5 min-w-0 flex-1 pr-2">
+                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-xs shrink-0 ${
+                            isCurrentReading 
+                              ? 'bg-[#ff5b14] text-white shadow-md shadow-[#ff5b14]/30' 
+                              : isExternalChapter
+                              ? 'bg-gradient-to-br from-pink-600/30 to-purple-600/30 text-pink-300 border border-pink-500/30'
+                              : 'bg-[#222232] text-slate-300 group-hover:bg-[#ff5b14] group-hover:text-white transition-colors'
+                          }`}>
+                            #{chapter.chapterNumber}
                           </div>
-                          <p className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-1.5">
-                            <span>{chapter.releaseDate}</span>
-                            <span>•</span>
-                            {chapter.sourceType === 'drive' ? (
-                              <span className="text-blue-400 font-semibold">Google Drive</span>
-                            ) : chapter.sourceType === 'pdf' ? (
-                              <span className="text-red-400 font-semibold">Dokumen PDF</span>
+
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h4 className="font-bold text-xs sm:text-sm text-slate-200 truncate group-hover:text-[#ff5b14] transition-colors" title={chapter.title}>
+                                {chapter.title}
+                              </h4>
+                              {isExternalChapter && (
+                                <span className="px-1.5 py-0.2 rounded text-[9px] font-black bg-pink-500/20 text-pink-300 border border-pink-500/40 shrink-0 flex items-center gap-0.5">
+                                  <Globe className="w-2.5 h-2.5" />
+                                  <span>{chapter.externalPlatform || 'Link Eksternal'}</span>
+                                </span>
+                              )}
+                              {chapter.mangadexChapterId && (
+                                <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shrink-0">
+                                  MangaDex
+                                </span>
+                              )}
+                              {chapter.isNew && (
+                                <span className="px-1.5 py-0.2 rounded text-[9px] font-black bg-[#ff5b14] text-white uppercase shrink-0">
+                                  NEW
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-1.5">
+                              <span>{chapter.releaseDate}</span>
+                              <span>•</span>
+                              {isExternalChapter ? (
+                                <span className="text-pink-400 font-semibold">Where to Read Gateway ↗</span>
+                              ) : chapter.sourceType === 'drive' ? (
+                                <span className="text-blue-400 font-semibold">Google Drive</span>
+                              ) : chapter.sourceType === 'pdf' ? (
+                                <span className="text-red-400 font-semibold">Dokumen PDF</span>
+                              ) : (
+                                <span>{chapter.pages?.length || 8} Halaman Gambar</span>
+                              )}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          {isCurrentReading && (
+                            <span className="text-[10px] font-bold text-[#ff5b14] bg-[#ff5b14]/15 px-2.5 py-0.5 rounded-full hidden sm:inline">
+                              Sedang Dibaca
+                            </span>
+                          )}
+
+                          {isExternalChapter ? (
+                            <div className="p-1.5 rounded-lg bg-pink-500/10 text-pink-400 group-hover:bg-pink-500 group-hover:text-white transition-colors">
+                              <ExternalLink className="w-4 h-4" />
+                            </div>
+                          ) : currentUser ? (
+                            isAccessAllowed ? (
+                              <BookOpen className="w-4 h-4 text-slate-400 group-hover:text-[#ff5b14] transition-colors" />
                             ) : (
-                              <span>{chapter.pages?.length || 8} Halaman Gambar</span>
-                            )}
-                          </p>
+                              <Lock className="w-4 h-4 text-blue-400" />
+                            )
+                          ) : (
+                            <Lock className="w-4 h-4 text-amber-500/80" />
+                          )}
                         </div>
                       </div>
-
-                      <div className="flex items-center gap-2 shrink-0">
-                        {isCurrentReading && (
-                          <span className="text-[10px] font-bold text-[#ff5b14] bg-[#ff5b14]/15 px-2.5 py-0.5 rounded-full hidden sm:inline">
-                            Sedang Dibaca
-                          </span>
-                        )}
-
-                        {currentUser ? (
-                          isAccessAllowed ? (
-                            <BookOpen className="w-4 h-4 text-slate-400 group-hover:text-[#ff5b14] transition-colors" />
-                          ) : (
-                            <Lock className="w-4 h-4 text-blue-400" />
-                          )
-                        ) : (
-                          <Lock className="w-4 h-4 text-amber-500/80" />
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             {/* Ad Banner: Bawah Daftar Chapter */}

@@ -19,7 +19,8 @@ import {
   AdSettings,
   AdSlotPosition,
   AdType,
-  AdminToastItem
+  AdminToastItem,
+  ExternalSource
 } from '../types';
 import { 
   initialComics, 
@@ -62,6 +63,7 @@ import { centralSync } from '../services/centralSyncService';
 import { auth, db, googleProvider } from '../lib/firebase';
 import { signInWithPopup, signOut } from 'firebase/auth';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import bcrypt from 'bcryptjs';
 
 export const ADMIN_EMAILS = [
   'admin@email.com',
@@ -86,10 +88,18 @@ export interface GoogleAuthUser {
   createdAt?: any;
 }
 
+export interface PendingGoogleUser {
+  uid: string;
+  email: string;
+  displayName: string;
+  photoURL: string;
+}
+
 interface AppContextType {
   // State
   currentUser: User | null;
   googleUser: GoogleAuthUser | null;
+  pendingGoogleUser: PendingGoogleUser | null;
   comics: Comic[];
   chapters: Record<string, Chapter[]>;
   users: User[];
@@ -112,17 +122,28 @@ interface AppContextType {
   adminActiveMenu: 'dashboard' | 'comics' | 'scraper' | 'chapters' | 'drives' | 'readers' | 'banners' | 'ads' | 'genres' | 'database' | 'logs' | 'settings';
   isLoginModalOpen: boolean;
   loginModalRedirectNotice?: string;
+  isGoogleAuthModalOpen: boolean;
+  isRegisterModalOpen: boolean;
+  isProfileSettingsModalOpen: boolean;
   isMobileDeviceFrame: boolean;
   
   // Actions - Auth
   login: (username: string, password: string) => Promise<{ success: boolean; message: string; remainingAttempts?: number; user?: User }> | { success: boolean; message: string; remainingAttempts?: number; user?: User };
   logout: () => void;
-  loginWithGoogle: (manualGoogleData?: { email: string; displayName: string; photoURL?: string }) => Promise<{ success: boolean; user?: any; message?: string; errorType?: string }>;
+  loginWithGoogle: (manualGoogleData?: { email: string; displayName: string; photoURL?: string; adminPass?: string }) => Promise<{ success: boolean; user?: any; needRegistration?: boolean; pendingUser?: PendingGoogleUser; message?: string; errorType?: string }>;
+  registerWithGoogle: (username: string, password: string, additionalProfile?: { displayName?: string; avatar?: string; bio?: string }) => Promise<{ success: boolean; message?: string; user?: User }>;
   logoutGoogle: () => Promise<void> | void;
   isLoggedIn: () => boolean;
   getUserIdentity: () => { name: string; avatar: string; uid: string; role?: string; email?: string } | null;
   openLoginModal: (notice?: string) => void;
   closeLoginModal: () => void;
+  openGoogleAuthModal: (notice?: string) => void;
+  closeGoogleAuthModal: () => void;
+  openRegisterModal: (pendingData?: PendingGoogleUser) => void;
+  closeRegisterModal: () => void;
+  openProfileSettingsModal: () => void;
+  closeProfileSettingsModal: () => void;
+  changeUserPassword: (userId: string, currentPassword: string, newPassword: string) => Promise<{ success: boolean; message: string }>;
 
   // Actions - Access & Permissions
   canUserReadComic: (comicId: string, userToCheck?: User | null) => ComicAccessCheck;
@@ -160,6 +181,10 @@ interface AppContextType {
     driveEmbedUrl?: string;
     driveAccountId?: string;
     driveNotes?: string;
+    externalUrl?: string;
+    externalPlatform?: string;
+    externalSources?: ExternalSource[];
+    externalNote?: string;
   }) => void;
   updateChapter: (comicId: string, chapterId: string, updates: Partial<Chapter>) => void;
   deleteChapter: (comicId: string, chapterId: string, reason?: string) => void;
@@ -188,7 +213,7 @@ interface AppContextType {
     priceNote?: string;
   }) => { success: boolean; message: string };
   updateUser: (id: string, updates: Partial<User>) => void;
-  updateUserProfile: (userId: string, updates: { avatar?: string; displayName?: string; bio?: string }) => void;
+  updateUserProfile: (userId: string, updates: { avatar?: string; displayName?: string; bio?: string; username?: string; password?: string }) => Promise<{ success: boolean; message: string }> | void;
   unlockUser: (id: string) => void;
   unlockAllUsers: () => { count: number };
   toggleUserStatus: (id: string) => void;
@@ -401,7 +426,41 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const [isLoginModalOpen, setIsLoginModalOpen] = useState<boolean>(false);
   const [loginModalRedirectNotice, setLoginModalRedirectNotice] = useState<string | undefined>(undefined);
+  const [isGoogleAuthModalOpen, setIsGoogleAuthModalOpen] = useState<boolean>(false);
+  const [pendingGoogleUser, setPendingGoogleUser] = useState<PendingGoogleUser | null>(null);
+  const [isRegisterModalOpen, setIsRegisterModalOpen] = useState<boolean>(false);
+  const [isProfileSettingsModalOpen, setIsProfileSettingsModalOpen] = useState<boolean>(false);
   const [isMobileDeviceFrame, setIsMobileDeviceFrame] = useState<boolean>(false);
+
+  const openGoogleAuthModal = useCallback((notice?: string) => {
+    if (notice) {
+      setLoginModalRedirectNotice(notice);
+    }
+    setIsGoogleAuthModalOpen(true);
+  }, []);
+
+  const closeGoogleAuthModal = useCallback(() => {
+    setIsGoogleAuthModalOpen(false);
+  }, []);
+
+  const openRegisterModal = useCallback((pendingData?: PendingGoogleUser) => {
+    if (pendingData) {
+      setPendingGoogleUser(pendingData);
+    }
+    setIsRegisterModalOpen(true);
+  }, []);
+
+  const closeRegisterModal = useCallback(() => {
+    setIsRegisterModalOpen(false);
+  }, []);
+
+  const openProfileSettingsModal = useCallback(() => {
+    setIsProfileSettingsModalOpen(true);
+  }, []);
+
+  const closeProfileSettingsModal = useCallback(() => {
+    setIsProfileSettingsModalOpen(false);
+  }, []);
 
   // Admin Toast Notifications State
   const [adminToasts, setAdminToasts] = useState<AdminToastItem[]>([]);
@@ -703,11 +762,33 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
   };
 
-  // Helper to flexibly and accurately match passwords across mobile devices (handling spaces/trimming)
+  // Helper to hash password using bcryptjs
+  const hashPassword = (password: string): string => {
+    try {
+      const salt = bcrypt.genSaltSync(10);
+      return bcrypt.hashSync(password, salt);
+    } catch (err) {
+      console.warn('Bcrypt hashing fallback:', err);
+      return password;
+    }
+  };
+
+  // Helper to flexibly and accurately match passwords across mobile devices (handling bcrypt and plain text)
   const verifyPasswordMatch = (storedPass?: string, inputPass?: string): boolean => {
     if (!storedPass || !inputPass) return false;
     const s = String(storedPass);
     const inp = String(inputPass);
+
+    // 1. If stored password is a bcrypt hash ($2a$, $2b$, $2y$), use bcrypt.compareSync
+    if (s.startsWith('$2a$') || s.startsWith('$2b$') || s.startsWith('$2y$')) {
+      try {
+        if (bcrypt.compareSync(inp, s)) {
+          return true;
+        }
+      } catch (_) {}
+    }
+
+    // 2. Direct string / trim comparison (for plain text legacy or admin accounts)
     return (
       s === inp ||
       s.trim() === inp.trim() ||
@@ -717,7 +798,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   // Auth Functions
-  const login = async (username: string, password: string): Promise<{ success: boolean; message: string; remainingAttempts?: number }> => {
+  const login = async (username: string, password: string): Promise<{ success: boolean; message: string; remainingAttempts?: number; user?: User }> => {
     const cleanUsername = username.trim();
     const rawPassword = password;
     if (!cleanUsername || !rawPassword) {
@@ -772,6 +853,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       setUsers(prev => prev.map(u => u.id === targetUser.id ? updatedAdmin : u));
       saveUserToFirestore(updatedAdmin);
       setCurrentUser(updatedAdmin);
+      safeSetItem(STORAGE_KEYS.CURRENT_USER, updatedAdmin);
       setIsAdminView(true);
       setIsLoginModalOpen(false);
       setLoginModalRedirectNotice(undefined);
@@ -868,6 +950,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setUsers(prev => prev.map(u => u.id === targetUser.id ? updatedUser : u));
     saveUserToFirestore(updatedUser);
     setCurrentUser(updatedUser);
+    safeSetItem(STORAGE_KEYS.CURRENT_USER, updatedUser);
     setIsLoginModalOpen(false);
     setLoginModalRedirectNotice(undefined);
 
@@ -889,145 +972,354 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       addLog(currentUser.username, 'Pengguna Logout', 'logout', 'info', 'Sesi diakhiri secara manual');
     }
     setCurrentUser(null);
+    setGoogleUser(null);
+    safeSetItem(STORAGE_KEYS.CURRENT_USER, null);
+    safeSetItem(STORAGE_KEYS.GOOGLE_USER, null);
     if (isAdminView) {
       setIsAdminView(false);
     }
   };
 
-  const loginWithGoogle = async (manualGoogleData?: { email: string; displayName: string; photoURL?: string }): Promise<{ success: boolean; user?: any; message?: string; errorType?: string }> => {
+  const loginWithGoogle = async (manualGoogleData?: { email: string; displayName: string; photoURL?: string; adminPass?: string }): Promise<{ success: boolean; user?: any; needRegistration?: boolean; pendingUser?: PendingGoogleUser; message?: string; errorType?: string }> => {
     try {
       let userUid: string;
       let userEmail: string;
       let userName: string;
       let userAvatar: string;
+      let isAuthenticPopup = false;
 
       if (manualGoogleData && manualGoogleData.email) {
-        // Direct registration with user's real personal Google account
+        // Direct / custom account input
         userEmail = manualGoogleData.email.trim().toLowerCase();
         userName = manualGoogleData.displayName?.trim() || userEmail.split('@')[0];
         userUid = `google-${userEmail.replace(/[^a-zA-Z0-9]/g, '_')}`;
         userAvatar = manualGoogleData.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(userName)}&background=ff5b14&color=fff&bold=true`;
+
+        // Security Guard: Prevent unauthorized visitor devices from impersonating Super Admin email without password
+        if (ADMIN_EMAILS.includes(userEmail)) {
+          const pass = manualGoogleData.adminPass || '';
+          if (!pass || (pass !== 'admin123' && pass !== 'superadmin')) {
+            return {
+              success: false,
+              message: 'Alamat email ini adalah Akun Pemilik (Super Admin). Demi keamanan, silakan gunakan tombol "Google Sign-In Popup" resmi atau masukkan Password Admin Anda.',
+              errorType: 'admin_auth_required'
+            };
+          }
+        }
       } else {
-        // Real browser Firebase Google Auth Popup
+        // Real browser Firebase Google Auth Popup (Cryptographically verified by Google OAuth)
         const result = await signInWithPopup(auth, googleProvider);
         const user = result.user;
         userUid = user.uid;
         userEmail = (user.email || '').toLowerCase();
         userName = user.displayName || userEmail.split('@')[0] || 'User Google';
         userAvatar = user.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(userName)}&background=ff5b14&color=fff&bold=true`;
+        isAuthenticPopup = true;
       }
 
       const isAdminEmail = ADMIN_EMAILS.includes(userEmail);
-      const defaultRole: 'admin' | 'reader' = isAdminEmail ? 'admin' : 'reader';
 
-      let googleUserData: GoogleAuthUser = {
-        uid: userUid,
-        email: userEmail,
-        displayName: userName,
-        photoURL: userAvatar,
-        role: defaultRole,
-        createdAt: new Date().toISOString()
-      };
+      // 1. Cek di Firestore koleksi users dengan dokumen ID = userUid ATAU email
+      let existingUser: User | null = null;
 
-      // Safely sync to Firestore (gracefully handle quota exceeded or offline)
       try {
         const userRef = doc(db, 'users', userUid);
         const userSnap = await getDoc(userRef);
 
         if (userSnap.exists()) {
-          const existing = userSnap.data();
-          googleUserData = {
-            uid: userUid,
-            email: userEmail,
-            displayName: existing.displayName || userName,
-            photoURL: existing.photoURL || userAvatar,
-            role: existing.role || defaultRole,
-            createdAt: existing.createdAt || new Date().toISOString()
-          };
-
-          if (isAdminEmail && existing.role !== 'admin') {
-            googleUserData.role = 'admin';
-            try {
-              await setDoc(userRef, { role: 'admin' }, { merge: true });
-            } catch (_) {}
+          const docData = userSnap.data() as any;
+          // Document exists and has username configured
+          if (docData.username) {
+            existingUser = {
+              id: userSnap.id,
+              uid: userUid,
+              email: userEmail,
+              displayName: docData.displayName || userName,
+              photoURL: docData.photoURL || userAvatar,
+              avatar: docData.avatar || docData.photoURL || userAvatar,
+              username: docData.username,
+              passwordHash: docData.passwordHash,
+              role: isAdminEmail ? 'admin' : (docData.role || 'user'),
+              status: docData.status || 'active',
+              durationType: docData.durationType || 'unlimited',
+              tier: docData.tier || (isAdminEmail ? 'Premium' : 'Free Tier'),
+              planType: docData.planType || 'plan_15k_all',
+              accessType: docData.accessType || 'all',
+              bio: docData.bio || 'Penggemar Komik AntiTimpa',
+              createdAt: docData.createdAt || new Date().toISOString(),
+              firstLoginAt: docData.firstLoginAt || new Date().toISOString(),
+              failedAttempts: 0,
+              stats: docData.stats || { comicsRead: 0, chaptersRead: 0, daysActive: 1 }
+            };
           }
-        } else {
-          await setDoc(userRef, {
-            ...googleUserData,
-            createdAt: serverTimestamp()
-          });
         }
       } catch (firestoreErr) {
-        console.warn('Firestore Quota/Network Notice (Falling back to local persistent storage):', firestoreErr);
+        console.warn('Firestore User Check Warning:', firestoreErr);
       }
 
-      setGoogleUser(googleUserData);
-      safeSetItem(STORAGE_KEYS.GOOGLE_USER, googleUserData);
-
-      // Create / link user session in app state
-      const currentAppUser: User = {
-        id: userUid,
-        username: googleUserData.displayName,
-        role: googleUserData.role === 'admin' ? 'admin' : 'reader',
-        status: 'active',
-        durationType: 'unlimited',
-        tier: googleUserData.role === 'admin' ? 'Premium' : 'Free Tier',
-        planType: 'plan_15k_all',
-        accessType: 'all',
-        avatar: googleUserData.photoURL,
-        failedAttempts: 0,
-        createdAt: new Date().toISOString(),
-        firstLoginAt: new Date().toISOString(),
-        stats: {
-          comicsRead: 0,
-          chaptersRead: 0,
-          daysActive: 1
+      // Fallback check in local memory state
+      if (!existingUser) {
+        const inState = users.find(u => 
+          (u.email && u.email.toLowerCase() === userEmail) || 
+          u.id === userUid || 
+          u.uid === userUid
+        );
+        if (inState && inState.username && inState.passwordHash) {
+          existingUser = inState;
         }
+      }
+
+      // CASE A: User sudah terdaftar -> Langsung Login!
+      if (existingUser) {
+        if (isAdminEmail && existingUser.role !== 'admin') {
+          existingUser.role = 'admin';
+          saveUserToFirestore(existingUser);
+        }
+
+        const gUserData: GoogleAuthUser = {
+          uid: userUid,
+          email: userEmail,
+          displayName: existingUser.displayName || userName,
+          photoURL: existingUser.photoURL || userAvatar,
+          role: existingUser.role === 'admin' ? 'admin' : 'reader',
+          createdAt: existingUser.createdAt
+        };
+
+        setGoogleUser(gUserData);
+        setCurrentUser(existingUser);
+        safeSetItem(STORAGE_KEYS.GOOGLE_USER, gUserData);
+        safeSetItem(STORAGE_KEYS.CURRENT_USER, existingUser);
+
+        setUsers(prev => {
+          const exists = prev.some(u => u.id === existingUser!.id);
+          if (exists) {
+            return prev.map(u => u.id === existingUser!.id ? existingUser! : u);
+          }
+          return [...prev, existingUser!];
+        });
+
+        setIsLoginModalOpen(false);
+        setIsGoogleAuthModalOpen(false);
+        setIsRegisterModalOpen(false);
+        setLoginModalRedirectNotice(undefined);
+
+        if (existingUser.role === 'admin') {
+          setIsAdminView(true);
+        }
+
+        showAdminToast('Login Google Berhasil', `Selamat datang kembali, ${existingUser.username}!`, 'success');
+        addLog(
+          existingUser.username,
+          'Login Akun Google Berhasil',
+          'login_success',
+          'success',
+          `Akun ${existingUser.username} (${userEmail}) berhasil masuk via Google.`
+        );
+
+        return { success: true, user: existingUser };
+      }
+
+      // CASE B: User Baru -> Simpan data Google sementara, buka form registrasi untuk isi username & password!
+      const pendingData: PendingGoogleUser = {
+        uid: userUid,
+        email: userEmail,
+        displayName: userName,
+        photoURL: userAvatar
       };
 
-      setCurrentUser(currentAppUser);
-      setUsers(prev => {
-        const filtered = prev.filter(u => u.id !== userUid && u.username.toLowerCase() !== googleUserData.displayName.toLowerCase());
-        return [...filtered, currentAppUser];
-      });
-
-      // Save to local storage and try firestore
-      try {
-        saveUserToFirestore(currentAppUser);
-      } catch (_) {}
-
-      addLog(
-        googleUserData.displayName, 
-        'Login Akun Google Berhasil', 
-        'login_success', 
-        'success', 
-        `Akun Google (${userEmail}) berhasil login. Role: ${googleUserData.role}`
-      );
-
+      setPendingGoogleUser(pendingData);
       setIsLoginModalOpen(false);
-      setLoginModalRedirectNotice(undefined);
+      setIsGoogleAuthModalOpen(false);
+      setIsRegisterModalOpen(true);
 
-      if (googleUserData.role === 'admin') {
-        setIsAdminView(true);
-      }
+      return { 
+        success: false, 
+        needRegistration: true, 
+        pendingUser: pendingData,
+        message: 'Silakan lengkapi username dan password akun Anda.' 
+      };
 
-      return { success: true, user: googleUserData };
     } catch (error: any) {
-      console.error('Google Sign-In Error:', error);
-
       if (error?.code === 'auth/unauthorized-domain' || error?.message?.includes('unauthorized-domain')) {
+        console.warn('Firebase Auth notice: Domain unauthorized. Opening direct Google sign-in modal.');
+        setIsGoogleAuthModalOpen(true);
         return { 
           success: false, 
           errorType: 'unauthorized_domain',
-          message: 'Domain pengujian lokal belum didaftarkan di Firebase Console. Anda dapat memasukkan Email & Nama Google Anda langsung di bawah untuk mendaftarkan akun ke Firestore.' 
+          message: 'Domain pengujian ini belum didaftarkan di Firebase Console. Silakan pilih akun Google Anda di jendela yang terbuka untuk masuk langsung.' 
         };
       }
 
-      const errMsg = error?.code === 'auth/popup-closed-by-user' || error?.message?.includes('popup-closed-by-user')
-        ? 'Login Google dibatalkan.'
-        : error?.message || 'Gagal login dengan Akun Google.';
+      if (error?.code === 'auth/popup-closed-by-user' || error?.message?.includes('popup-closed-by-user')) {
+        return { success: false, message: 'Login Google dibatalkan.' };
+      }
+
+      console.warn('Google Sign-In Notice:', error?.message || error);
+      const errMsg = error?.message || 'Gagal login dengan Akun Google.';
       return { success: false, message: errMsg };
     }
+  };
+
+  const registerWithGoogle = async (
+    username: string, 
+    password: string, 
+    additionalProfile?: { displayName?: string; avatar?: string; bio?: string }
+  ): Promise<{ success: boolean; message?: string; user?: User }> => {
+    if (!pendingGoogleUser) {
+      return { success: false, message: 'Data Google tidak ditemukan. Silakan login Google terlebih dahulu.' };
+    }
+
+    const cleanUsername = username.trim().toLowerCase();
+    if (!cleanUsername || cleanUsername.length < 3) {
+      return { success: false, message: 'Username minimal 3 karakter tanpa spasi.' };
+    }
+
+    // Format username check (alphanumeric and underscores)
+    if (!/^[a-zA-Z0-9_.-]+$/.test(cleanUsername)) {
+      return { success: false, message: 'Username hanya boleh berisi huruf, angka, titik, dan garis bawah.' };
+    }
+
+    if (!password || password.length < 4) {
+      return { success: false, message: 'Password minimal 4 karakter.' };
+    }
+
+    // Check if username is already taken by another account
+    const isTaken = users.some(u => (u.username || '').trim().toLowerCase() === cleanUsername);
+    if (isTaken) {
+      return { success: false, message: `Username "${cleanUsername}" sudah dipakai pengguna lain. Silakan gunakan username lain.` };
+    }
+
+    const isAdminEmail = ADMIN_EMAILS.includes(pendingGoogleUser.email.toLowerCase()) || cleanUsername === 'admin';
+    const role: 'admin' | 'reader' | 'user' = isAdminEmail ? 'admin' : 'reader';
+    const passwordHash = hashPassword(password);
+    const now = new Date().toISOString();
+    const finalDisplayName = additionalProfile?.displayName || pendingGoogleUser.displayName || cleanUsername;
+    const finalAvatar = additionalProfile?.avatar || pendingGoogleUser.photoURL;
+
+    const newUser: User = {
+      id: pendingGoogleUser.uid,
+      uid: pendingGoogleUser.uid,
+      email: pendingGoogleUser.email,
+      displayName: finalDisplayName,
+      photoURL: finalAvatar,
+      avatar: finalAvatar,
+      username: cleanUsername,
+      passwordHash: passwordHash,
+      role: role,
+      status: 'active',
+      durationType: 'unlimited',
+      tier: role === 'admin' ? 'Premium' : 'Free Tier',
+      planType: 'plan_15k_all',
+      accessType: 'all',
+      bio: additionalProfile?.bio || 'Penggemar Komik AntiTimpa',
+      createdAt: now,
+      firstLoginAt: now,
+      failedAttempts: 0,
+      stats: {
+        comicsRead: 0,
+        chaptersRead: 0,
+        daysActive: 1
+      }
+    };
+
+    // Save to Firestore
+    try {
+      await saveUserToFirestore(newUser);
+      centralSync.saveUser(newUser);
+    } catch (e) {
+      console.warn('Firestore user save notice:', e);
+    }
+
+    // Update state & LocalStorage
+    setUsers(prev => {
+      const filtered = prev.filter(u => u.id !== newUser.id && u.username.toLowerCase() !== newUser.username.toLowerCase());
+      return [newUser, ...filtered];
+    });
+
+    const gUserData: GoogleAuthUser = {
+      uid: pendingGoogleUser.uid,
+      email: pendingGoogleUser.email,
+      displayName: finalDisplayName,
+      photoURL: finalAvatar,
+      role: role === 'admin' ? 'admin' : 'reader',
+      createdAt: now
+    };
+
+    setGoogleUser(gUserData);
+    setCurrentUser(newUser);
+    safeSetItem(STORAGE_KEYS.GOOGLE_USER, gUserData);
+    safeSetItem(STORAGE_KEYS.CURRENT_USER, newUser);
+
+    setIsRegisterModalOpen(false);
+    setPendingGoogleUser(null);
+    setIsLoginModalOpen(false);
+    setIsGoogleAuthModalOpen(false);
+
+    if (newUser.role === 'admin') {
+      setIsAdminView(true);
+    }
+
+    showAdminToast('Registrasi Berhasil', `Akun @${newUser.username} berhasil didaftarkan dan terhubung!`, 'success');
+
+    addLog(
+      newUser.username,
+      'Registrasi Akun Baru (Google + App)',
+      'user_create',
+      'success',
+      `Akun ${newUser.username} (${newUser.email}) sukses dibuat dengan password terenkripsi. Role: ${newUser.role}`
+    );
+
+    return { success: true, user: newUser };
+  };
+
+  const changeUserPassword = async (
+    userId: string, 
+    currentPassword: string, 
+    newPassword: string
+  ): Promise<{ success: boolean; message: string }> => {
+    const target = users.find(u => u.id === userId) || (currentUser?.id === userId ? currentUser : null);
+    if (!target) {
+      return { success: false, message: 'Pengguna tidak ditemukan.' };
+    }
+
+    // If target has passwordHash, verify current password
+    if (target.passwordHash && !verifyPasswordMatch(target.passwordHash, currentPassword)) {
+      return { success: false, message: 'Password saat ini / password lama tidak cocok.' };
+    }
+
+    if (!newPassword || newPassword.length < 4) {
+      return { success: false, message: 'Password baru minimal 4 karakter.' };
+    }
+
+    const newHash = hashPassword(newPassword);
+    const updatedUser: User = {
+      ...target,
+      passwordHash: newHash
+    };
+
+    setUsers(prev => prev.map(u => u.id === userId ? updatedUser : u));
+    if (currentUser && currentUser.id === userId) {
+      setCurrentUser(updatedUser);
+      safeSetItem(STORAGE_KEYS.CURRENT_USER, updatedUser);
+    }
+
+    try {
+      await saveUserToFirestore(updatedUser);
+      centralSync.saveUser(updatedUser);
+    } catch (e) {
+      console.warn('Firestore password update notice:', e);
+    }
+
+    showAdminToast('Password Berhasil Diubah', 'Password baru akun Anda telah aktif dan tersimpan.', 'success');
+    addLog(
+      target.username,
+      'Ganti Password Akun Pengguna',
+      'user_update',
+      'info',
+      'Pengguna berhasil memperbarui password akun aplikasi.'
+    );
+
+    return { success: true, message: 'Password akun berhasil diganti!' };
   };
 
   const logoutGoogle = async () => {
@@ -1504,6 +1796,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       driveEmbedUrl?: string;
       driveAccountId?: string;
       driveNotes?: string;
+      externalUrl?: string;
+      externalPlatform?: string;
+      externalSources?: ExternalSource[];
+      externalNote?: string;
     }
   ) => {
     const targetComic = comics.find(c => c.id === comicId);
@@ -1517,6 +1813,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       const formatted = formatGoogleDriveEmbedUrl(chapterData.driveUrl || '');
       driveEmbed = formatted;
     } else if (st === 'pdf') {
+      generatedPages = [];
+    } else if (st === 'external') {
       generatedPages = [];
     } else {
       if (chapterData.customPages && chapterData.customPages.length > 0) {
@@ -1557,6 +1855,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       ...(driveEmbed ? { driveEmbedUrl: driveEmbed } : {}),
       ...(chapterData.driveAccountId ? { driveAccountId: chapterData.driveAccountId } : {}),
       ...(chapterData.driveNotes ? { driveNotes: chapterData.driveNotes } : {}),
+      ...(chapterData.externalUrl ? { externalUrl: chapterData.externalUrl } : {}),
+      ...(chapterData.externalPlatform ? { externalPlatform: chapterData.externalPlatform } : {}),
+      ...(chapterData.externalSources ? { externalSources: chapterData.externalSources } : {}),
+      ...(chapterData.externalNote ? { externalNote: chapterData.externalNote } : {}),
       pages: generatedPages,
       viewsCount: 0
     };
@@ -1909,33 +2211,63 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     );
   };
 
-  const updateUserProfile = (userId: string, updates: { avatar?: string; displayName?: string; bio?: string }) => {
-    setUsers(prev => prev.map(u => {
-      if (u.id === userId) {
-        const updatedUser: User = { ...u, ...updates };
-        saveUserToFirestore(updatedUser);
-        centralSync.saveUser(updatedUser);
-        if (currentUser && currentUser.id === userId) {
-          setCurrentUser(updatedUser);
-        }
-        return updatedUser;
-      }
-      return u;
-    }));
-
-    if (currentUser && currentUser.id === userId) {
-      setCurrentUser(prev => prev ? { ...prev, ...updates } : null);
+  const updateUserProfile = async (
+    userId: string, 
+    updates: { avatar?: string; displayName?: string; bio?: string; username?: string; password?: string }
+  ): Promise<{ success: boolean; message: string }> => {
+    const target = users.find(u => u.id === userId) || (currentUser?.id === userId ? currentUser : null);
+    if (!target) {
+      return { success: false, message: 'Pengguna tidak ditemukan.' };
     }
 
-    showAdminToast('Profil Diperbarui', 'Foto profil atau biodata Anda berhasil disimpan.', 'success');
+    // Check username uniqueness if changed
+    if (updates.username && updates.username.trim().toLowerCase() !== target.username.toLowerCase()) {
+      const cleanUsername = updates.username.trim().toLowerCase();
+      if (cleanUsername.length < 3) {
+        return { success: false, message: 'Username minimal 3 karakter.' };
+      }
+      if (!/^[a-zA-Z0-9_.-]+$/.test(cleanUsername)) {
+        return { success: false, message: 'Username hanya boleh huruf, angka, titik, dan garis bawah.' };
+      }
+      const isTaken = users.some(u => u.id !== userId && (u.username || '').toLowerCase() === cleanUsername);
+      if (isTaken) {
+        return { success: false, message: `Username "${cleanUsername}" sudah digunakan.` };
+      }
+    }
+
+    const modified: Partial<User> = {};
+    if (updates.avatar !== undefined) modified.avatar = updates.avatar;
+    if (updates.avatar !== undefined) modified.photoURL = updates.avatar;
+    if (updates.displayName !== undefined) modified.displayName = updates.displayName;
+    if (updates.bio !== undefined) modified.bio = updates.bio;
+    if (updates.username !== undefined) modified.username = updates.username.trim().toLowerCase();
+    if (updates.password) modified.passwordHash = hashPassword(updates.password);
+
+    const updatedUser: User = {
+      ...target,
+      ...modified
+    };
+
+    setUsers(prev => prev.map(u => u.id === userId ? updatedUser : u));
+    saveUserToFirestore(updatedUser);
+    centralSync.saveUser(updatedUser);
+
+    if (currentUser && currentUser.id === userId) {
+      setCurrentUser(updatedUser);
+      safeSetItem(STORAGE_KEYS.CURRENT_USER, updatedUser);
+    }
+
+    showAdminToast('Profil Diperbarui', 'Perubahan informasi profil Anda berhasil disimpan.', 'success');
 
     addLog(
-      currentUser?.username || 'user',
-      `Ganti Foto Profil / Bio Pengguna`,
+      updatedUser.username,
+      'Perbarui Profil Pengguna',
       'user_update',
       'info',
-      'Pengguna berhasil memperbarui foto profil avatar dan biodata'
+      'Pengguna berhasil memperbarui informasi profil akun.'
     );
+
+    return { success: true, message: 'Profil berhasil diperbarui.' };
   };
 
   const unlockUser = (id: string) => {
@@ -2420,6 +2752,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       value={{
         currentUser,
         googleUser,
+        pendingGoogleUser,
         comics,
         chapters,
         users,
@@ -2438,15 +2771,26 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         adminActiveMenu,
         isLoginModalOpen,
         loginModalRedirectNotice,
+        isGoogleAuthModalOpen,
+        isRegisterModalOpen,
+        isProfileSettingsModalOpen,
         isMobileDeviceFrame,
         login,
         logout,
         loginWithGoogle,
+        registerWithGoogle,
         logoutGoogle,
         isLoggedIn,
         getUserIdentity,
         openLoginModal,
         closeLoginModal,
+        openGoogleAuthModal,
+        closeGoogleAuthModal,
+        openRegisterModal,
+        closeRegisterModal,
+        openProfileSettingsModal,
+        closeProfileSettingsModal,
+        changeUserPassword,
         canUserReadComic,
         setActiveTab,
         selectComic,

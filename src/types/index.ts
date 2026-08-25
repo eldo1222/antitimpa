@@ -11,10 +11,14 @@ export interface UserStats {
 
 export interface User {
   id: string;
+  uid?: string;
+  email?: string;
+  displayName?: string;
+  photoURL?: string;
   username: string;
   password?: string;
   passwordHash?: string; // Stored hashed/encrypted password
-  role: 'admin' | 'reader';
+  role: 'admin' | 'reader' | 'user';
   status: UserStatus;
   createdAt: string;
   firstLoginAt?: string | null;
@@ -60,11 +64,24 @@ export interface AdminToastItem {
 }
 
 export type ComicStatus = 'ongoing' | 'completed' | 'Ongoing' | 'Completed' | 'Hiatus';
-export type ChapterSourceType = 'images' | 'pdf' | 'drive';
+export type ChapterSourceType = 'images' | 'pdf' | 'drive' | 'external';
 export type ComicContentType = 'normal' | '18plus';
 export type ComicCategoryType = 'manga' | 'manhwa' | 'manhua' | 'doujin' | 'comic' | 'webtoon';
 export type ComicType = ComicCategoryType;
 export type ContentRating = ComicContentType;
+
+export interface ExternalSource {
+  id?: string;
+  name?: string; // e.g. 'NHentai', 'Doujindesu', 'MangaDex', 'MangaPlus', 'Crunchyroll', 'Muse Asia', 'Bato.to', 'MyAnimeList', 'Official Website'
+  platform?: string; // alias for name
+  url: string;
+  type?: 'read' | 'watch' | 'raw' | 'official' | 'mirror' | 'database';
+  language?: string; // 'ID' | 'EN' | 'RAW' | 'JP' etc.
+  quality?: string; // 'HD', 'Official', 'Color', 'Uncensored'
+  isFree?: boolean;
+  notes?: string;
+  badge?: string;
+}
 
 export interface Comment {
   id: string;
@@ -122,7 +139,7 @@ export interface Chapter {
   releaseDate: string;
   isNew?: boolean;
   isLocked?: boolean;
-  sourceType?: ChapterSourceType; // 'images' | 'pdf' | 'drive'
+  sourceType?: ChapterSourceType; // 'images' | 'pdf' | 'drive' | 'external'
   pdfUrl?: string;
   pdfFileName?: string;
   driveUrl?: string;
@@ -136,6 +153,10 @@ export interface Chapter {
   viewsCount?: number;
   mangadexChapterId?: string;
   mangadexMangaId?: string;
+  externalUrl?: string;
+  externalPlatform?: string;
+  externalSources?: ExternalSource[];
+  externalNote?: string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -174,6 +195,10 @@ export interface Comic {
   sourceUrl?: string;
   sourceApi?: string;
   mangaDexId?: string;
+  externalUrl?: string;
+  externalLinks?: ExternalSource[];
+  whereToRead?: ExternalSource[];
+  hasExternalGateway?: boolean;
 }
 
 export interface Banner {

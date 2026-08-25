@@ -68,6 +68,11 @@ export const AdminComicsTab: React.FC = () => {
   const [genresText, setGenresText] = useState('');
   const [synopsis, setSynopsis] = useState('');
   
+  // External Gateway & Where to Read (MAL style)
+  const [hasExternalGateway, setHasExternalGateway] = useState(false);
+  const [externalUrl, setExternalUrl] = useState('');
+  const [whereToReadText, setWhereToReadText] = useState('');
+
   // Image Upload States
   const [coverSourceType, setCoverSourceType] = useState<'file' | 'url'>('file');
   const [coverImage, setCoverImage] = useState('');
@@ -132,6 +137,9 @@ export const AdminComicsTab: React.FC = () => {
     setBannerImage('');
     setCoverSourceType('file');
     setBannerSourceType('file');
+    setHasExternalGateway(false);
+    setExternalUrl('');
+    setWhereToReadText('');
     setShowAddModal(true);
   };
 
@@ -152,12 +160,66 @@ export const AdminComicsTab: React.FC = () => {
     setBannerImage(comic.bannerImage);
     setCoverSourceType(comic.coverImage?.startsWith('data:') ? 'file' : 'url');
     setBannerSourceType(comic.bannerImage?.startsWith('data:') ? 'file' : 'url');
+    setHasExternalGateway(comic.hasExternalGateway || !!comic.externalUrl || !!(comic.whereToRead && comic.whereToRead.length > 0));
+    setExternalUrl(comic.externalUrl || '');
+    
+    // Format whereToRead to textarea string
+    if (comic.whereToRead && comic.whereToRead.length > 0) {
+      setWhereToReadText(
+        comic.whereToRead.map(s => {
+          if (typeof s === 'string') return s;
+          return `${s.platform}: ${s.url}${s.language ? ` | ${s.language}` : ''}`;
+        }).join('\n')
+      );
+    } else {
+      setWhereToReadText('');
+    }
+
     setShowAddModal(true);
   };
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     const genresArray = genresText.split(',').map(s => s.trim()).filter(Boolean);
+
+    // Parse whereToReadText into structured items
+    const parsedSources = whereToReadText
+      .split('\n')
+      .map(line => line.trim())
+      .filter(Boolean)
+      .map((line, idx) => {
+        if (line.includes('|')) {
+          const parts = line.split('|').map(s => s.trim());
+          const [platUrl, lang] = parts;
+          const [platform, url] = platUrl.includes(':') ? [platUrl.split(':')[0].trim(), platUrl.split(':').slice(1).join(':').trim()] : ['Platform', platUrl];
+          return {
+            id: `ext-${idx + 1}`,
+            platform: platform || 'Mitra',
+            url: url || platUrl,
+            language: lang || 'All',
+            isOfficial: true
+          };
+        }
+        if (line.includes(':') && !line.startsWith('http://') && !line.startsWith('https://')) {
+          const colonIdx = line.indexOf(':');
+          const platform = line.substring(0, colonIdx).trim();
+          const url = line.substring(colonIdx + 1).trim();
+          return {
+            id: `ext-${idx + 1}`,
+            platform: platform || 'Mitra',
+            url: url,
+            language: 'All',
+            isOfficial: true
+          };
+        }
+        return {
+          id: `ext-${idx + 1}`,
+          platform: 'Penyedia',
+          url: line,
+          language: 'All',
+          isOfficial: true
+        };
+      });
 
     if (editingComic) {
       updateComic(editingComic.id, {
@@ -175,7 +237,10 @@ export const AdminComicsTab: React.FC = () => {
         genres: genresArray,
         synopsis,
         coverImage,
-        bannerImage
+        bannerImage,
+        hasExternalGateway,
+        externalUrl: externalUrl || undefined,
+        whereToRead: parsedSources.length > 0 ? parsedSources : undefined
       });
     } else {
       addComic({
@@ -194,7 +259,10 @@ export const AdminComicsTab: React.FC = () => {
         synopsis: synopsis || 'Sinopsis petualangan komik terbaru.',
         coverImage: coverImage || 'https://images.unsplash.com/photo-1578632767115-351597cf2477?w=600&auto=format&fit=crop&q=80',
         bannerImage: bannerImage || 'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=1200&auto=format&fit=crop&q=80',
-        isTrending: true
+        isTrending: true,
+        hasExternalGateway,
+        externalUrl: externalUrl || undefined,
+        whereToRead: parsedSources.length > 0 ? parsedSources : undefined
       });
     }
     setShowAddModal(false);
@@ -870,6 +938,63 @@ export const AdminComicsTab: React.FC = () => {
                     placeholder="https://images.unsplash.com/... or banner link"
                     className="w-full p-2 bg-[#101018] border border-[#27273a] rounded-xl text-white font-mono text-[11px]"
                   />
+                )}
+              </div>
+
+              {/* Where to Read / External Gateway Section (MAL Style) */}
+              <div className="p-3.5 bg-[#161622] rounded-xl border border-purple-500/30 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-purple-400 font-bold text-xs">
+                    <Globe className="w-4 h-4" />
+                    <span>Gateway "Where to Read / Watch" & Mitra (MAL Style)</span>
+                  </div>
+
+                  <label className="flex items-center gap-1.5 text-xs text-purple-300 font-semibold cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={hasExternalGateway}
+                      onChange={(e) => setHasExternalGateway(e.target.checked)}
+                      className="rounded border-[#3a3a4e] text-purple-600 focus:ring-purple-500 w-4 h-4 cursor-pointer"
+                    />
+                    <span>Aktifkan Gateway</span>
+                  </label>
+                </div>
+
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  Fitur ini memungkinkan judul anime/komik (termasuk hasil scraping Jikan/MAL tanpa chapter lokal) menyediakan tombol pop-up rujukan mitra resmi/scanlation (seperti Crunchyroll, NHentai, MangaDex, Muse Asia, dll).
+                </p>
+
+                {hasExternalGateway && (
+                  <div className="space-y-3 pt-1 border-t border-[#252538]">
+                    <div>
+                      <label className="block text-slate-300 mb-1 font-semibold text-xs">
+                        Daftar Tautan Platform Penyedia (Format: <code className="text-purple-300">Platform: URL | Bahasa</code>):
+                      </label>
+                      <textarea
+                        value={whereToReadText}
+                        onChange={(e) => setWhereToReadText(e.target.value)}
+                        placeholder="NHentai: https://nhentai.net/g/123456 | Raw&#10;MangaDex: https://mangadex.org/title/123456 | EN&#10;Crunchyroll: https://crunchyroll.com/series/123456 | Sub ID"
+                        rows={3}
+                        className="w-full p-2.5 bg-[#101018] border border-[#2c2c3e] rounded-xl text-white font-mono text-xs focus:border-purple-500"
+                      />
+                      <p className="text-[10px] text-slate-500 mt-1">
+                        Satu platform per baris. Contoh: <code className="text-slate-400">NHentai: https://nhentai.net/g/123456 | Bahasa Indonesia</code>
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="block text-slate-300 mb-1 font-semibold text-xs">
+                        Tautan Utama / Default External URL (Opsional):
+                      </label>
+                      <input
+                        type="url"
+                        value={externalUrl}
+                        onChange={(e) => setExternalUrl(e.target.value)}
+                        placeholder="https://nhentai.net/g/123456/"
+                        className="w-full p-2 bg-[#101018] border border-[#2c2c3e] rounded-xl text-white font-mono text-xs focus:border-purple-500"
+                      />
+                    </div>
+                  </div>
                 )}
               </div>
 

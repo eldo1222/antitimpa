@@ -20,6 +20,9 @@ import { ComicDetailView } from './components/frontend/ComicDetailView';
 import { ComicReaderView } from './components/frontend/ComicReaderView';
 import { AdminDashboard } from './components/admin/AdminDashboard';
 import { LoginModal } from './components/auth/LoginModal';
+import { GoogleAuthModal } from './components/auth/GoogleAuthModal';
+import { RegisterModal } from './components/auth/RegisterModal';
+import { ProfileSettingsModal } from './components/common/ProfileSettingsModal';
 import { OfflineGuard } from './components/common/OfflineGuard';
 import { Smartphone } from 'lucide-react';
 
@@ -73,7 +76,12 @@ const AdminRouteWrapper: React.FC = () => {
 
 const MainAppContent: React.FC = () => {
   const location = useLocation();
-  const { isMobileDeviceFrame, toggleMobileDeviceFrame } = useApp();
+  const { 
+    isMobileDeviceFrame, 
+    toggleMobileDeviceFrame,
+    isProfileSettingsModalOpen,
+    closeProfileSettingsModal
+  } = useApp();
 
   const isReadingRoute = location.pathname.startsWith('/read/');
   const isAdminRoute = location.pathname.startsWith('/admin');
@@ -156,8 +164,14 @@ const MainAppContent: React.FC = () => {
         </div>
       )}
 
-      {/* Global Login & Auth Modal */}
+      {/* Global Login & Auth Modals */}
       <LoginModal />
+      <GoogleAuthModal />
+      <RegisterModal />
+      <ProfileSettingsModal 
+        isOpen={isProfileSettingsModalOpen} 
+        onClose={closeProfileSettingsModal} 
+      />
     </div>
   );
 };

@@ -24,7 +24,10 @@ import {
   FileText,
   HardDrive,
   Download,
-  Loader2
+  Loader2,
+  Globe,
+  Tv,
+  Share2
 } from 'lucide-react';
 
 export const ComicReaderView: React.FC = () => {
@@ -413,7 +416,7 @@ export const ComicReaderView: React.FC = () => {
     }
 
     // Fallback: Professional Dark Comic Storyboard Skeleton
-    target.src = getProfessionalComicSkeletonUrl(currentComic?.title || 'Komik AntiTimpa', currentComic?.comicType || 'manga');
+    target.src = getProfessionalComicSkeletonUrl(activeComic?.title || 'Komik AntiTimpa', activeComic?.comicType || 'manga');
   };
 
   return (
@@ -520,8 +523,104 @@ export const ComicReaderView: React.FC = () => {
         className="flex-1 overflow-y-auto overflow-x-hidden relative flex flex-col items-center bg-[#070709] w-full"
         onClick={() => setIsHudVisible(prev => !prev)}
       >
-        {/* CASE 1: GOOGLE DRIVE READER MODE - EXTENDED FULLSCREEN HEIGHT */}
-        {sourceType === 'drive' ? (
+        {/* CASE 0: EXTERNAL GATEWAY READER MODE (NHentai, DoujinDesu, MangaPlus, etc.) */}
+        {sourceType === 'external' || !!activeChapter.externalUrl ? (
+          <div className="w-full max-w-3xl mx-auto flex-1 flex flex-col items-center justify-center p-4 sm:p-6 pt-20 pb-20 space-y-6">
+            <div className="w-full bg-[#12121c] border border-[#2b2b3d] rounded-2xl p-6 sm:p-8 shadow-2xl text-center space-y-5 animate-in zoom-in-95 duration-200">
+              
+              <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-[#ff5b14]/30 to-pink-600/30 border border-[#ff5b14]/40 text-[#ff5b14] shadow-lg">
+                <Globe className="w-8 h-8" />
+              </div>
+
+              <div className="space-y-2">
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#ff5b14]/20 border border-[#ff5b14]/40 text-[11px] font-black text-[#ff7a3d] uppercase tracking-wide">
+                  <span>Where to Read • Gateway Eksternal</span>
+                </div>
+                
+                <h2 className="text-xl sm:text-2xl font-black text-white">
+                  Chapter #{activeChapter.chapterNumber}: {activeChapter.title}
+                </h2>
+
+                <p className="text-xs sm:text-sm text-slate-300 max-w-lg mx-auto leading-relaxed">
+                  Chapter ini disediakan dan dihosting melalui platform mitra penyedia (
+                  <strong className="text-white">{activeChapter.externalPlatform || 'Penyedia Pihak Ketiga'}</strong>
+                  ). Anda akan dialihkan secara aman ke tautan baca resmi/scanlation.
+                </p>
+              </div>
+
+              {/* Target URL Preview */}
+              {activeChapter.externalUrl && (
+                <div className="p-3 bg-black/50 border border-white/10 rounded-xl max-w-md mx-auto truncate text-xs font-mono text-slate-400">
+                  {activeChapter.externalUrl}
+                </div>
+              )}
+
+              {/* Primary Action Button */}
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (activeChapter.externalUrl) {
+                      window.open(activeChapter.externalUrl, '_blank', 'noopener,noreferrer');
+                    }
+                  }}
+                  className="w-full sm:w-auto px-8 py-3.5 bg-gradient-to-r from-[#ff5b14] to-[#f97316] hover:opacity-95 text-white font-extrabold text-xs sm:text-sm rounded-xl shadow-xl shadow-[#ff5b14]/30 flex items-center justify-center gap-2 transition-all active:scale-95 cursor-pointer"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                  <span>Buka di {activeChapter.externalPlatform || 'Platform Penyedia'} (Tab Baru)</span>
+                </button>
+              </div>
+
+              {/* Reader Ad Banner */}
+              <div className="pt-4 border-t border-[#1f1f2e]">
+                <AdBanner position="reader_bottom_nav" />
+              </div>
+            </div>
+
+            {/* Seamless Chapter Switcher */}
+            <div className="w-full bg-[#141420] border border-[#252538] rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-2">
+                {prevChapter && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleNavigateChapter(prevChapter.id);
+                    }}
+                    className="px-3.5 py-2 bg-[#1e1e2c] hover:bg-[#28283a] text-slate-300 font-bold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                    <span>Ch. {prevChapter.chapterNumber}</span>
+                  </button>
+                )}
+              </div>
+
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleClose();
+                }}
+                className="px-4 py-2 bg-[#1e1e2c] hover:bg-[#28283a] text-white font-bold rounded-xl transition-colors cursor-pointer"
+              >
+                Kembali ke Detail Komik
+              </button>
+
+              <div className="flex items-center gap-2">
+                {nextChapter && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleNavigateChapter(nextChapter.id);
+                    }}
+                    className="px-4 py-2 bg-[#ff5b14] hover:bg-[#e04e0e] text-white font-extrabold rounded-xl flex items-center gap-1.5 shadow transition-colors cursor-pointer"
+                  >
+                    <span>Ch. {nextChapter.chapterNumber}</span>
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : sourceType === 'drive' ? (
           <div className="w-full max-w-5xl mx-auto flex-1 flex flex-col items-center justify-between p-0 sm:p-2 pt-12 sm:pt-14 pb-8 min-h-[calc(100vh-20px)]">
             <div className="w-full flex-1 rounded-none sm:rounded-2xl overflow-hidden border-0 sm:border border-[#232338] bg-[#11111a] shadow-2xl relative flex flex-col min-h-[92vh] sm:min-h-[90vh] h-[calc(100vh-70px)] sm:h-[calc(100vh-100px)]">
               {activeChapter.driveEmbedUrl ? (

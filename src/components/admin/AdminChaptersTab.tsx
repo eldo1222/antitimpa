@@ -31,7 +31,8 @@ import {
   ArrowLeft,
   Filter,
   Layers,
-  BookOpen
+  BookOpen,
+  Globe
 } from 'lucide-react';
 
 export const AdminChaptersTab: React.FC = () => {
@@ -93,6 +94,11 @@ export const AdminChaptersTab: React.FC = () => {
   const [driveAccountId, setDriveAccountId] = useState<string>('');
   const [driveNotes, setDriveNotes] = useState<string>('');
   const [drivePreviewTest, setDrivePreviewTest] = useState<boolean>(false);
+
+  // Option 4: External Link Gateway State (NHentai, DoujinDesu, MangaPlus, etc.)
+  const [externalUrl, setExternalUrl] = useState<string>('');
+  const [externalPlatform, setExternalPlatform] = useState<string>('NHentai');
+  const [externalNote, setExternalNote] = useState<string>('');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pdfInputRef = useRef<HTMLInputElement>(null);
@@ -174,6 +180,9 @@ export const AdminChaptersTab: React.FC = () => {
     setDriveUrl('');
     setDriveAccountId('');
     setDriveNotes('');
+    setExternalUrl('');
+    setExternalPlatform('NHentai');
+    setExternalNote('');
     setShowAddModal(true);
   };
 
@@ -231,6 +240,9 @@ export const AdminChaptersTab: React.FC = () => {
     setDriveAccountId(currentComic?.primaryDriveAccountId || driveAccounts[0]?.id || '');
     setDriveNotes('');
     setDrivePreviewTest(false);
+    setExternalUrl('');
+    setExternalPlatform('NHentai');
+    setExternalNote('');
     setShowAddModal(true);
   };
 
@@ -254,6 +266,10 @@ export const AdminChaptersTab: React.FC = () => {
         setPdfMode('url');
         setPdfWebUrl(ch.pdfUrl || '');
       }
+    } else if (ch.sourceType === 'external') {
+      setExternalUrl(ch.externalUrl || '');
+      setExternalPlatform(ch.externalPlatform || 'NHentai');
+      setExternalNote(ch.externalNote || '');
     } else {
       if (ch.pages && ch.pages.length > 0) {
         setCustomImageFiles(ch.pages.map(p => p.imageUrl));
@@ -317,6 +333,10 @@ export const AdminChaptersTab: React.FC = () => {
       } else if (sourceType === 'pdf') {
         updates.pdfUrl = pdfMode === 'file' ? pdfFileUrl : pdfWebUrl;
         updates.pdfFileName = pdfFileName || 'document.pdf';
+      } else if (sourceType === 'external') {
+        updates.externalUrl = externalUrl;
+        updates.externalPlatform = externalPlatform;
+        updates.externalNote = externalNote;
       } else {
         // Images mode
         let pagesToSave: string[] | undefined = undefined;
@@ -357,6 +377,16 @@ export const AdminChaptersTab: React.FC = () => {
           pdfUrl: finalPdfUrl,
           pdfFileName: pdfFileName || 'document.pdf',
           pageCount: Number(pageCount)
+        });
+      } else if (sourceType === 'external') {
+        addChapter(selectedComicId, {
+          chapterNumber: Number(chapterNumber),
+          title: title || `Chapter ${chapterNumber}`,
+          sourceType: 'external',
+          externalUrl,
+          externalPlatform: externalPlatform || 'NHentai',
+          externalNote,
+          pageCount: Number(pageCount) || 1
         });
       } else {
         // Images mode
@@ -788,12 +818,15 @@ export const AdminChaptersTab: React.FC = () => {
                             ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30' 
                             : ch.sourceType === 'pdf'
                             ? 'bg-red-500/20 text-red-300 border border-red-500/30'
+                            : ch.sourceType === 'external'
+                            ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
                             : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
                         }`}>
                           {ch.sourceType === 'drive' && <HardDrive className="w-3 h-3" />}
                           {ch.sourceType === 'pdf' && <FileText className="w-3 h-3" />}
+                          {ch.sourceType === 'external' && <Globe className="w-3 h-3" />}
                           {ch.sourceType === 'images' && <ImageIcon className="w-3 h-3" />}
-                          <span className="uppercase">{ch.sourceType}</span>
+                          <span className="uppercase">{ch.sourceType === 'external' ? (ch.externalPlatform || 'EXTERNAL') : ch.sourceType}</span>
                         </span>
                       </td>
                       <td className="p-3 text-slate-400 font-mono text-[11px]">
@@ -803,6 +836,10 @@ export const AdminChaptersTab: React.FC = () => {
                           </span>
                         ) : ch.sourceType === 'pdf' ? (
                           <span>PDF Dokumen</span>
+                        ) : ch.sourceType === 'external' ? (
+                          <span className="truncate block max-w-xs text-purple-300">
+                            {ch.externalUrl ? ch.externalUrl : `Gateway: ${ch.externalPlatform || 'Penyedia Eksternal'}`}
+                          </span>
                         ) : (
                           <span>{ch.pages?.length || ch.pageCount || 0} Gambar</span>
                         )}
@@ -909,59 +946,76 @@ export const AdminChaptersTab: React.FC = () => {
                 </div>
               </div>
 
-              {/* Source Type Selector (The 3 Methods) */}
+              {/* Source Type Selector (The 4 Methods) */}
               <div>
-                <label className="block text-slate-300 mb-1.5 font-bold">Pilih Format & Metode Upload:</label>
-                <div className="grid grid-cols-3 gap-2">
+                <label className="block text-slate-300 mb-1.5 font-bold">Pilih Format & Metode Chapter:</label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   {/* Method 1: Images */}
                   <button
                     type="button"
                     onClick={() => setSourceType('images')}
-                    className={`p-3 rounded-xl border text-left flex flex-col gap-1 transition-all ${
+                    className={`p-2.5 rounded-xl border text-left flex flex-col gap-1 transition-all ${
                       sourceType === 'images' 
-                        ? 'bg-[#ff5b14]/15 border-[#ff5b14] text-white' 
+                        ? 'bg-[#ff5b14]/15 border-[#ff5b14] text-white ring-1 ring-[#ff5b14]' 
                         : 'bg-[#161622] border-[#252536] text-slate-400 hover:text-slate-200'
                     }`}
                   >
                     <div className="flex items-center gap-1.5 font-bold text-xs text-[#ff7a3d]">
-                      <ImageIcon className="w-4 h-4" />
+                      <ImageIcon className="w-4 h-4 shrink-0" />
                       <span>1. File Gambar</span>
                     </div>
-                    <p className="text-[10px] text-slate-400">JPG, PNG, WebP atau Panel Komik</p>
+                    <p className="text-[10px] text-slate-400">JPG, PNG, WebP</p>
                   </button>
 
                   {/* Method 2: PDF */}
                   <button
                     type="button"
                     onClick={() => setSourceType('pdf')}
-                    className={`p-3 rounded-xl border text-left flex flex-col gap-1 transition-all ${
+                    className={`p-2.5 rounded-xl border text-left flex flex-col gap-1 transition-all ${
                       sourceType === 'pdf' 
-                        ? 'bg-red-500/15 border-red-500 text-white' 
+                        ? 'bg-red-500/15 border-red-500 text-white ring-1 ring-red-500' 
                         : 'bg-[#161622] border-[#252536] text-slate-400 hover:text-slate-200'
                     }`}
                   >
                     <div className="flex items-center gap-1.5 font-bold text-xs text-red-400">
-                      <FileText className="w-4 h-4" />
+                      <FileText className="w-4 h-4 shrink-0" />
                       <span>2. File PDF</span>
                     </div>
-                    <p className="text-[10px] text-slate-400">Dokumen PDF Komik Lengkap</p>
+                    <p className="text-[10px] text-slate-400">Dokumen Lengkap</p>
                   </button>
 
                   {/* Method 3: Google Drive */}
                   <button
                     type="button"
                     onClick={() => setSourceType('drive')}
-                    className={`p-3 rounded-xl border text-left flex flex-col gap-1 transition-all ${
+                    className={`p-2.5 rounded-xl border text-left flex flex-col gap-1 transition-all ${
                       sourceType === 'drive' 
-                        ? 'bg-blue-500/15 border-blue-500 text-white' 
+                        ? 'bg-blue-500/15 border-blue-500 text-white ring-1 ring-blue-500' 
                         : 'bg-[#161622] border-[#252536] text-slate-400 hover:text-slate-200'
                     }`}
                   >
                     <div className="flex items-center gap-1.5 font-bold text-xs text-blue-400">
-                      <HardDrive className="w-4 h-4" />
+                      <HardDrive className="w-4 h-4 shrink-0" />
                       <span>3. Google Drive</span>
                     </div>
-                    <p className="text-[10px] text-slate-400">Link Share Drive Mode Baca</p>
+                    <p className="text-[10px] text-slate-400">Link Share Reader</p>
+                  </button>
+
+                  {/* Method 4: External Gateway */}
+                  <button
+                    type="button"
+                    onClick={() => setSourceType('external')}
+                    className={`p-2.5 rounded-xl border text-left flex flex-col gap-1 transition-all ${
+                      sourceType === 'external' 
+                        ? 'bg-purple-500/20 border-purple-500 text-white ring-1 ring-purple-500' 
+                        : 'bg-[#161622] border-[#252536] text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 font-bold text-xs text-purple-400">
+                      <Globe className="w-4 h-4 shrink-0" />
+                      <span>4. Link Eksternal</span>
+                    </div>
+                    <p className="text-[10px] text-slate-400">NHentai, MangaDex, dll</p>
                   </button>
                 </div>
               </div>
@@ -1213,6 +1267,85 @@ export const AdminChaptersTab: React.FC = () => {
                           />
                         </div>
                       )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* METHOD 4 CONFIGURATION: EXTERNAL LINK GATEWAY */}
+              {sourceType === 'external' && (
+                <div className="p-3.5 bg-[#161622] rounded-xl border border-purple-500/30 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-purple-400 font-bold text-xs">
+                      <Globe className="w-4 h-4" />
+                      <span>Where to Read / Gateway Link Eksternal (NHentai, MangaDex, dll)</span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-slate-300 mb-1 font-semibold text-xs">
+                        Platform / Sumber Penyedia:
+                      </label>
+                      <select
+                        value={externalPlatform}
+                        onChange={(e) => setExternalPlatform(e.target.value)}
+                        className="w-full p-2 bg-[#101018] border border-[#27273a] rounded-xl text-white text-xs focus:border-purple-500"
+                      >
+                        <option value="NHentai">NHentai (nhentai.net)</option>
+                        <option value="DoujinDesu">DoujinDesu (doujindesu.tv)</option>
+                        <option value="MangaDex">MangaDex (mangadex.org)</option>
+                        <option value="MangaPlus">MangaPlus Shueisha</option>
+                        <option value="Bato.to">Bato.to</option>
+                        <option value="Komikcast">Komikcast</option>
+                        <option value="Crunchyroll">Crunchyroll</option>
+                        <option value="Webtoon">LINE Webtoon</option>
+                        <option value="Lainnya">Lainnya / Custom</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-slate-400 mb-1 font-semibold text-xs">
+                        Keterangan Bahasa / Badge:
+                      </label>
+                      <input
+                        type="text"
+                        value={externalNote}
+                        onChange={(e) => setExternalNote(e.target.value)}
+                        placeholder="Contoh: Bahasa Indonesia, Raw Official, Warna"
+                        className="w-full p-2 bg-[#101018] border border-[#27273a] rounded-xl text-white text-xs focus:border-purple-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-300 mb-1 font-semibold text-xs">
+                      Tautan URL Chapter Eksternal:
+                    </label>
+                    <input
+                      type="url"
+                      value={externalUrl}
+                      onChange={(e) => setExternalUrl(e.target.value)}
+                      placeholder="https://nhentai.net/g/123456/1/ atau link chapter tujuan"
+                      className="w-full p-2 bg-[#101018] border border-[#27273a] rounded-xl text-white text-xs font-mono focus:border-purple-500"
+                      required={sourceType === 'external'}
+                    />
+                    <p className="text-[10px] text-slate-400 mt-1">
+                      Pengunjung yang mengklik chapter ini akan diarahkan melalui pop-up modal gateway resmi sebelum dialihkan ke platform penyedia.
+                    </p>
+                  </div>
+
+                  {externalUrl && (
+                    <div className="pt-1 flex items-center gap-2">
+                      <a
+                        href={externalUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-3 py-1.5 bg-purple-500/20 text-purple-300 hover:text-white border border-purple-500/40 rounded-lg text-xs font-semibold flex items-center gap-1.5"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        <span>Uji Buka Tautan Eksternal</span>
+                      </a>
                     </div>
                   )}
                 </div>

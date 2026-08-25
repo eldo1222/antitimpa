@@ -25,7 +25,8 @@ import {
   Tag,
   Star,
   Zap,
-  Globe
+  Globe,
+  Lock
 } from 'lucide-react';
 
 export const Header: React.FC = () => {
@@ -36,7 +37,9 @@ export const Header: React.FC = () => {
     isAdminView, 
     setIsAdminView, 
     openLoginModal, 
+    openGoogleAuthModal,
     logout, 
+    isLoggedIn,
     activeTab,
     setActiveTab, 
     selectComic,
@@ -47,6 +50,8 @@ export const Header: React.FC = () => {
     toggleMobileDeviceFrame,
     setSelectedGenreFilter
   } = useApp();
+
+  const isUserAuthenticated = isLoggedIn();
 
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
@@ -559,8 +564,9 @@ export const Header: React.FC = () => {
               </button>
             ) : (
               <button
+                type="button"
                 onClick={() => openLoginModal()}
-                className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-[#ff5b14] to-[#f95700] text-white text-xs font-bold flex items-center gap-1.5 shadow-md shadow-[#ff5b14]/20 hover:opacity-95 transition-opacity cursor-pointer active:scale-95"
+                className="px-4 py-2 rounded-xl bg-gradient-to-r from-[#ff5b14] to-[#f95700] hover:from-[#e04e0e] hover:to-[#df4a00] text-white text-xs font-bold flex items-center gap-1.5 shadow-md shadow-[#ff5b14]/20 hover:opacity-95 transition-all cursor-pointer active:scale-95"
               >
                 <LogIn className="w-3.5 h-3.5" />
                 <span>Login</span>
@@ -621,10 +627,12 @@ export const Header: React.FC = () => {
                   <div className="text-center py-2">
                     <p className="text-xs text-slate-300 mb-2">Belum masuk akun?</p>
                     <button
+                      type="button"
                       onClick={() => { setIsDrawerOpen(false); openLoginModal(); }}
-                      className="w-full py-2 bg-[#ff5b14] text-white text-xs font-bold rounded-lg shadow cursor-pointer"
+                      className="w-full py-2.5 bg-gradient-to-r from-[#ff5b14] to-[#f95700] hover:from-[#e04e0e] hover:to-[#df4a00] text-white text-xs font-bold rounded-xl shadow cursor-pointer transition-all flex items-center justify-center gap-1.5"
                     >
-                      Masuk / Login Akun
+                      <LogIn className="w-3.5 h-3.5" />
+                      <span>Masuk / Login Akun</span>
                     </button>
                   </div>
                 )}
