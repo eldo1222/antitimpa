@@ -67,29 +67,47 @@ export const ProfileView: React.FC = () => {
   const historyComic = latestHistory ? comics.find(c => c.id === latestHistory.comicId) : null;
   const historyComicChapters = historyComic ? (chapters[historyComic.id] || []) : [];
 
+  // Real-time calculated user reading statistics
+  const uniqueComicsRead = new Set(readingHistory.map(h => h.comicId)).size;
+  const totalChaptersRead = readingHistory.length;
+  const createdAtTime = currentUser.createdAt ? new Date(currentUser.createdAt).getTime() : Date.now();
+  const daysActive = Math.max(1, Math.floor((Date.now() - createdAtTime) / (1000 * 60 * 60 * 24)) + 1);
+
   return (
-    <div className="max-w-4xl mx-auto w-full px-4 sm:px-6 lg:px-8 pb-28 space-y-6 text-slate-100 animate-in fade-in pt-3 sm:pt-4">
-      {/* 1. Header Profile & Avatar Card (Image 25.png Layout) */}
-      <div className="flex flex-col items-center text-center space-y-2 pt-2">
-        <div className="relative">
-          <img 
-            src={currentUser.avatar} 
-            alt={currentUser.username} 
-            className="w-24 h-24 rounded-full object-cover ring-4 ring-[#ff5b14]/50 shadow-xl shadow-[#ff5b14]/20" 
+    <div className="max-w-xl mx-auto px-4 py-6 space-y-6">
+      {/* 1. Header Profile Card */}
+      <div className="flex items-center gap-4 bg-[#14141d] p-4 rounded-2xl border border-[#222232] shadow-sm relative">
+        <div className="relative group">
+          <img
+            src={currentUser.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80'}
+            alt={currentUser.username}
+            className="w-16 h-16 rounded-full object-cover border-2 border-[#ff5b14] ring-2 ring-[#ff5b14]/20 shadow"
           />
-          <button 
+          <button
             onClick={() => setShowAvatarModal(true)}
-            className="absolute bottom-0 right-0 p-2 bg-[#ff5b14] text-white rounded-full shadow-lg border-2 border-[#0f0f14] hover:scale-110 active:scale-95 transition-transform cursor-pointer"
-            title="Ganti Foto Profil & Avatar"
+            className="absolute inset-0 bg-black/60 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-white text-[10px] font-bold"
+            title="Ganti Foto Profil"
           >
-            <Camera className="w-3.5 h-3.5" />
+            <Camera className="w-4 h-4" />
           </button>
         </div>
 
-        <div className="space-y-1">
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-gradient-to-r from-[#ff5b14]/20 to-purple-500/20 border border-[#ff5b14]/40 text-[#ff7a3d] text-[11px] font-extrabold uppercase tracking-wider">
-            <Crown className="w-3.5 h-3.5 text-[#ff5b14]" />
-            {currentUser.role === 'admin' ? 'SUPER ADMIN' : currentUser.tier}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-[#ff5b14]/15 text-[#ff7a3d] border border-[#ff5b14]/30">
+              {currentUser.role === 'admin' ? 'SUPER ADMIN' : currentUser.tier || 'PRO MEMBER'}
+            </span>
+            {currentUser.role === 'admin' && (
+              <button
+                onClick={() => {
+                  setIsAdminView(true);
+                  navigate('/admin');
+                }}
+                className="text-[10px] font-bold text-emerald-400 bg-emerald-950/40 px-2 py-0.5 rounded-full border border-emerald-500/30 hover:bg-emerald-900/50"
+              >
+                Panel Admin →
+              </button>
+            )}
           </div>
 
           <h2 className="font-extrabold text-xl text-white tracking-tight">
@@ -97,30 +115,30 @@ export const ProfileView: React.FC = () => {
           </h2>
 
           <p className="text-xs text-slate-400">
-            {currentUser.bio || `Bergabung sejak ${new Date(currentUser.createdAt).getFullYear()} • Komik Enthusiast`}
+            {currentUser.bio || `Bergabung sejak ${new Date(currentUser.createdAt || Date.now()).getFullYear()} • Komik Enthusiast`}
           </p>
         </div>
       </div>
 
-      {/* 2. 3-Stat Metric Boxes (Image 25.png) */}
+      {/* 2. 3-Stat Metric Boxes (Real-Time Genuine Data) */}
       <div className="grid grid-cols-3 gap-2 text-center">
         <div className="p-3 bg-[#14141d] rounded-2xl border border-[#222232] shadow">
           <span className="block font-extrabold text-lg text-white">
-            {currentUser.stats?.comicsRead || 142}
+            {uniqueComicsRead}
           </span>
           <span className="text-[10px] text-slate-400 font-medium">Komik Dibaca</span>
         </div>
 
         <div className="p-3 bg-[#14141d] rounded-2xl border border-[#222232] shadow">
           <span className="block font-extrabold text-lg text-[#ff5b14]">
-            {currentUser.stats?.chaptersRead || 1240}
+            {totalChaptersRead}
           </span>
           <span className="text-[10px] text-slate-400 font-medium">Chapters</span>
         </div>
 
         <div className="p-3 bg-[#14141d] rounded-2xl border border-[#222232] shadow">
           <span className="block font-extrabold text-lg text-white">
-            {currentUser.stats?.daysActive || 45}
+            {daysActive}
           </span>
           <span className="text-[10px] text-slate-400 font-medium">Hari Aktif</span>
         </div>
@@ -315,12 +333,12 @@ export const ProfileView: React.FC = () => {
             </p>
 
             <div className="p-3.5 bg-[#1d1d2b] rounded-xl border border-[#2a2a3e] space-y-2 text-xs">
-              <p><strong className="text-white">Admin Support:</strong> admin@komikyuk.id</p>
+              <p><strong className="text-white">Admin Support:</strong> admin@antitimpa.id</p>
               <p><strong className="text-white">WhatsApp Admin:</strong> <span className="font-mono text-emerald-400 font-bold">089514441988</span></p>
               <p><strong className="text-white">Jam Operasional:</strong> 24/7 Fast Response</p>
               
               <a
-                href="https://wa.me/6289514441988?text=Halo%20Admin%20KomikYuk,%20saya%20ingin%20konsultasi%20akun%20pembaca%20atau%20perpanjang%20durasi."
+                href="https://wa.me/6289514441988?text=Halo%20Admin%20AntiTimpa,%20saya%20ingin%20konsultasi%20akun%20pembaca%20atau%20perpanjang%20durasi."
                 target="_blank"
                 rel="noreferrer"
                 className="mt-2 w-full py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-lg flex items-center justify-center gap-1.5 transition-colors"

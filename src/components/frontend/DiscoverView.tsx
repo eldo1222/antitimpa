@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useApp } from '../../context/AppContext';
 import { PRESET_GENRES, comicHasGenre } from '../../data/genres';
 import { 
@@ -13,17 +13,39 @@ import {
   Layers, 
   ChevronRight,
   TrendingUp,
-  Tag
+  Tag,
+  Lock
 } from 'lucide-react';
 
 export const DiscoverView: React.FC = () => {
   const navigate = useNavigate();
-  const { comics, selectComic, chapters, selectedGenreFilter, setSelectedGenreFilter } = useApp();
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedGenre, setSelectedGenre] = useState(selectedGenreFilter || 'All');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { 
+    comics, 
+    selectComic, 
+    chapters, 
+    selectedGenreFilter, 
+    setSelectedGenreFilter,
+    currentUser,
+    googleUser,
+    openLoginModal
+  } = useApp();
+
+  const isUserAuthenticated = !!currentUser || !!googleUser;
+
+  const urlQuery = searchParams.get('q') || '';
+  const urlType = searchParams.get('type') || 'all';
+  const urlGenre = searchParams.get('genre') || selectedGenreFilter || 'All';
+
+  const [searchQuery, setSearchQuery] = useState(urlQuery);
+  const [selectedGenre, setSelectedGenre] = useState(urlGenre);
   const [selectedStatus, setSelectedStatus] = useState<'all' | 'ongoing' | 'completed'>('all');
   const [sortBy, setSortBy] = useState<'rating' | 'popular' | 'latest'>('popular');
   const [showAllGenres, setShowAllGenres] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState<'all' | 'manga' | 'manhwa' | 'manhua' | 'doujin' | '18plus'>(
+    urlType as any
+  );
+  const [adultOnlyFilter, setAdultOnlyFilter] = useState(urlType === '18plus');
 
   // Helper to determine the actual category of a comic
   const getComicCategory = (comic: any): 'manga' | 'manhwa' | 'manhua' | 'doujin' | '18plus' => {
@@ -39,18 +61,26 @@ export const DiscoverView: React.FC = () => {
     return 'manga';
   };
 
-  // Sync when selectedGenreFilter changes globally (e.g. clicking a genre tag on comic detail)
-  React.useEffect(() => {
-    if (selectedGenreFilter) {
-      setSelectedGenre(selectedGenreFilter);
+  // Sync with searchParams changes (e.g. from navbar header or sidebar)
+  useEffect(() => {
+    const q = searchParams.get('q');
+    if (q !== null) setSearchQuery(q);
+
+    const t = searchParams.get('type');
+    if (t) {
+      setSelectedCategory(t as any);
+      if (t === '18plus') setAdultOnlyFilter(true);
     }
-  }, [selectedGenreFilter]);
+
+    const g = searchParams.get('genre');
+    if (g) {
+      setSelectedGenre(g);
+      setSelectedGenreFilter(g);
+    }
+  }, [searchParams, setSelectedGenreFilter]);
 
   const allGenres = ['All', ...PRESET_GENRES];
   const displayedGenres = showAllGenres ? allGenres : allGenres.slice(0, 18);
-
-  const [selectedCategory, setSelectedCategory] = useState<'all' | 'manga' | 'manhwa' | 'manhua' | 'doujin' | '18plus'>('all');
-  const [adultOnlyFilter, setAdultOnlyFilter] = useState(false);
 
   const filtered = comics
     .filter(c => {
@@ -58,8 +88,8 @@ export const DiscoverView: React.FC = () => {
       if (c.isVisibleOnHome === false || c.showOnHome === false) return false;
 
       const matchSearch = c.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                          c.storyWriter.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          c.artist.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                          (c.storyWriter && c.storyWriter.toLowerCase().includes(searchQuery.toLowerCase())) ||
+                          (c.artist && c.artist.toLowerCase().includes(searchQuery.toLowerCase())) ||
                           c.genres.some(g => g.toLowerCase().includes(searchQuery.toLowerCase()));
       const matchGenre = comicHasGenre(c, selectedGenre);
       const matchStatus = selectedStatus === 'all' || c.status === selectedStatus;
@@ -79,9 +109,9 @@ export const DiscoverView: React.FC = () => {
       return matchSearch && matchGenre && matchStatus && matchCat && matchAdult;
     })
     .sort((a, b) => {
-      if (sortBy === 'rating') return b.rating - a.rating;
-      if (sortBy === 'popular') return b.totalReaders - a.totalReaders;
-      return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+      if (sortBy === 'rating') return (b.rating || 0) - (a.rating || 0);
+      if (sortBy === 'popular') return (b.totalReaders || 0) - (a.totalReaders || 0);
+      return new Date(b.updatedAt || b.createdAt || 0).getTime() - new Date(a.updatedAt || a.createdAt || 0).getTime();
     });
 
   const handleGenreClick = (g: string) => {
@@ -123,7 +153,7 @@ export const DiscoverView: React.FC = () => {
           </label>
           <button
             onClick={() => setShowAllGenres(!showAllGenres)}
-            className="text-[11px] text-[#ff5b14] hover:underline font-bold"
+            className="text-[11px] text-[#ff5b14] hover:underline font-bold cursor-pointer"
           >
             {showAllGenres ? 'Sembunyikan Sebagian' : `Lihat Semua (${allGenres.length - 1})`}
           </button>
@@ -243,16 +273,36 @@ export const DiscoverView: React.FC = () => {
                 }}
                 className="p-3 bg-[#13131c] hover:bg-[#191924] border border-[#222232] rounded-2xl flex gap-3 cursor-pointer group transition-all"
               >
-                <img 
-                  src={comic.coverImage} 
-                  alt={comic.title} 
-                  referrerPolicy="no-referrer"
-                  loading="lazy"
-                  onError={(e) => {
-                    (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1544717305-2782549b5136?q=80&w=800&auto=format&fit=crop';
-                  }}
-                  className="w-20 h-28 rounded-xl object-cover ring-1 ring-white/10 shrink-0 group-hover:scale-102 transition-transform" 
-                />
+                <div className="relative w-20 h-28 rounded-xl overflow-hidden ring-1 ring-white/10 shrink-0 group-hover:scale-102 transition-transform bg-[#181824]">
+                  <img 
+                    src={comic.coverImage} 
+                    alt={comic.title} 
+                    referrerPolicy="no-referrer"
+                    loading="lazy"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1544717305-2782549b5136?q=80&w=800&auto=format&fit=crop';
+                    }}
+                    style={{ filter: !isUserAuthenticated ? 'blur(10px)' : 'none' }}
+                    className="w-full h-full object-cover transition-all" 
+                  />
+
+                  {/* Anti-Timpa Sensor Blur Overlay for Unauthenticated Visitors */}
+                  {!isUserAuthenticated && (
+                    <div 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openLoginModal('Daftar / Masuk dengan Akun Google untuk membuka sensor gambar komik.');
+                      }}
+                      className="absolute inset-0 flex flex-col items-center justify-center bg-black/40 backdrop-blur-[2px] p-1 text-center cursor-pointer"
+                      title="Klik untuk buka sensor"
+                    >
+                      <Lock className="w-4 h-4 text-white drop-shadow-md" />
+                      <span className="text-[8px] font-black text-white uppercase tracking-tighter mt-0.5 bg-red-600/90 px-1 py-0.2 rounded shadow">
+                        18+ Sensor
+                      </span>
+                    </div>
+                  )}
+                </div>
                 <div className="flex flex-col justify-between flex-1 min-w-0">
                   <div>
                     <div className="flex items-center gap-1.5 mb-1">

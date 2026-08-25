@@ -1,4 +1,9 @@
 import { Comic, Chapter, ComicContentType, ComicCategoryType } from '../types';
+import { getProfessionalComicSkeletonUrl } from '../components/common/ComicSkeletonBox';
+
+export function getFallbackCover(title: string = 'Komik AntiTimpa', type: string = 'manga'): string {
+  return getProfessionalComicSkeletonUrl(title, type);
+}
 
 export interface ScrapedComicResult {
   title: string;
@@ -260,50 +265,78 @@ function filterPresetFallback(query: string, categoryFilter: string): ScrapedCom
   });
 }
 
-function getFallbackCover(title: string): string {
-  const hash = title.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-  const fallbacks = [
-    'https://images.unsplash.com/photo-1578632767115-351597cf2477?w=600&auto=format&fit=crop&q=80',
-    'https://images.unsplash.com/photo-1534447677768-be436bb09401?w=600&auto=format&fit=crop&q=80',
-    'https://images.unsplash.com/photo-1563089145-599997674d42?w=600&auto=format&fit=crop&q=80',
-    'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=600&auto=format&fit=crop&q=80',
-    'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=600&auto=format&fit=crop&q=80',
-    'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=600&auto=format&fit=crop&q=80',
-    'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=600&auto=format&fit=crop&q=80'
-  ];
-  return fallbacks[hash % fallbacks.length];
-}
-
-// 3. Live Fetch from Jikan (MyAnimeList Manga API) with Server Proxy and Resilience
+// 3. Live Fetch from Jikan (MyAnimeList Manga API) with Server Proxy and Multi-Tier Resilience
 export async function searchJikanManga(query: string = '', limit: number = 16): Promise<ScrapedComicResult[]> {
   try {
     const qStr = query.trim();
-    // Try internal server proxy first or Netlify Function to prevent CORS / Rate limits
     let json: any = null;
+
+    // Attempt 1: Internal server proxy (handles Jikan + Kitsu fallback + Cache)
     try {
       const proxyRes = await fetch(`/api/jikan/search?q=${encodeURIComponent(qStr)}&limit=${limit}`);
       if (proxyRes.ok) {
         json = await proxyRes.json();
       }
     } catch (e) {
-      // Direct fallback
+      // Direct fallback below
     }
 
-    if (!json) {
-      // Direct Jikan fallback
-      const directUrl = qStr 
-        ? `https://api.jikan.moe/v4/manga?q=${encodeURIComponent(qStr)}&limit=${limit}&sfw=false`
-        : `https://api.jikan.moe/v4/top/manga?limit=${limit}&filter=bypopularity`;
-      const directRes = await fetch(directUrl);
-      if (directRes.ok) {
-        json = await directRes.json();
+    // Attempt 2: Direct Kitsu API (if server proxy unreachable)
+    if (!json || !json.data || !Array.isArray(json.data) || json.data.length === 0) {
+      try {
+        const kitsuUrl = qStr 
+          ? `https://kitsu.io/api/edge/manga?filter[text]=${encodeURIComponent(qStr)}&page[limit]=${limit}`
+          : `https://kitsu.io/api/edge/manga?sort=-userCount&page[limit]=${limit}`;
+        const kRes = await fetch(kitsuUrl);
+        if (kRes.ok) {
+          const kJson = await kRes.json();
+          if (kJson && Array.isArray(kJson.data) && kJson.data.length > 0) {
+            return kJson.data.map((item: any) => {
+              const attr = item.attributes || {};
+              const titles = attr.titles || {};
+              const title = attr.canonicalTitle || titles.en || titles.en_jp || Object.values(titles)[0] || 'Manga Title';
+              const poster = attr.posterImage || {};
+              const imgUrl = poster.large || poster.original || poster.medium || 'https://images.unsplash.com/photo-1578632767115-351597cf2477?w=600&auto=format&fit=crop&q=80';
+              const subtype = (attr.subtype || attr.mangaType || 'manga').toLowerCase();
+              let comicType: ComicCategoryType = 'manga';
+              if (subtype === 'manhwa') comicType = 'manhwa';
+              else if (subtype === 'manhua') comicType = 'manhua';
+              else if (subtype === 'doujin') comicType = 'doujin';
+
+              const isAdult = attr.ageRating === 'R18' || /18\+|hentai|ecchi|erotica/i.test(title);
+
+              return {
+                title,
+                slug: title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
+                coverImage: imgUrl,
+                bannerImage: imgUrl,
+                synopsis: (attr.synopsis || attr.description || 'Sinopsis komik terverifikasi dari database MyAnimeList / Kitsu.').slice(0, 450),
+                genres: [comicType === 'manhwa' ? 'Manhwa' : 'Action', 'Drama', 'Fantasy'],
+                status: attr.status === 'finished' ? 'completed' : 'ongoing',
+                storyWriter: 'Official Author',
+                artist: 'Official Artist',
+                rating: attr.averageRating ? Math.min(5, Math.max(1, (parseFloat(attr.averageRating) / 20))) : 4.8,
+                totalChapters: attr.chapterCount || 45,
+                contentType: isAdult ? '18plus' : 'normal',
+                comicType,
+                isFree: !isAdult,
+                isVisibleOnHome: true,
+                isPublished: true,
+                sourceApi: 'MyAnimeList / Kitsu API',
+                sourceUrl: `https://kitsu.io/manga/${item.id}`
+              };
+            });
+          }
+        }
+      } catch (kErr) {
+        console.warn('Direct Kitsu fallback failed:', kErr);
       }
     }
 
     if (!json || !json.data || !Array.isArray(json.data)) return [];
 
     return json.data.map((item: any) => {
-      const genres = (item.genres || []).map((g: any) => g.name);
+      const genres = (item.genres || []).map((g: any) => typeof g === 'string' ? g : g.name);
       const isAdult = (item.explicit_genres && item.explicit_genres.length > 0) || 
                       genres.some((g: string) => /hentai|ecchi|erotica|adult/i.test(g));
       
@@ -437,16 +470,42 @@ export async function getKomikcastDetail(slug: string): Promise<ScrapedComicResu
   }
 }
 
-// 6. Fetch Chapter Pages from Komikcast
-export async function getKomikcastChapterPages(chapterSlug: string): Promise<{ id: string; pageNumber: number; imageUrl: string }[]> {
+// 7. Live Scraper from Doujindesu API (18+ Doujinshi, Netorare, Hentai, Manhwa 18+)
+export async function searchDoujindesu(
+  query: string = '',
+  categoryFilter: 'all' | '18plus' | 'doujin' | 'netorare' | 'milf' | 'harem' = 'all'
+): Promise<ScrapedComicResult[]> {
   try {
-    const res = await fetch(`/api/komikcast/chapter?slug=${encodeURIComponent(chapterSlug)}`);
-    if (!res.ok) return [];
-    const json = await res.json();
-    return json.pages || [];
+    const qStr = query.trim();
+    // Try internal server proxy first
+    try {
+      const params = new URLSearchParams();
+      if (qStr) params.append('q', qStr);
+      if (categoryFilter !== 'all') params.append('category', categoryFilter);
+      const res = await fetch(`/api/doujindesu/search?${params.toString()}`);
+      if (res.ok) {
+        const json = await res.json();
+        if (json.data && Array.isArray(json.data) && json.data.length > 0) {
+          return json.data;
+        }
+      }
+    } catch {
+      // fallback
+    }
+
+    // Filter curated Doujindesu feeds
+    return DOUJINDESU_SCRAPE_FEEDS.filter(item => {
+      const itemText = `${item.title} ${(item.genres || []).join(' ')} ${item.storyWriter}`.toLowerCase();
+      if (qStr && !itemText.includes(qStr.toLowerCase())) return false;
+      if (categoryFilter === 'netorare' && !itemText.includes('netorare') && !itemText.includes('ntr')) return false;
+      if (categoryFilter === 'milf' && !itemText.includes('milf')) return false;
+      if (categoryFilter === 'harem' && !itemText.includes('harem')) return false;
+      if (categoryFilter === 'doujin' && item.comicType !== 'doujin') return false;
+      return true;
+    });
   } catch (err) {
-    console.warn('Failed to load Komikcast pages:', err);
-    return [];
+    console.warn('Doujindesu fetch failed:', err);
+    return DOUJINDESU_SCRAPE_FEEDS;
   }
 }
 
@@ -725,8 +784,28 @@ export const PRESET_IMPORT_FEEDS: ScrapedComicResult[] = [
   },
 
   // ==========================================
-  // 4. 18+ DEWASA (VIP BERBAYAR)
+  // 4. 18+ DEWASA & DOUJINDESU VIP
   // ==========================================
+  {
+    title: 'Kanojo no Ane Incha Neet ni Netorareta Ore',
+    slug: 'kanojo-no-ane-incha-neet-ni-netorareta-ore',
+    coverImage: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=600&auto=format&fit=crop&q=80',
+    bannerImage: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=1200&auto=format&fit=crop&q=80',
+    synopsis: 'Kisah romansa terlarang dan penuh gairah ketika aku yang terjebak dalam hubungan rumit justru tergoda dan terlibat skandal panas tak terduga dengan kakak perempuan pacarku yang seorang NEET pemalu di dalam rumah.',
+    genres: ['Netorare', 'NTR', 'Milf', 'Romance 18+', 'Doujinshi', 'Drama Dewasa', 'Full Color'],
+    status: 'completed',
+    storyWriter: 'Doujindesu Studio',
+    artist: 'Doujindesu Creator',
+    rating: 4.98,
+    totalChapters: 3,
+    contentType: '18plus',
+    comicType: 'doujin',
+    isFree: false,
+    isVisibleOnHome: true,
+    isPublished: true,
+    sourceApi: 'Doujindesu API',
+    sourceUrl: 'https://doujin.desu.xxx/manga/kanojo-no-ane-incha-neet-ni-netorareta-ore'
+  },
   {
     title: 'Secret Class: Private Education',
     slug: 'secret-class-private-education',
@@ -889,43 +968,11 @@ export const PRESET_IMPORT_FEEDS: ScrapedComicResult[] = [
   }
 ];
 
-export const PRESET_SCRAPE_FEEDS = PRESET_IMPORT_FEEDS;
+export const DOUJINDESU_SCRAPE_FEEDS: ScrapedComicResult[] = PRESET_IMPORT_FEEDS.filter(
+  item => item.contentType === '18plus' || item.comicType === 'doujin' || item.sourceApi.includes('Doujindesu')
+);
 
-// High quality realistic comic panel and reading page sets (Vertical Webtoon and Manga Panels)
-const MANGA_ACTION_PAGES = [
-  'https://images.unsplash.com/photo-1578632767115-351597cf2477?w=1000&auto=format&fit=crop&q=85',
-  'https://images.unsplash.com/photo-1569705460033-cfaa4bf9f822?w=1000&auto=format&fit=crop&q=85',
-  'https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?w=1000&auto=format&fit=crop&q=85',
-  'https://images.unsplash.com/photo-1618336753974-aae8e04506aa?w=1000&auto=format&fit=crop&q=85',
-  'https://images.unsplash.com/photo-1579783902614-a3fb3927b675?w=1000&auto=format&fit=crop&q=85',
-  'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=1000&auto=format&fit=crop&q=85',
-  'https://images.unsplash.com/photo-1534447677768-be436bb09401?w=1000&auto=format&fit=crop&q=85',
-  'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=1000&auto=format&fit=crop&q=85'
-];
-
-const MANHWA_WEBTOON_PAGES = [
-  'https://images.unsplash.com/photo-1563089145-599997674d42?w=1000&auto=format&fit=crop&q=85',
-  'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=1000&auto=format&fit=crop&q=85',
-  'https://images.unsplash.com/photo-1578632767115-351597cf2477?w=1000&auto=format&fit=crop&q=85',
-  'https://images.unsplash.com/photo-1534447677768-be436bb09401?w=1000&auto=format&fit=crop&q=85',
-  'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=1000&auto=format&fit=crop&q=85',
-  'https://images.unsplash.com/photo-1579783902614-a3fb3927b675?w=1000&auto=format&fit=crop&q=85',
-  'https://images.unsplash.com/photo-1569705460033-cfaa4bf9f822?w=1000&auto=format&fit=crop&q=85',
-  'https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?w=1000&auto=format&fit=crop&q=85'
-];
-
-const ADULT_VIP_PAGES = [
-  'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=1000&auto=format&fit=crop&q=85',
-  'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=1000&auto=format&fit=crop&q=85',
-  'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=1000&auto=format&fit=crop&q=85',
-  'https://images.unsplash.com/photo-1529626455594-4ff0802cfb7e?w=1000&auto=format&fit=crop&q=85',
-  'https://images.unsplash.com/photo-1508214751196-bcfd4ca60f91?w=1000&auto=format&fit=crop&q=85',
-  'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=1000&auto=format&fit=crop&q=85',
-  'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=1000&auto=format&fit=crop&q=85',
-  'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=1000&auto=format&fit=crop&q=85'
-];
-
-export const SAMPLE_PAGE_SETS = MANGA_ACTION_PAGES;
+export const PRESET_SCRAPE_FEEDS = DOUJINDESU_SCRAPE_FEEDS;
 
 // Fetch real chapters from MangaDex API
 export async function fetchMangaDexChapters(mangaId: string): Promise<any[]> {
@@ -942,7 +989,7 @@ export async function fetchMangaDexChapters(mangaId: string): Promise<any[]> {
     console.warn('Failed to fetch real MangaDex chapters via Express proxy:', err);
   }
 
-  // Attempt 2: Netlify Function Proxy (for deployed Netlify static/serverless hosting)
+  // Attempt 2: Netlify Function Proxy
   try {
     const netlifyRes = await fetch(`/.netlify/functions/mangadex-proxy?action=chapters&mangaId=${mangaId}`);
     if (netlifyRes.ok) {
@@ -971,7 +1018,6 @@ export async function fetchMangaDexChapters(mangaId: string): Promise<any[]> {
           if (!existing) {
             chapterMap.set(chNumStr, item);
           } else {
-            // Prioritize Indonesian ('id') > English ('en') > others
             if (itemLang === 'id') {
               chapterMap.set(chNumStr, item);
             } else if (itemLang === 'en' && existing.attributes?.translatedLanguage !== 'id') {
@@ -1008,40 +1054,6 @@ export async function fetchMangaDexChapters(mangaId: string): Promise<any[]> {
   return [];
 }
 
-// Realistic chapter titles generator for serialized stories
-const SERIALIZED_CHAPTER_SUBTITLES = [
-  'Prologue & Kebangkitan',
-  'Ancaman Monster Pertama',
-  'Pertemuan Takdir',
-  'Latihan Tempur Tingkat Tinggi',
-  'Membuka Gerbang Dimensi',
-  'Serangan Pasukan Bayangan',
-  'Pertarungan di Reruntuhan',
-  'Kekuatan yang Tersegel',
-  'Titik Balik Pertempuran',
-  'Duel Antar Ranker Terkuat',
-  'Kembalinya Sang Pahlawan',
-  'Dimensi Kegelapan',
-  'Senjata Legendaris',
-  'Krisis Kota Metropolitan',
-  'Perang Puncak Dimulai',
-  'Pembangkitan Jiwa Naga',
-  'Aliansi Terlarang',
-  'Kebenaran Abad Kuno',
-  'Serangan Balasan Terakhir',
-  'Puncak Kejayaan Sang Legenda',
-  'Misi Penyelamatan Rahasia',
-  'Jebakan di Lembah Kematian',
-  'Kebangkitan Bentuk Sejati',
-  'Pertarungan di Langit Terbuka',
-  'Penebusan Dosa Masa Lalu',
-  'Kemenangan yang Dinanti',
-  'Awal Era Kekuatan Baru',
-  'Rahasia Sang Penguasa Takhta',
-  'Pertarungan Dua Garis Keturunan',
-  'Menuju Dunia Selanjutnya'
-];
-
 // Helper to determine if a comic is a Doujinshi / Short 18+ Oneshot (1 - 3 chapters only)
 export function isDoujinshiOrOneshot(scraped: ScrapedComicResult): boolean {
   const genresStr = (scraped.genres || []).join(' ').toLowerCase();
@@ -1059,7 +1071,7 @@ export function isDoujinshiOrOneshot(scraped: ScrapedComicResult): boolean {
   return false;
 }
 
-// Helper to convert scraped item into complete Comic & initial Chapters ready for database injection
+// Helper to convert scraped item into genuine Comic & initial Chapters (if available from source)
 export function buildComicFromScrape(
   scraped: ScrapedComicResult,
   customSettings?: {
@@ -1081,32 +1093,23 @@ export function buildComicFromScrape(
   const comicType = customSettings?.comicType ?? scraped.comicType ?? 'manga';
 
   const isShortDoujin = isDoujinshiOrOneshot(scraped);
-
-  // Determine genuine chapter count based on comic type:
-  // - Doujinshi / Oneshot: 1 to 3 chapters
-  // - Manhwa / Manga / Manhua: Exact chapters count from source API (no artificial 15 chapter floor)
-  let totalChaptersCount: number;
-  if (isShortDoujin) {
-    totalChaptersCount = Math.min(Math.max(scraped.totalChapters || 1, 1), 3);
-  } else {
-    totalChaptersCount = Math.max(1, scraped.totalChapters || 1);
-  }
+  const rawChapters = scraped.chapters || [];
 
   const comic: Comic = {
     id: comicId,
     title: scraped.title,
     slug: scraped.slug || scraped.title.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-    coverImage: scraped.coverImage || getFallbackCover(scraped.title),
-    bannerImage: scraped.bannerImage || scraped.coverImage || getFallbackCover(scraped.title),
+    coverImage: scraped.coverImage || getFallbackCover(scraped.title, comicType),
+    bannerImage: scraped.bannerImage || scraped.coverImage || getFallbackCover(scraped.title, comicType),
     synopsis: scraped.synopsis,
     genres: scraped.genres,
     status: isShortDoujin ? 'completed' : scraped.status,
     storyWriter: scraped.storyWriter || 'Official Writer',
     artist: scraped.artist || 'Official Artist',
     rating: scraped.rating || 4.85,
-    ratingCount: Math.floor(Math.random() * 9500) + 2100,
-    totalChapters: totalChaptersCount,
-    totalReaders: Math.floor(Math.random() * 35000) + 8000,
+    ratingCount: 0,
+    totalChapters: rawChapters.length,
+    totalReaders: 0,
     createdAt: now,
     updatedAt: now,
     isTrending: true,
@@ -1124,57 +1127,29 @@ export function buildComicFromScrape(
     primaryDriveAccountId: customSettings?.primaryDriveAccountId
   };
 
-  // Choose appropriate authentic panel sets based on category
-  const activePanels = contentType === '18plus' 
-    ? ADULT_VIP_PAGES 
-    : (comicType === 'manhwa' ? MANHWA_WEBTOON_PAGES : MANGA_ACTION_PAGES);
-
-  const chapters: Chapter[] = [];
-
-  for (let chNum = 1; chNum <= totalChaptersCount; chNum++) {
+  // If real chapters are provided from source (Komikcast, Doujindesu, etc.)
+  const chapters: Chapter[] = rawChapters.map((ch, idx) => {
+    const chNum = ch.chapterNumber || (idx + 1);
     const chId = `ch-${comicId}-${chNum}`;
-    const pageCount = isShortDoujin ? 16 : 8;
-    const pages = Array.from({ length: pageCount }, (_, pIdx) => {
-      const pageIdx = (chNum * 2 + pIdx) % activePanels.length;
-      return {
-        id: `p-${chId}-${pIdx + 1}`,
-        pageNumber: pIdx + 1,
-        imageUrl: activePanels[pageIdx],
-        caption: `${scraped.title} - Chapter ${chNum} Hal. ${pIdx + 1}`
-      };
-    });
-
-    let chapterTitle: string;
-    if (isShortDoujin) {
-      if (totalChaptersCount === 1) {
-        chapterTitle = `Chapter 1: Full Story [Oneshot]`;
-      } else {
-        chapterTitle = `Chapter ${chNum}: Edisi Lengkap Part ${chNum}`;
-      }
-    } else {
-      const subtitle = SERIALIZED_CHAPTER_SUBTITLES[(chNum - 1) % SERIALIZED_CHAPTER_SUBTITLES.length];
-      chapterTitle = `Chapter ${chNum}: ${subtitle}`;
-    }
-
-    chapters.push({
+    return {
       id: chId,
       comicId: comicId,
       chapterNumber: chNum,
-      title: chapterTitle,
-      releaseDate: now,
-      isNew: chNum >= totalChaptersCount - 2,
+      title: ch.title || `Chapter ${chNum}`,
+      releaseDate: ch.releaseDate || now,
+      isNew: idx >= rawChapters.length - 2,
       isLocked: !isFree,
-      sourceType: 'images',
-      pages,
-      viewsCount: Math.floor(Math.random() * 6000) + 400,
-      mangadexMangaId: scraped.mangaDexId
-    });
-  }
+      sourceType: 'images' as const,
+      pages: [],
+      viewsCount: 0,
+      driveUrl: ch.driveUrl
+    };
+  });
 
   return { comic, chapters };
 }
 
-// Asynchronous Builder that pulls real MangaDex chapters when mangaDexId exists
+// Asynchronous Builder that pulls real MangaDex chapters or auto-resolves Jikan/MAL manga titles
 export async function buildComicFromScrapeAsync(
   scraped: ScrapedComicResult,
   customSettings?: {
@@ -1186,13 +1161,32 @@ export async function buildComicFromScrapeAsync(
     primaryDriveAccountId?: string;
   }
 ): Promise<{ comic: Comic; chapters: Chapter[] }> {
-  // If no MangaDex ID, fallback immediately to synchronous builder
-  if (!scraped.mangaDexId) {
+  let targetMangaDexId = scraped.mangaDexId;
+
+  // Auto-resolver for Jikan / MyAnimeList & external items:
+  // If no MangaDex ID yet, search MangaDex in background to automatically attach real chapters!
+  if (!targetMangaDexId && scraped.title) {
+    try {
+      const cleanTitle = scraped.title.replace(/:\s*.*$/, '').replace(/\(.*?\)/g, '').trim();
+      const mdSearchRes = await fetch(`/api/mangadex/search?title=${encodeURIComponent(cleanTitle)}&limit=1`);
+      if (mdSearchRes.ok) {
+        const mdSearchData = await mdSearchRes.json();
+        if (mdSearchData && mdSearchData.data && mdSearchData.data.length > 0) {
+          targetMangaDexId = mdSearchData.data[0].id;
+        }
+      }
+    } catch (e) {
+      // Continue to fallback
+    }
+  }
+
+  // If no MangaDex ID found after auto-resolution, fallback to synchronous builder with genuine data
+  if (!targetMangaDexId) {
     return buildComicFromScrape(scraped, customSettings);
   }
 
   try {
-    const rawMangaDexChapters = await fetchMangaDexChapters(scraped.mangaDexId);
+    const rawMangaDexChapters = await fetchMangaDexChapters(targetMangaDexId);
     if (rawMangaDexChapters && rawMangaDexChapters.length > 0) {
       const comicId = `comic-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
       const now = new Date().toISOString().split('T')[0];
@@ -1203,11 +1197,6 @@ export async function buildComicFromScrapeAsync(
       const isPublished = customSettings?.isPublished ?? scraped.isPublished ?? true;
       const comicType = customSettings?.comicType ?? scraped.comicType ?? 'manga';
 
-      const activePanels = contentType === '18plus' 
-        ? ADULT_VIP_PAGES 
-        : (comicType === 'manhwa' ? MANHWA_WEBTOON_PAGES : MANGA_ACTION_PAGES);
-
-      // Use all real chapters fetched from MangaDex
       const isShort = isDoujinshiOrOneshot(scraped);
       const selectedMdChapters = isShort 
         ? rawMangaDexChapters.slice(0, 3) 
@@ -1217,17 +1206,17 @@ export async function buildComicFromScrapeAsync(
         id: comicId,
         title: scraped.title,
         slug: scraped.slug || scraped.title.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-        coverImage: scraped.coverImage || getFallbackCover(scraped.title),
-        bannerImage: scraped.bannerImage || scraped.coverImage || getFallbackCover(scraped.title),
+        coverImage: scraped.coverImage || getFallbackCover(scraped.title, comicType),
+        bannerImage: scraped.bannerImage || scraped.coverImage || getFallbackCover(scraped.title, comicType),
         synopsis: scraped.synopsis,
         genres: scraped.genres,
         status: isShort ? 'completed' : scraped.status,
         storyWriter: scraped.storyWriter || 'Official Writer',
         artist: scraped.artist || 'Official Artist',
         rating: scraped.rating || 4.85,
-        ratingCount: Math.floor(Math.random() * 9500) + 2100,
+        ratingCount: 0,
         totalChapters: selectedMdChapters.length,
-        totalReaders: Math.floor(Math.random() * 35000) + 8000,
+        totalReaders: 0,
         createdAt: now,
         updatedAt: now,
         isTrending: true,
@@ -1241,25 +1230,13 @@ export async function buildComicFromScrapeAsync(
         isPublished,
         sourceApi: 'MangaDex Live API',
         sourceUrl: scraped.sourceUrl,
-        mangaDexId: scraped.mangaDexId,
+        mangaDexId: targetMangaDexId,
         primaryDriveAccountId: customSettings?.primaryDriveAccountId
       };
 
       const chapters: Chapter[] = selectedMdChapters.map((mdCh, idx) => {
         const chNum = mdCh.chapterNumber || (idx + 1);
         const chId = `ch-${comicId}-${chNum}`;
-        const pageCount = mdCh.pagesCount || 8;
-        
-        // Initial fallbacks while live MangaDex images load on reader open
-        const initialPages = Array.from({ length: Math.min(pageCount, 12) }, (_, pIdx) => {
-          const pageIdx = (idx * 2 + pIdx) % activePanels.length;
-          return {
-            id: `p-${chId}-${pIdx + 1}`,
-            pageNumber: pIdx + 1,
-            imageUrl: activePanels[pageIdx],
-            caption: `${scraped.title} - Chapter ${chNum} Hal. ${pIdx + 1}`
-          };
-        });
 
         return {
           id: chId,
@@ -1270,10 +1247,10 @@ export async function buildComicFromScrapeAsync(
           isNew: idx >= selectedMdChapters.length - 2,
           isLocked: !isFree,
           sourceType: 'images' as const,
-          pages: initialPages,
-          viewsCount: Math.floor(Math.random() * 6000) + 400,
+          pages: [],
+          viewsCount: 0,
           mangadexChapterId: mdCh.id,
-          mangadexMangaId: scraped.mangaDexId
+          mangadexMangaId: targetMangaDexId
         };
       });
 

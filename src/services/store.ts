@@ -1,11 +1,12 @@
 import { Comic, UserAccount, CommentItem, GoogleUser, Chapter } from '../types';
 import { INITIAL_COMICS, INITIAL_USERS, INITIAL_COMMENTS } from './initialData';
+import { centralSync } from './centralSyncService';
 
-const COMICS_STORAGE_KEY = 'komikyuk_comics_v1';
-const USERS_STORAGE_KEY = 'komikyuk_users_v1';
-const COMMENTS_STORAGE_KEY = 'komikyuk_comments_v1';
-const CURRENT_READER_KEY = 'komikyuk_current_reader_v1';
-const CURRENT_GOOGLE_USER_KEY = 'komikyuk_current_google_user_v1';
+const COMICS_STORAGE_KEY = 'antitimpa_comics_v1';
+const USERS_STORAGE_KEY = 'antitimpa_users_v1';
+const COMMENTS_STORAGE_KEY = 'antitimpa_comments_v1';
+const CURRENT_READER_KEY = 'antitimpa_current_reader_v1';
+const CURRENT_GOOGLE_USER_KEY = 'antitimpa_current_google_user_v1';
 
 export class Store {
   private static instance: Store;
@@ -18,6 +19,23 @@ export class Store {
 
   private constructor() {
     this.loadFromStorage();
+    // Connect to central sync service
+    if (typeof window !== 'undefined') {
+      centralSync.startSync((remoteData) => {
+        if (remoteData.comics && Array.isArray(remoteData.comics)) {
+          this.comics = remoteData.comics;
+          this.saveComics();
+        }
+        if (remoteData.users && Array.isArray(remoteData.users)) {
+          this.users = remoteData.users as any;
+          this.saveUsers();
+        }
+        if (remoteData.comments && Array.isArray(remoteData.comments)) {
+          this.comments = remoteData.comments as any;
+          this.saveComments();
+        }
+      });
+    }
   }
 
   public static getInstance(): Store {
@@ -27,21 +45,30 @@ export class Store {
     return Store.instance;
   }
 
+  private getItemWithLegacy(key: string): string | null {
+    let item = localStorage.getItem(key);
+    if (!item && key.startsWith('antitimpa_')) {
+      const legacyKey = key.replace('antitimpa_', 'komikyuk_');
+      item = localStorage.getItem(legacyKey);
+    }
+    return item;
+  }
+
   private loadFromStorage() {
     try {
-      const storedComics = localStorage.getItem(COMICS_STORAGE_KEY);
+      const storedComics = this.getItemWithLegacy(COMICS_STORAGE_KEY);
       this.comics = storedComics ? JSON.parse(storedComics) : INITIAL_COMICS;
 
-      const storedUsers = localStorage.getItem(USERS_STORAGE_KEY);
+      const storedUsers = this.getItemWithLegacy(USERS_STORAGE_KEY);
       this.users = storedUsers ? JSON.parse(storedUsers) : INITIAL_USERS;
 
-      const storedComments = localStorage.getItem(COMMENTS_STORAGE_KEY);
+      const storedComments = this.getItemWithLegacy(COMMENTS_STORAGE_KEY);
       this.comments = storedComments ? JSON.parse(storedComments) : INITIAL_COMMENTS;
 
-      const storedReader = localStorage.getItem(CURRENT_READER_KEY);
+      const storedReader = this.getItemWithLegacy(CURRENT_READER_KEY);
       this.currentReader = storedReader ? JSON.parse(storedReader) : null;
 
-      const storedGoogle = localStorage.getItem(CURRENT_GOOGLE_USER_KEY);
+      const storedGoogle = this.getItemWithLegacy(CURRENT_GOOGLE_USER_KEY);
       this.currentGoogleUser = storedGoogle ? JSON.parse(storedGoogle) : null;
     } catch (e) {
       console.error('Failed to load local storage data, using fallback:', e);
@@ -85,8 +112,9 @@ export class Store {
   }
 
   public addComic(comic: Comic): void {
-    this.comics.unshift(comic);
+    this.comics = [comic, ...this.comics.filter(c => c.id !== comic.id && c.title.toLowerCase() !== comic.title.toLowerCase())];
     this.saveComics();
+    centralSync.saveComic(comic);
   }
 
   public updateComic(comic: Comic): void {
@@ -94,19 +122,23 @@ export class Store {
     if (idx !== -1) {
       this.comics[idx] = comic;
       this.saveComics();
+      centralSync.saveComic(comic);
     }
   }
 
   public deleteComic(id: string): void {
     this.comics = this.comics.filter((c) => c.id !== id);
     this.saveComics();
+    centralSync.deleteComic(id);
   }
 
   public toggleComicHomeVisibility(id: string): boolean {
     const comic = this.comics.find((c) => c.id === id);
     if (comic) {
       comic.showOnHome = !comic.showOnHome;
+      comic.isVisibleOnHome = comic.showOnHome;
       this.saveComics();
+      centralSync.saveComic(comic);
       return comic.showOnHome;
     }
     return false;
@@ -136,10 +168,16 @@ export class Store {
         sourceType: 'images',
         viewsCount: Math.floor(1000 + Math.random() * 5000),
         pages: [
-          'https://images.unsplash.com/photo-1578632767115-351597cf2477?q=80&w=900&auto=format&fit=crop',
-          'https://images.unsplash.com/photo-1534447677768-be436bb09401?q=80&w=900&auto=format&fit=crop',
-          'https://images.unsplash.com/photo-1579783902614-a3fb3927b675?q=80&w=900&auto=format&fit=crop',
-          'https://images.unsplash.com/photo-1563089145-599997674d42?q=80&w=900&auto=format&fit=crop'
+          {
+            id: `p-1`,
+            pageNumber: 1,
+            imageUrl: 'https://images.unsplash.com/photo-1578632767115-351597cf2477?q=80&w=900&auto=format&fit=crop'
+          },
+          {
+            id: `p-2`,
+            pageNumber: 2,
+            imageUrl: 'https://images.unsplash.com/photo-1534447677768-be436bb09401?q=80&w=900&auto=format&fit=crop'
+          }
         ]
       });
     }
@@ -154,6 +192,7 @@ export class Store {
   public addUser(user: UserAccount): void {
     this.users.unshift(user);
     this.saveUsers();
+    centralSync.saveUser(user as any);
   }
 
   public updateUser(user: UserAccount): void {
@@ -161,12 +200,14 @@ export class Store {
     if (idx !== -1) {
       this.users[idx] = user;
       this.saveUsers();
+      centralSync.saveUser(user as any);
     }
   }
 
   public deleteUser(id: string): void {
     this.users = this.users.filter((u) => u.id !== id);
     this.saveUsers();
+    centralSync.deleteUser(id);
   }
 
   public loginReader(username: string, password?: string): { success: boolean; message: string; user?: UserAccount } {
@@ -200,17 +241,14 @@ export class Store {
     return this.currentReader;
   }
 
-  // Check if current user has access to a specific 18+ comic
   public canAccess18PlusComic(comicId: string): { allowed: boolean; reason?: string } {
     const comic = this.getComicById(comicId);
     if (!comic) return { allowed: false, reason: 'Komik tidak ditemukan' };
 
-    // Komik normal bebas dibaca semua orang tanpa login
-    if (comic.contentRating === 'normal') {
+    if (comic.contentRating === 'normal' || comic.contentType === 'normal' || comic.isFree === true) {
       return { allowed: true };
     }
 
-    // Komik 18+ wajib login
     if (!this.currentReader) {
       return { 
         allowed: false, 
@@ -218,84 +256,63 @@ export class Store {
       };
     }
 
-    // Admin selalu punya akses
-    if (this.currentReader.role === 'admin' || this.currentReader.planType === 'plan_15k_all') {
+    const reader = this.currentReader;
+
+    if (reader.role === 'admin') {
       return { allowed: true };
     }
 
-    // Paket 5k (Single Comic / Selected)
-    if (this.currentReader.planType === 'plan_5k_single') {
-      const isAllowed = this.currentReader.allowedComicIds?.includes(comic.id);
-      if (isAllowed) {
-        return { allowed: true };
-      } else {
-        return { 
-          allowed: false, 
-          reason: 'Akun Anda menggunakan Paket 5K (1 Komik Pilihan). Komik 18+ ini tidak termasuk dalam daftar komik pilihan Anda. Hubungi admin untuk upgrade atau ganti komik.' 
-        };
-      }
+    if (reader.planType === 'plan_15k_all' || reader.accessType === 'all') {
+      return { allowed: true };
     }
 
-    return { allowed: false, reason: 'Paket langganan Anda tidak aktif.' };
-  }
+    if (reader.planType === 'plan_5k_single' || reader.accessType === 'specific') {
+      const allowed = reader.allowedComicIds || [];
+      if (allowed.includes(comic.id)) {
+        return { allowed: true };
+      }
+      return { 
+        allowed: false, 
+        reason: `Akun Anda adalah Paket Rp 5.000 (${allowed.length} Judul). Komik ini tidak termasuk dalam daftar judul yang diizinkan.` 
+      };
+    }
 
-  // --- GOOGLE USER (For Comments) ---
-  public loginGoogle(customUser?: Partial<GoogleUser>): GoogleUser {
-    const mockUser: GoogleUser = {
-      uid: customUser?.uid || 'google-' + Math.random().toString(36).substring(2, 9),
-      displayName: customUser?.displayName || 'Pembaca Komik #' + Math.floor(1000 + Math.random() * 9000),
-      email: customUser?.email || 'user' + Math.floor(Math.random() * 100) + '@gmail.com',
-      photoURL: customUser?.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${Date.now()}`
-    };
-    this.currentGoogleUser = mockUser;
-    localStorage.setItem(CURRENT_GOOGLE_USER_KEY, JSON.stringify(mockUser));
-    return mockUser;
-  }
-
-  public logoutGoogle(): void {
-    this.currentGoogleUser = null;
-    localStorage.removeItem(CURRENT_GOOGLE_USER_KEY);
-  }
-
-  public getCurrentGoogleUser(): GoogleUser | null {
-    return this.currentGoogleUser;
+    return { allowed: true };
   }
 
   // --- COMMENT METHODS ---
-  public getCommentsByComic(comicId: string): CommentItem[] {
+  public getComments(comicId: string): CommentItem[] {
     return this.comments.filter((c) => c.comicId === comicId);
   }
 
-  public addComment(comment: Omit<CommentItem, 'id' | 'createdAt' | 'likes' | 'likedBy'>): CommentItem {
-    const newComment: CommentItem = {
-      ...comment,
-      id: 'comment-' + Date.now(),
-      likes: 0,
-      likedBy: [],
-      createdAt: new Date().toISOString(),
-    };
-    this.comments.unshift(newComment);
+  public addComment(comment: CommentItem): void {
+    this.comments.unshift(comment);
     this.saveComments();
-    return newComment;
+    centralSync.saveComment(comment as any);
   }
 
-  public toggleLikeComment(commentId: string, userId: string): void {
+  public toggleCommentLike(commentId: string): void {
     const comment = this.comments.find((c) => c.id === commentId);
     if (comment) {
-      if (comment.likedBy.includes(userId)) {
-        comment.likedBy = comment.likedBy.filter((id) => id !== userId);
-        comment.likes = Math.max(0, comment.likes - 1);
-      } else {
-        comment.likedBy.push(userId);
-        comment.likes += 1;
-      }
+      comment.isLiked = !comment.isLiked;
+      comment.likes = comment.isLiked ? comment.likes + 1 : Math.max(0, comment.likes - 1);
       this.saveComments();
+      centralSync.saveComment(comment as any);
     }
   }
 
-  public deleteComment(commentId: string): void {
-    this.comments = this.comments.filter((c) => c.id !== commentId);
-    this.saveComments();
+  // --- GOOGLE AUTH ---
+  public setGoogleUser(user: GoogleUser | null): void {
+    this.currentGoogleUser = user;
+    if (user) {
+      localStorage.setItem(CURRENT_GOOGLE_USER_KEY, JSON.stringify(user));
+    } else {
+      localStorage.removeItem(CURRENT_GOOGLE_USER_KEY);
+    }
+  }
+
+  public getGoogleUser(): GoogleUser | null {
+    return this.currentGoogleUser;
   }
 }
 

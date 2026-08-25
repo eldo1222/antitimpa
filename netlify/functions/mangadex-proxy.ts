@@ -14,7 +14,7 @@ export async function handler(event: any) {
   try {
     if (action === 'chapters' && mangaId) {
       const directUrl = `https://api.mangadex.org/manga/${mangaId}/feed?limit=100&order[chapter]=asc&includes[]=scanlation_group`;
-      const res = await fetch(directUrl, { headers: { 'User-Agent': 'KomikYuk-Client/1.0' } });
+      const res = await fetch(directUrl, { headers: { 'User-Agent': 'AntiTimpa-Client/2.0' } });
       if (!res.ok) {
         return { statusCode: res.status, headers, body: JSON.stringify({ chapters: [] }) };
       }

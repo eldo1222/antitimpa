@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { 
   Comic, 
   Chapter, 
@@ -18,7 +18,8 @@ import {
   AdItem,
   AdSettings,
   AdSlotPosition,
-  AdType
+  AdType,
+  AdminToastItem
 } from '../types';
 import { 
   initialComics, 
@@ -57,6 +58,17 @@ import {
   saveActivityLogToFirestore,
   saveSettingsToFirestore
 } from '../services/firestoreService';
+import { centralSync } from '../services/centralSyncService';
+import { auth, db, googleProvider } from '../lib/firebase';
+import { signInWithPopup, signOut } from 'firebase/auth';
+import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+
+export const ADMIN_EMAILS = [
+  'admin@email.com',
+  'eldorivaldo8@gmail.com',
+  'admin@antitimpa.id',
+  'eldoa@gmail.com'
+];
 
 export interface ComicAccessCheck {
   allowed: boolean;
@@ -70,6 +82,8 @@ export interface GoogleAuthUser {
   displayName: string;
   email: string;
   photoURL: string;
+  role?: 'admin' | 'reader' | 'user';
+  createdAt?: any;
 }
 
 interface AppContextType {
@@ -100,11 +114,13 @@ interface AppContextType {
   loginModalRedirectNotice?: string;
   isMobileDeviceFrame: boolean;
   
-  // Actions - Auth & Google
-  login: (username: string, password: string) => Promise<{ success: boolean; message: string; remainingAttempts?: number }> | { success: boolean; message: string; remainingAttempts?: number };
+  // Actions - Auth
+  login: (username: string, password: string) => Promise<{ success: boolean; message: string; remainingAttempts?: number; user?: User }> | { success: boolean; message: string; remainingAttempts?: number; user?: User };
   logout: () => void;
-  loginWithGoogle: (customData?: { displayName?: string; email?: string; photoURL?: string }) => void;
-  logoutGoogle: () => void;
+  loginWithGoogle: (manualGoogleData?: { email: string; displayName: string; photoURL?: string }) => Promise<{ success: boolean; user?: any; message?: string; errorType?: string }>;
+  logoutGoogle: () => Promise<void> | void;
+  isLoggedIn: () => boolean;
+  getUserIdentity: () => { name: string; avatar: string; uid: string; role?: string; email?: string } | null;
   openLoginModal: (notice?: string) => void;
   closeLoginModal: () => void;
 
@@ -204,25 +220,30 @@ interface AppContextType {
   isBookmarked: (comicId: string) => boolean;
   saveReadingProgress: (comicId: string, chapterId: string, chapterNumber: number, pageNumber: number, totalPages: number) => void;
   getReadingProgress: (comicId: string) => ReadingHistory | undefined;
+
+  // Actions - Admin Notifications Toast
+  adminToasts: AdminToastItem[];
+  showAdminToast: (title: string, message?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
+  removeAdminToast: (id: string) => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 const STORAGE_KEYS = {
-  CURRENT_USER: 'komikyuk_current_user_v1',
-  GOOGLE_USER: 'komikyuk_google_user_v1',
-  COMICS: 'komikyuk_comics_v1',
-  CHAPTERS: 'komikyuk_chapters_v1',
-  USERS: 'komikyuk_users_v1',
-  BANNERS: 'komikyuk_banners_v1',
-  ADS: 'komikyuk_ads_v1',
-  AD_SETTINGS: 'komikyuk_ad_settings_v1',
+  CURRENT_USER: 'antitimpa_current_user_v1',
+  GOOGLE_USER: 'antitimpa_google_user_v1',
+  COMICS: 'antitimpa_comics_v1',
+  CHAPTERS: 'antitimpa_chapters_v1',
+  USERS: 'antitimpa_users_v1',
+  BANNERS: 'antitimpa_banners_v1',
+  ADS: 'antitimpa_ads_v1',
+  AD_SETTINGS: 'antitimpa_ad_settings_v1',
   DRIVE_ACCOUNTS: 'antitimpa_drive_accounts_v1',
-  LOGS: 'komikyuk_logs_v1',
-  SETTINGS: 'komikyuk_settings_v1',
-  BOOKMARKS: 'komikyuk_bookmarks_v1',
-  HISTORY: 'komikyuk_history_v1',
-  COMMENTS: 'komikyuk_comments_v1',
+  LOGS: 'antitimpa_logs_v1',
+  SETTINGS: 'antitimpa_settings_v1',
+  BOOKMARKS: 'antitimpa_bookmarks_v1',
+  HISTORY: 'antitimpa_history_v1',
+  COMMENTS: 'antitimpa_comments_v1',
 };
 
 const getDurationMs = (durationType: DurationType): number => {
@@ -237,7 +258,12 @@ const getDurationMs = (durationType: DurationType): number => {
 
 function safeParseJson<T>(key: string, fallback: T): T {
   try {
-    const saved = localStorage.getItem(key);
+    let saved = localStorage.getItem(key);
+    // Backward compatibility with legacy komikyuk keys
+    if (!saved && key.startsWith('antitimpa_')) {
+      const legacyKey = key.replace('antitimpa_', 'komikyuk_');
+      saved = localStorage.getItem(legacyKey);
+    }
     if (!saved) return fallback;
     return JSON.parse(saved);
   } catch (e) {
@@ -338,43 +364,138 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [selectedComicId, setSelectedComicId] = useState<string | null>(null);
   const [readingChapterId, setReadingChapterId] = useState<string | null>(null);
   const [isAdminView, setIsAdminViewState] = useState<boolean>(false);
-  const [adminActiveMenu, setAdminActiveMenu] = useState<'dashboard' | 'comics' | 'scraper' | 'chapters' | 'drives' | 'readers' | 'banners' | 'ads' | 'genres' | 'database' | 'logs' | 'settings'>('dashboard');
+
+  // Persistent Admin Active Menu (Preserves tab on reload / scraper injection)
+  type AdminMenuOption = 'dashboard' | 'comics' | 'scraper' | 'chapters' | 'drives' | 'readers' | 'banners' | 'ads' | 'genres' | 'database' | 'logs' | 'settings';
+  const [adminActiveMenu, setAdminActiveMenuState] = useState<AdminMenuOption>(() => {
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      const tabParam = urlParams.get('tab') as AdminMenuOption;
+      const validTabs: AdminMenuOption[] = ['dashboard', 'comics', 'scraper', 'chapters', 'drives', 'readers', 'banners', 'ads', 'genres', 'database', 'logs', 'settings'];
+      if (tabParam && validTabs.includes(tabParam)) {
+        return tabParam;
+      }
+      const saved = localStorage.getItem('antitimpa_admin_tab') as AdminMenuOption;
+      if (saved && validTabs.includes(saved)) {
+        return saved;
+      }
+    }
+    return 'dashboard';
+  });
+
+  const setAdminActiveMenu = useCallback((menu: AdminMenuOption) => {
+    setAdminActiveMenuState(menu);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('antitimpa_admin_tab', menu);
+      try {
+        const url = new URL(window.location.href);
+        if (url.pathname.startsWith('/admin')) {
+          url.searchParams.set('tab', menu);
+          window.history.replaceState({}, '', url.toString());
+        }
+      } catch (e) {
+        // ignore
+      }
+    }
+  }, []);
+
   const [isLoginModalOpen, setIsLoginModalOpen] = useState<boolean>(false);
   const [loginModalRedirectNotice, setLoginModalRedirectNotice] = useState<string | undefined>(undefined);
   const [isMobileDeviceFrame, setIsMobileDeviceFrame] = useState<boolean>(false);
 
-  // Firestore Realtime Synchronization
+  // Admin Toast Notifications State
+  const [adminToasts, setAdminToasts] = useState<AdminToastItem[]>([]);
+
+  const showAdminToast = useCallback((title: string, message?: string, type: 'success' | 'info' | 'warning' | 'error' = 'success') => {
+    const id = `toast-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+    const newToast: AdminToastItem = {
+      id,
+      title,
+      message,
+      type,
+      timestamp: Date.now()
+    };
+    setAdminToasts(prev => [...prev.slice(-3), newToast]);
+
+    setTimeout(() => {
+      setAdminToasts(prev => prev.filter(t => t.id !== id));
+    }, 4000);
+  }, []);
+
+  const removeAdminToast = useCallback((id: string) => {
+    setAdminToasts(prev => prev.filter(t => t.id !== id));
+  }, []);
+
+  // Central Server & Firestore Realtime Synchronization (Cross-Browser & Multi-Device)
   useEffect(() => {
-    // 1. Seed or verify Firestore
+    // 1. Subscribe to Central Server Database (Instant Realtime SSE Stream & Fast REST Sync)
+    const unsubCentral = centralSync.startSync((remoteData) => {
+      if (remoteData.comics && Array.isArray(remoteData.comics)) {
+        setComics(deduplicateById(remoteData.comics));
+      }
+      if (remoteData.chapters) {
+        setChapters(remoteData.chapters);
+      }
+      if (remoteData.users && Array.isArray(remoteData.users)) {
+        setUsers(remoteData.users);
+        setCurrentUser(prev => {
+          if (!prev) return null;
+          const match = remoteData.users?.find(u => u.id === prev.id || (u.role === 'admin' && prev.role === 'admin'));
+          if (!match) return null;
+          return match;
+        });
+      }
+      if (remoteData.banners && Array.isArray(remoteData.banners)) {
+        setBanners(remoteData.banners);
+      }
+      if (remoteData.driveAccounts && Array.isArray(remoteData.driveAccounts)) {
+        setDriveAccounts(remoteData.driveAccounts);
+      }
+      if (remoteData.activityLogs && Array.isArray(remoteData.activityLogs)) {
+        setActivityLogs(remoteData.activityLogs);
+      }
+      if (remoteData.systemSettings) {
+        setSystemSettings(remoteData.systemSettings);
+      }
+      if (remoteData.comments && Array.isArray(remoteData.comments)) {
+        setComments(remoteData.comments);
+      }
+      if (remoteData.ads && Array.isArray(remoteData.ads)) {
+        setAds(remoteData.ads);
+      }
+      if (remoteData.adSettings) {
+        setAdSettings(remoteData.adSettings);
+      }
+    });
+
+    // 2. Initialize Firestore as Cloud Backup
     initializeFirestoreDatabase();
 
-    // 2. Subscribe to realtime updates
-    const unsubscribe = subscribeToFirestore({
+    // 3. Subscribe to Firestore updates
+    const unsubscribeFirestore = subscribeToFirestore({
       onComics: (remoteComics) => {
-        if (Array.isArray(remoteComics)) {
+        if (Array.isArray(remoteComics) && remoteComics.length > 0) {
           setComics(deduplicateById(remoteComics));
         }
       },
       onChapters: (remoteChapters) => {
-        if (remoteChapters) {
+        if (remoteChapters && Object.keys(remoteChapters).length > 0) {
           setChapters(remoteChapters);
         }
       },
       onUsers: (remoteUsers) => {
         if (Array.isArray(remoteUsers) && remoteUsers.length > 0) {
           setUsers(remoteUsers);
-          // Also update currentUser if currently logged in
           setCurrentUser(prev => {
             if (!prev) return null;
             const match = remoteUsers.find(u => u.id === prev.id || (u.role === 'admin' && prev.role === 'admin'));
-            if (!match) return null; // user deleted
-            // If password changed remotely for admin, keep updated credentials
+            if (!match) return null;
             return match;
           });
         }
       },
       onDrives: (remoteDrives) => {
-        if (Array.isArray(remoteDrives)) {
+        if (Array.isArray(remoteDrives) && remoteDrives.length > 0) {
           setDriveAccounts(remoteDrives);
         }
       },
@@ -394,7 +515,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         }
       },
       onAds: (remoteAds) => {
-        if (Array.isArray(remoteAds)) {
+        if (Array.isArray(remoteAds) && remoteAds.length > 0) {
           setAds(remoteAds);
         }
       },
@@ -406,7 +527,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     });
 
     return () => {
-      unsubscribe();
+      unsubCentral();
+      unsubscribeFirestore();
     };
   }, []);
 
@@ -498,6 +620,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
     setActivityLogs(prev => [newLog, ...prev]);
     saveActivityLogToFirestore(newLog);
+    centralSync.logActivity(newLog);
   };
 
   // Access check for reader tiers & plans
@@ -649,8 +772,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       setUsers(prev => prev.map(u => u.id === targetUser.id ? updatedAdmin : u));
       saveUserToFirestore(updatedAdmin);
       setCurrentUser(updatedAdmin);
+      setIsAdminView(true);
       setIsLoginModalOpen(false);
       setLoginModalRedirectNotice(undefined);
+
+      showAdminToast('Login Super Admin Berhasil', `Selamat datang kembali, Super Admin ${targetUser.username}!`, 'success');
 
       addLog(
         targetUser.username,
@@ -659,7 +785,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         'success',
         'Sesi Super Admin diaktifkan'
       );
-      return { success: true, message: `Selamat datang kembali, Super Admin ${targetUser.username}!` };
+      return { success: true, message: `Selamat datang kembali, Super Admin ${targetUser.username}!`, user: updatedAdmin };
     }
 
     // 1. Check if user is locked
@@ -745,6 +871,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setIsLoginModalOpen(false);
     setLoginModalRedirectNotice(undefined);
 
+    showAdminToast('Login Berhasil', `Selamat datang kembali, ${targetUser.username}!`, 'success');
+
     addLog(
       targetUser.username,
       'Login Berhasil (User)',
@@ -753,7 +881,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       isFirstTimeLogin ? `Login perdana. Masa aktif ${targetUser.durationType} mulai dihitung.` : 'Sesi aktif diperbarui'
     );
 
-    return { success: true, message: `Selamat datang kembali, ${targetUser.username}!` };
+    return { success: true, message: `Selamat datang kembali, ${targetUser.username}!`, user: updatedUser };
   };
 
   const logout = () => {
@@ -766,20 +894,182 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   };
 
-  const loginWithGoogle = (customData?: { displayName?: string; email?: string; photoURL?: string }) => {
-    const defaultUser: GoogleAuthUser = {
-      uid: `google-${Date.now()}`,
-      displayName: customData?.displayName || 'Google Reader',
-      email: customData?.email || 'reader@gmail.com',
-      photoURL: customData?.photoURL || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120&auto=format&fit=crop&q=80'
-    };
-    setGoogleUser(defaultUser);
-    addLog(defaultUser.displayName, 'Login Google Masuk', 'login_success', 'success', `Pengguna Google (${defaultUser.email}) login untuk berkomentar`);
+  const loginWithGoogle = async (manualGoogleData?: { email: string; displayName: string; photoURL?: string }): Promise<{ success: boolean; user?: any; message?: string; errorType?: string }> => {
+    try {
+      let userUid: string;
+      let userEmail: string;
+      let userName: string;
+      let userAvatar: string;
+
+      if (manualGoogleData && manualGoogleData.email) {
+        // Direct registration with user's real personal Google account
+        userEmail = manualGoogleData.email.trim().toLowerCase();
+        userName = manualGoogleData.displayName?.trim() || userEmail.split('@')[0];
+        userUid = `google-${userEmail.replace(/[^a-zA-Z0-9]/g, '_')}`;
+        userAvatar = manualGoogleData.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(userName)}&background=ff5b14&color=fff&bold=true`;
+      } else {
+        // Real browser Firebase Google Auth Popup
+        const result = await signInWithPopup(auth, googleProvider);
+        const user = result.user;
+        userUid = user.uid;
+        userEmail = (user.email || '').toLowerCase();
+        userName = user.displayName || userEmail.split('@')[0] || 'User Google';
+        userAvatar = user.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(userName)}&background=ff5b14&color=fff&bold=true`;
+      }
+
+      const isAdminEmail = ADMIN_EMAILS.includes(userEmail);
+      const defaultRole: 'admin' | 'reader' = isAdminEmail ? 'admin' : 'reader';
+
+      let googleUserData: GoogleAuthUser = {
+        uid: userUid,
+        email: userEmail,
+        displayName: userName,
+        photoURL: userAvatar,
+        role: defaultRole,
+        createdAt: new Date().toISOString()
+      };
+
+      // Safely sync to Firestore (gracefully handle quota exceeded or offline)
+      try {
+        const userRef = doc(db, 'users', userUid);
+        const userSnap = await getDoc(userRef);
+
+        if (userSnap.exists()) {
+          const existing = userSnap.data();
+          googleUserData = {
+            uid: userUid,
+            email: userEmail,
+            displayName: existing.displayName || userName,
+            photoURL: existing.photoURL || userAvatar,
+            role: existing.role || defaultRole,
+            createdAt: existing.createdAt || new Date().toISOString()
+          };
+
+          if (isAdminEmail && existing.role !== 'admin') {
+            googleUserData.role = 'admin';
+            try {
+              await setDoc(userRef, { role: 'admin' }, { merge: true });
+            } catch (_) {}
+          }
+        } else {
+          await setDoc(userRef, {
+            ...googleUserData,
+            createdAt: serverTimestamp()
+          });
+        }
+      } catch (firestoreErr) {
+        console.warn('Firestore Quota/Network Notice (Falling back to local persistent storage):', firestoreErr);
+      }
+
+      setGoogleUser(googleUserData);
+      safeSetItem(STORAGE_KEYS.GOOGLE_USER, googleUserData);
+
+      // Create / link user session in app state
+      const currentAppUser: User = {
+        id: userUid,
+        username: googleUserData.displayName,
+        role: googleUserData.role === 'admin' ? 'admin' : 'reader',
+        status: 'active',
+        durationType: 'unlimited',
+        tier: googleUserData.role === 'admin' ? 'Premium' : 'Free Tier',
+        planType: 'plan_15k_all',
+        accessType: 'all',
+        avatar: googleUserData.photoURL,
+        failedAttempts: 0,
+        createdAt: new Date().toISOString(),
+        firstLoginAt: new Date().toISOString(),
+        stats: {
+          comicsRead: 0,
+          chaptersRead: 0,
+          daysActive: 1
+        }
+      };
+
+      setCurrentUser(currentAppUser);
+      setUsers(prev => {
+        const filtered = prev.filter(u => u.id !== userUid && u.username.toLowerCase() !== googleUserData.displayName.toLowerCase());
+        return [...filtered, currentAppUser];
+      });
+
+      // Save to local storage and try firestore
+      try {
+        saveUserToFirestore(currentAppUser);
+      } catch (_) {}
+
+      addLog(
+        googleUserData.displayName, 
+        'Login Akun Google Berhasil', 
+        'login_success', 
+        'success', 
+        `Akun Google (${userEmail}) berhasil login. Role: ${googleUserData.role}`
+      );
+
+      setIsLoginModalOpen(false);
+      setLoginModalRedirectNotice(undefined);
+
+      if (googleUserData.role === 'admin') {
+        setIsAdminView(true);
+      }
+
+      return { success: true, user: googleUserData };
+    } catch (error: any) {
+      console.error('Google Sign-In Error:', error);
+
+      if (error?.code === 'auth/unauthorized-domain' || error?.message?.includes('unauthorized-domain')) {
+        return { 
+          success: false, 
+          errorType: 'unauthorized_domain',
+          message: 'Domain pengujian lokal belum didaftarkan di Firebase Console. Anda dapat memasukkan Email & Nama Google Anda langsung di bawah untuk mendaftarkan akun ke Firestore.' 
+        };
+      }
+
+      const errMsg = error?.code === 'auth/popup-closed-by-user' || error?.message?.includes('popup-closed-by-user')
+        ? 'Login Google dibatalkan.'
+        : error?.message || 'Gagal login dengan Akun Google.';
+      return { success: false, message: errMsg };
+    }
   };
 
-  const logoutGoogle = () => {
+  const logoutGoogle = async () => {
+    try {
+      await signOut(auth);
+    } catch (err) {
+      console.warn('Firebase SignOut error:', err);
+    }
     setGoogleUser(null);
-    localStorage.removeItem(STORAGE_KEYS.GOOGLE_USER);
+    safeSetItem(STORAGE_KEYS.GOOGLE_USER, null);
+    try {
+      localStorage.removeItem(STORAGE_KEYS.GOOGLE_USER);
+    } catch (_) {}
+    if (currentUser) {
+      logout();
+    }
+  };
+
+  const isLoggedIn = (): boolean => {
+    return currentUser !== null || googleUser !== null;
+  };
+
+  const getUserIdentity = () => {
+    if (googleUser) {
+      return { 
+        name: googleUser.displayName, 
+        avatar: googleUser.photoURL, 
+        uid: googleUser.uid,
+        role: googleUser.role || (currentUser?.role ?? 'reader'),
+        email: googleUser.email
+      };
+    }
+    if (currentUser) {
+      return { 
+        name: currentUser.username, 
+        avatar: currentUser.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(currentUser.username)}&background=ff5b14&color=fff`, 
+        uid: currentUser.id,
+        role: currentUser.role,
+        email: `${currentUser.username.toLowerCase()}@antitimpa.id`
+      };
+    }
+    return null;
   };
 
   const openLoginModal = (notice?: string) => {
@@ -868,6 +1158,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         updatedTitle = c.title;
         const updated = { ...c, isVisibleOnHome: nextVal, showOnHome: nextVal };
         saveComicToFirestore(updated);
+        centralSync.saveComic(updated);
         return updated;
       }
       return c;
@@ -889,6 +1180,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       if (comicIds.includes(c.id)) {
         const updated = { ...c, isVisibleOnHome: isVisible, showOnHome: isVisible };
         saveComicToFirestore(updated);
+        centralSync.saveComic(updated);
         return updated;
       }
       return c;
@@ -931,6 +1223,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
 
     setComments(prev => [newComment, ...prev]);
+    centralSync.saveComment(newComment);
     return newComment;
   };
 
@@ -939,7 +1232,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       if (c.id === commentId) {
         const isLiked = !c.isLiked;
         const likes = isLiked ? c.likes + 1 : Math.max(0, c.likes - 1);
-        return { ...c, isLiked, likes };
+        const updated = { ...c, isLiked, likes };
+        centralSync.saveComment(updated);
+        return updated;
       }
       return c;
     }));
@@ -947,6 +1242,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const deleteComment = (commentId: string) => {
     setComments(prev => prev.filter(c => c.id !== commentId && c.replyToId !== commentId));
+    centralSync.deleteComment(commentId);
   };
 
   // Content Management - Comics
@@ -966,7 +1262,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
 
     setComics(prev => {
-      const filtered = prev.filter(c => c.id !== finalComicId);
+      const normalizedNewTitle = (newComic.title || '').trim().toLowerCase();
+      const filtered = prev.filter(c => c.id !== finalComicId && (c.title || '').trim().toLowerCase() !== normalizedNewTitle);
       return [newComic, ...filtered];
     });
 
@@ -993,6 +1290,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         viewsCount: 0
       };
       saveChapterToFirestore(firstChapter);
+      centralSync.saveChapter(firstChapter);
       return {
         ...prev,
         [finalComicId]: [firstChapter]
@@ -1000,6 +1298,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     });
 
     saveComicToFirestore(newComic);
+    centralSync.saveComic(newComic);
+
+    showAdminToast('Komik Berhasil Ditambahkan', `Komik "${newComic.title}" telah disimpan ke katalog.`, 'success');
 
     addLog(
       currentUser?.username || 'admin',
@@ -1028,9 +1329,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       [finalComic.id]: chaptersList
     }));
 
-    // Persist to Firestore
+    // Persist to Central Server and Firestore
     saveComicToFirestore(finalComic);
-    chaptersList.forEach(ch => saveChapterToFirestore(ch));
+    centralSync.saveComic(finalComic);
+
+    chaptersList.forEach(ch => {
+      saveChapterToFirestore(ch);
+      centralSync.saveChapter(ch);
+    });
+
+    showAdminToast('Komik Berhasil Disuntikkan', `"${finalComic.title}" beserta ${chaptersList.length} chapter siap dibaca.`, 'success');
 
     addLog(
       currentUser?.username || 'admin',
@@ -1067,11 +1375,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       return nextChapters;
     });
 
-    // Persist all to Firestore
+    // Persist all to Central Server and Firestore
     items.forEach(item => {
       saveComicToFirestore(item.comic);
-      item.chapters.forEach(ch => saveChapterToFirestore(ch));
+      centralSync.saveComic(item.comic);
+      item.chapters.forEach(ch => {
+        saveChapterToFirestore(ch);
+        centralSync.saveChapter(ch);
+      });
     });
+
+    showAdminToast('Batch Import Selesai', `Berhasil menyuntikkan ${items.length} komik lengkap ke katalog.`, 'success');
 
     addLog(
       currentUser?.username || 'admin',
@@ -1096,7 +1410,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     if (updatedComic) {
       saveComicToFirestore(updatedComic);
+      centralSync.saveComic(updatedComic);
     }
+
+    showAdminToast('Komik Berhasil Diperbarui', `Perubahan data komik telah disimpan.`, 'success');
 
     addLog(
       currentUser?.username || 'admin',
@@ -1111,6 +1428,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const target = comics.find(c => c.id === id);
     setComics(prev => prev.filter(c => c.id !== id));
     deleteComicFromFirestore(id);
+    centralSync.deleteComic(id);
 
     // Also delete chapters for this comic
     setChapters(prev => {
@@ -1126,12 +1444,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setBookmarks(prev => prev.filter(b => b.comicId !== id));
     setReadingHistory(prev => prev.filter(h => h.comicId !== id));
 
+    showAdminToast('Komik Berhasil Dihapus', `Komik "${target?.title || id}" telah dihapus.`, 'info');
+
     addLog(
       currentUser?.username || 'admin',
       `Hapus Komik: "${target?.title || id}"`,
       'comic_delete',
       'warning',
-      `Komik dan seluruh chapter terkait telah dihapus permanen dari Firestore.${reason ? ` [Alasan Audit: ${reason}]` : ''}`
+      `Komik dan seluruh chapter terkait telah dihapus permanen dari server database.${reason ? ` [Alasan Audit: ${reason}]` : ''}`
     );
   };
 
@@ -1143,6 +1463,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     setComics(prev => prev.filter(c => !idSet.has(c.id)));
     batchDeleteComicsFromFirestore(ids);
+    centralSync.batchDeleteComics(ids);
 
     setChapters(prev => {
       const next = { ...prev };
@@ -1157,12 +1478,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setBookmarks(prev => prev.filter(b => !idSet.has(b.comicId)));
     setReadingHistory(prev => prev.filter(h => !idSet.has(h.comicId)));
 
+    showAdminToast('Batch Hapus Berhasil', `${ids.length} komik telah dihapus dari katalog.`, 'info');
+
     addLog(
       currentUser?.username || 'admin',
       `Batch Hapus Komik (${ids.length} Judul)`,
       'comic_delete',
       'warning',
-      `Menghapus ${ids.length} komik dari Firestore: ${targetTitles.slice(0, 5).join(', ')}${targetTitles.length > 5 ? ` (+${targetTitles.length - 5} lainnya)` : ''}.${reason ? ` [Alasan Audit: ${reason}]` : ''}`
+      `Menghapus ${ids.length} komik dari database: ${targetTitles.slice(0, 5).join(', ')}${targetTitles.length > 5 ? ` (+${targetTitles.length - 5} lainnya)` : ''}.${reason ? ` [Alasan Audit: ${reason}]` : ''}`
     );
   };
 
@@ -1246,18 +1569,22 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }));
 
     saveChapterToFirestore(newChapter);
+    centralSync.saveChapter(newChapter);
 
     // Update totalChapters count on comic
     setComics(prev => prev.map(c => {
       if (c.id === comicId) {
         const updated = { ...c, totalChapters: updatedList.length, updatedAt: new Date().toISOString().split('T')[0] };
         saveComicToFirestore(updated);
+        centralSync.saveComic(updated);
         return updated;
       }
       return c;
     }));
 
     const sourceLabel = st === 'pdf' ? 'Dokumen PDF' : st === 'drive' ? 'Google Drive Reader' : `${generatedPages.length} Halaman Gambar`;
+
+    showAdminToast('Chapter Berhasil Ditambahkan', `"${targetComic?.title || 'Komik'}" Chapter ${chapterData.chapterNumber} berhasil disimpan.`, 'success');
 
     addLog(
       currentUser?.username || 'admin',
@@ -1280,6 +1607,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         if (ch.id === chapterId) {
           const updated = { ...ch, ...enrichedUpdates };
           saveChapterToFirestore(updated);
+          centralSync.saveChapter(updated);
           return updated;
         }
         return ch;
@@ -1289,6 +1617,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         [comicId]: updatedList
       };
     });
+
+    showAdminToast('Chapter Diperbarui', 'Perubahan chapter berhasil disimpan.', 'success');
 
     addLog(
       currentUser?.username || 'admin',
@@ -1301,6 +1631,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const deleteChapter = (comicId: string, chapterId: string, reason?: string) => {
     deleteChapterFromFirestore(chapterId);
+    centralSync.deleteChapter(comicId, chapterId);
+
     const targetChapter = (chapters[comicId] || []).find(ch => ch.id === chapterId);
     const remainingList = (chapters[comicId] || []).filter(ch => ch.id !== chapterId);
 
@@ -1313,10 +1645,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       if (c.id === comicId) {
         const updated = { ...c, totalChapters: remainingList.length, updatedAt: new Date().toISOString().split('T')[0] };
         saveComicToFirestore(updated);
+        centralSync.saveComic(updated);
         return updated;
       }
       return c;
     }));
+
+    showAdminToast('Chapter Dihapus', `Chapter ${targetChapter?.chapterNumber || ''} telah dihapus.`, 'info');
 
     // Clean up reading history referencing this chapter
     setReadingHistory(prev => prev.filter(h => !(h.comicId === comicId && h.chapterId === chapterId)));
@@ -1327,7 +1662,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       `Hapus Chapter: "${targetComic?.title || comicId}" Ch. ${targetChapter?.chapterNumber || chapterId}`,
       'chapter_delete',
       'warning',
-      `Chapter pada komik ${targetComic?.title || comicId} berhasil dihapus dari Firestore.${reason ? ` [Alasan Audit: ${reason}]` : ''}`
+      `Chapter pada komik ${targetComic?.title || comicId} berhasil dihapus dari server database.${reason ? ` [Alasan Audit: ${reason}]` : ''}`
     );
   };
 
@@ -1336,6 +1671,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     const idSet = new Set(chapterIds);
     batchDeleteChaptersFromFirestore(chapterIds);
+    chapterIds.forEach(chId => centralSync.deleteChapter(comicId, chId));
 
     const remainingList = (chapters[comicId] || []).filter(ch => !idSet.has(ch.id));
 
@@ -1348,6 +1684,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       if (c.id === comicId) {
         const updated = { ...c, totalChapters: remainingList.length, updatedAt: new Date().toISOString().split('T')[0] };
         saveComicToFirestore(updated);
+        centralSync.saveComic(updated);
         return updated;
       }
       return c;
@@ -1362,7 +1699,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       `Batch Hapus Chapter (${chapterIds.length} Chapter): "${targetComic?.title || comicId}"`,
       'chapter_delete',
       'warning',
-      `${chapterIds.length} chapter pada komik "${targetComic?.title || comicId}" berhasil dihapus dari Firestore.${reason ? ` [Alasan Audit: ${reason}]` : ''}`
+      `${chapterIds.length} chapter pada komik "${targetComic?.title || comicId}" berhasil dihapus dari database.${reason ? ` [Alasan Audit: ${reason}]` : ''}`
     );
   };
 
@@ -1387,6 +1724,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
     setDriveAccounts(prev => [newAccount, ...prev]);
     saveDriveAccountToFirestore(newAccount);
+    centralSync.saveDriveAccount(newAccount);
+
     addLog(
       currentUser?.username || 'admin',
       `Tambah Akun Google Drive: "${newAccount.name}"`,
@@ -1401,6 +1740,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       if (acc.id === id) {
         const updated = { ...acc, ...updates };
         saveDriveAccountToFirestore(updated);
+        centralSync.saveDriveAccount(updated);
         return updated;
       }
       return acc;
@@ -1419,6 +1759,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const target = driveAccounts.find(a => a.id === id);
     setDriveAccounts(prev => prev.filter(acc => acc.id !== id));
     deleteDriveAccountFromFirestore(id);
+    centralSync.deleteDriveAccount(id);
+
     addLog(
       currentUser?.username || 'admin',
       `Hapus Akun Google Drive: "${target?.name || id}"`,
@@ -1445,6 +1787,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
               driveNotes: driveNotes !== undefined ? driveNotes : ch.driveNotes
             };
             saveChapterToFirestore(updated);
+            centralSync.saveChapter(updated);
             return updated;
           }
           return ch;
@@ -1518,15 +1861,18 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     setUsers(prev => [newUser, ...prev]);
     saveUserToFirestore(newUser);
+    centralSync.saveUser(newUser);
 
     const planLabel = assignedPlan === 'plan_15k_all' ? 'Paket 15k (All Access)' : `Paket 5k (${(newUser.allowedComicIds || []).length} Judul)`;
+
+    showAdminToast('Akun Berhasil Dibuat', `Akun "${newUser.username}" (${planLabel}) berhasil didaftarkan.`, 'success');
 
     addLog(
       currentUser?.username || 'admin',
       `Buat Akun Pembaca Baru: "${newUser.username}" (${planLabel})`,
       'user_create',
       'success',
-      `Durasi masa aktif: ${newUser.durationType.replace('_', ' ')}. Tipe Akses: ${assignedAccess}. Tersimpan di Firebase Firestore.`
+      `Durasi masa aktif: ${newUser.durationType.replace('_', ' ')}. Tipe Akses: ${assignedAccess}. Tersimpan di database.`
     );
 
     return { success: true, message: `Akun pembaca "${newUser.username}" (${planLabel}) berhasil dibuat!` };
@@ -1543,6 +1889,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         }
         const updatedUser: User = { ...u, ...updates, expiresAt: newExpiresAt || u.expiresAt };
         saveUserToFirestore(updatedUser);
+        centralSync.saveUser(updatedUser);
         if (currentUser && currentUser.id === id) {
           setCurrentUser(updatedUser);
         }
@@ -1551,12 +1898,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       return u;
     }));
 
+    showAdminToast('Data Pengguna Diperbarui', 'Perubahan status/paket pengguna berhasil disimpan.', 'success');
+
     addLog(
       currentUser?.username || 'admin',
       `Update Akun Pengguna: ID ${id}`,
       'user_update',
       'info',
-      'Data profil, paket akses, atau status pengguna diperbarui oleh Admin di Firestore.'
+      'Data profil, paket akses, atau status pengguna diperbarui oleh Admin.'
     );
   };
 
@@ -1565,6 +1914,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       if (u.id === userId) {
         const updatedUser: User = { ...u, ...updates };
         saveUserToFirestore(updatedUser);
+        centralSync.saveUser(updatedUser);
         if (currentUser && currentUser.id === userId) {
           setCurrentUser(updatedUser);
         }
@@ -1576,6 +1926,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     if (currentUser && currentUser.id === userId) {
       setCurrentUser(prev => prev ? { ...prev, ...updates } : null);
     }
+
+    showAdminToast('Profil Diperbarui', 'Foto profil atau biodata Anda berhasil disimpan.', 'success');
 
     addLog(
       currentUser?.username || 'user',
@@ -1591,12 +1943,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       if (u.id === id) {
         const updated: User = { ...u, failedAttempts: 0, status: 'active' as const };
         saveUserToFirestore(updated);
+        centralSync.saveUser(updated);
         return updated;
       }
       return u;
     }));
 
     const target = users.find(u => u.id === id);
+    showAdminToast('Kunci Akun Dibuka', `Akun "${target?.username}" telah dipulihkan menjadi aktif.`, 'success');
+
     addLog(
       currentUser?.username || 'admin',
       `Buka Kunci Akun: "${target?.username}"`,
@@ -1613,10 +1968,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         unlockedCount++;
         const updated: User = { ...u, failedAttempts: 0, status: 'active' as const };
         saveUserToFirestore(updated);
+        centralSync.saveUser(updated);
         return updated;
       }
       return u;
     }));
+
+    showAdminToast('Buka Kunci Massal Selesai', `${unlockedCount} akun telah dipulihkan menjadi aktif.`, 'success');
 
     addLog(
       currentUser?.username || 'admin',
@@ -1634,6 +1992,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         const nextStatus = u.status === 'active' ? 'inactive' : 'active';
         const updated: User = { ...u, status: nextStatus, failedAttempts: 0 };
         saveUserToFirestore(updated);
+        centralSync.saveUser(updated);
+        showAdminToast('Status Akun Berubah', `Status akun ${u.username} diubah menjadi ${nextStatus.toUpperCase()}.`, 'info');
         return updated;
       }
       return u;
@@ -1654,12 +2014,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     if (target?.role === 'admin') return; // Cannot delete admin
     setUsers(prev => prev.filter(u => u.id !== id));
     deleteUserFromFirestore(id);
+    centralSync.deleteUser(id);
+
+    showAdminToast('Akun Pengguna Dihapus', `Akun "${target?.username || id}" telah dihapus.`, 'info');
+
     addLog(
       currentUser?.username || 'admin',
       `Hapus Akun Pengguna: "${target?.username}"`,
       'user_update',
       'warning',
-      'Akun dihapus dari Firestore database'
+      'Akun dihapus dari database'
     );
   };
 
@@ -1694,7 +2058,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       return { success: false, message: 'Password baru tidak boleh sama persis dengan password lama!' };
     }
 
-    // Update in users state & Firestore
+    // Update in users state & Firestore & Central Server
     const updatedAdmin: User = {
       ...(adminUser || currentUser),
       id: adminUser?.id || currentUser.id || 'user-admin',
@@ -1711,20 +2075,25 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     });
 
     saveUserToFirestore(updatedAdmin);
+    centralSync.saveUser(updatedAdmin);
+
     // Also explicitly ensure user-admin doc is updated
     if (updatedAdmin.id !== 'user-admin') {
       saveUserToFirestore({ ...updatedAdmin, id: 'user-admin' });
+      centralSync.saveUser({ ...updatedAdmin, id: 'user-admin' });
     }
 
     // Update in currentUser state
     setCurrentUser(updatedAdmin);
+
+    showAdminToast('Password Berhasil Diganti', 'Kata sandi Super Admin telah diperbarui.', 'success');
 
     addLog(
       currentUser.username,
       'Pergantian Password Super Admin Berhasil',
       'user_update',
       'success',
-      'Password utama akun Super Admin telah berhasil diperbarui dan tersinkronisasi di Firestore.'
+      'Password utama akun Super Admin telah berhasil diperbarui dan tersinkronisasi di server.'
     );
 
     return { success: true, message: 'Password Super Admin berhasil diganti! Semua perangkat yang terhubung akan disinkronkan.' };
@@ -1738,6 +2107,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
     setBanners(prev => [...prev, newBanner]);
     saveBannerToFirestore(newBanner);
+    centralSync.saveBanner(newBanner);
+
+    showAdminToast('Banner Ditambahkan', `Banner "${newBanner.title}" berhasil disimpan ke beranda.`, 'success');
+
     addLog(
       currentUser?.username || 'admin',
       `Tambah Banner Hero: "${newBanner.title}"`,
@@ -1752,29 +2125,40 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       if (b.id === id) {
         const updated = { ...b, ...updates };
         saveBannerToFirestore(updated);
+        centralSync.saveBanner(updated);
         return updated;
       }
       return b;
     }));
+
+    showAdminToast('Banner Diperbarui', 'Perubahan banner berhasil disimpan.', 'success');
   };
 
   const deleteBanner = (id: string) => {
+    const target = banners.find(b => b.id === id);
     setBanners(prev => prev.filter(b => b.id !== id));
     deleteBannerFromFirestore(id);
+    centralSync.deleteBanner(id);
+
+    showAdminToast('Banner Dihapus', `Banner "${target?.title || id}" telah dihapus.`, 'info');
   };
 
   const updateSettings = (settings: Partial<SystemSettings>) => {
     setSystemSettings(prev => {
       const updated = { ...prev, ...settings };
       saveSettingsToFirestore(updated);
+      centralSync.saveSettings(updated);
       return updated;
     });
+
+    showAdminToast('Pengaturan Disimpan', 'Konfigurasi website berhasil diperbarui.', 'success');
+
     addLog(
       currentUser?.username || 'admin',
       'Perubahan Pengaturan Sistem (System Settings)',
       'system_settings',
       'info',
-      'Preferensi keamanan dan default reader diperbarui di Firestore'
+      'Preferensi keamanan dan default reader diperbarui di server'
     );
   };
 
@@ -1787,8 +2171,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       clickCount: adData.clickCount || 0,
       viewCount: adData.viewCount || 0
     };
-    setAds(prev => [newAd, ...prev]);
+    const nextAds = [newAd, ...ads];
+    setAds(nextAds);
     saveAdToFirestore(newAd);
+    centralSync.saveAds(nextAds, adSettings);
+
+    showAdminToast('Iklan Ditambahkan', 'Slot iklan baru berhasil dikonfigurasi.', 'success');
+
     addLog(
       currentUser?.username || 'admin',
       `Tambah Slot Iklan: "${newAd.title}" [${newAd.position}]`,
@@ -1799,15 +2188,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const updateAd = (id: string, updates: Partial<AdItem>) => {
-    setAds(prev => prev.map(ad => {
-      if (ad.id === id) {
-        const updated = { ...ad, ...updates };
-        saveAdToFirestore(updated);
-        return updated;
-      }
-      return ad;
-    }));
-    const target = ads.find(a => a.id === id);
+    const updatedList = ads.map(ad => (ad.id === id ? { ...ad, ...updates } : ad));
+    setAds(updatedList);
+    const target = updatedList.find(a => a.id === id);
+    if (target) {
+      saveAdToFirestore(target);
+      centralSync.saveAds(updatedList, adSettings);
+    }
     addLog(
       currentUser?.username || 'admin',
       `Update Iklan: "${target?.title || id}"`,
@@ -1819,8 +2206,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const deleteAd = (id: string) => {
     const target = ads.find(a => a.id === id);
-    setAds(prev => prev.filter(a => a.id !== id));
+    const remaining = ads.filter(a => a.id !== id);
+    setAds(remaining);
     deleteAdFromFirestore(id);
+    centralSync.saveAds(remaining, adSettings);
+
     addLog(
       currentUser?.username || 'admin',
       `Hapus Slot Iklan: "${target?.title || id}"`,
@@ -1833,16 +2223,21 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const toggleAd = (id: string) => {
     let nextStatus = false;
     let targetTitle = '';
-    setAds(prev => prev.map(ad => {
+    const updatedList = ads.map(ad => {
       if (ad.id === id) {
         nextStatus = !ad.isActive;
         targetTitle = ad.title;
-        const updated = { ...ad, isActive: nextStatus };
-        saveAdToFirestore(updated);
-        return updated;
+        return { ...ad, isActive: nextStatus };
       }
       return ad;
-    }));
+    });
+    setAds(updatedList);
+    const target = updatedList.find(a => a.id === id);
+    if (target) {
+      saveAdToFirestore(target);
+      centralSync.saveAds(updatedList, adSettings);
+    }
+
     addLog(
       currentUser?.username || 'admin',
       `Toggle Status Iklan: "${targetTitle || id}" (${nextStatus ? 'AKTIF' : 'NONAKTIF'})`,
@@ -1907,7 +2302,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return ads.filter(ad => ad.position === position && canShowAd(ad));
   };
 
-  const POPUNDER_STORAGE_KEY = 'komikyuk_popunder_last_trigger';
+  const POPUNDER_STORAGE_KEY = 'antitimpa_popunder_last_trigger';
 
   const triggerPopunder = (customUrl?: string): boolean => {
     if (!adSettings.adsEnabled || !adSettings.popunderEnabled) return false;
@@ -2048,6 +2443,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         logout,
         loginWithGoogle,
         logoutGoogle,
+        isLoggedIn,
+        getUserIdentity,
         openLoginModal,
         closeLoginModal,
         canUserReadComic,
@@ -2109,7 +2506,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         toggleBookmark,
         isBookmarked,
         saveReadingProgress,
-        getReadingProgress
+        getReadingProgress,
+        adminToasts,
+        showAdminToast,
+        removeAdminToast
       }}
     >
       {children}

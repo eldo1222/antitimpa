@@ -1,151 +1,127 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useApp } from '../../context/AppContext';
 import { getSimilarComics } from '../../data/genres';
-import { CommentSection } from '../CommentSection';
 import { 
-  ArrowLeft, 
-  Share2, 
+  Star, 
+  BookOpen, 
   Bookmark, 
   BookmarkCheck, 
-  Star, 
+  ArrowLeft, 
+  Share2, 
+  Sparkles, 
   Clock, 
-  BookOpen, 
-  Lock, 
+  Layers, 
   Eye, 
-  CheckCircle2, 
-  Flame, 
-  ArrowUpDown,
-  Sparkles,
-  AlertCircle,
-  AlertTriangle,
-  ShieldCheck,
-  Tag,
-  Layers,
+  Lock, 
+  Unlock, 
+  ShieldCheck, 
   ChevronRight,
-  Unlock,
-  Crown
+  ArrowUpDown,
+  Tag
 } from 'lucide-react';
+import { CommentSection } from '../CommentSection';
 import { AdBanner } from './AdBanner';
+import { Chapter } from '../../types';
 
 export const ComicDetailView: React.FC = () => {
-  const params = useParams<{ comicId?: string }>();
+  const { comicId } = useParams<{ comicId: string }>();
   const navigate = useNavigate();
   const { 
-    selectedComicId, 
-    selectComic, 
     comics, 
     chapters, 
-    currentUser, 
-    startReading, 
-    openLoginModal, 
+    selectComic, 
     toggleBookmark, 
     isBookmarked,
-    getReadingProgress,
+    readingHistory,
+    currentUser,
+    googleUser,
+    openLoginModal,
+    startReading,
     canUserReadComic,
-    setActiveTab,
-    navigateToGenre,
-    triggerPopunder
+    navigateToGenre
   } = useApp();
 
+  const isUserAuthenticated = !!currentUser || !!googleUser;
+
+  // Resolve comic by ID or slug
+  const comic = comics.find(c => c.id === comicId || c.slug === comicId);
+
   const [isSynopsisExpanded, setIsSynopsisExpanded] = useState(false);
-  const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
   const [chapterSearch, setChapterSearch] = useState('');
+  const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
   const [copiedLinkNotice, setCopiedLinkNotice] = useState(false);
 
-  const targetId = params.comicId || selectedComicId;
-  const comic = comics.find(c => c.id === targetId || c.slug === targetId);
+  // Scroll to top upon opening
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [comicId]);
+
   if (!comic) {
     return (
-      <div className="min-h-[500px] flex flex-col items-center justify-center p-6 text-center text-slate-100">
-        <div className="w-16 h-16 rounded-2xl bg-slate-800/80 flex items-center justify-center text-slate-400 mb-4 border border-slate-700">
-          <BookOpen className="w-8 h-8" />
+      <div className="min-h-[70vh] flex flex-col items-center justify-center p-6 text-center text-slate-100">
+        <div className="w-16 h-16 rounded-2xl bg-[#1a1a26] border border-[#2e2e42] flex items-center justify-center text-slate-400 mb-4 text-2xl">
+          📖
         </div>
-        <h2 className="text-lg font-bold text-white mb-1">Komik Tidak Ditemukan</h2>
-        <p className="text-xs text-slate-400 max-w-xs mb-6 leading-relaxed">
-          Komik yang Anda pilih mungkin telah diperbarui atau belum tersedia di daftar katalog.
+        <h2 className="text-xl font-bold text-white mb-2">Komik Tidak Ditemukan</h2>
+        <p className="text-xs text-slate-400 max-w-sm mb-6">
+          Komik yang Anda cari mungkin telah diubah judulnya atau dinonaktifkan oleh admin.
         </p>
         <button
-          onClick={() => {
-            selectComic(null);
-            navigate('/');
-          }}
-          className="px-5 py-2.5 bg-[#ff5b14] hover:bg-[#e04e0e] text-white font-bold text-xs rounded-xl shadow-lg cursor-pointer transition-all active:scale-95 flex items-center gap-2"
+          onClick={() => navigate('/')}
+          className="px-5 py-2.5 bg-[#ff5b14] hover:bg-[#e04e0e] text-white font-bold text-xs rounded-xl shadow-lg transition-all cursor-pointer"
         >
-          <ArrowLeft className="w-4 h-4" />
-          <span>Kembali ke Beranda</span>
+          Kembali ke Beranda
         </button>
       </div>
     );
   }
 
-  const rawChaptersList = chapters[comic.id] || [];
+  const rawChaptersList: Chapter[] = chapters[comic.id] || [];
+  
+  // Sort and filter chapters
   const chaptersList = [...rawChaptersList]
-    .filter(ch => chapterSearch === '' || ch.title.toLowerCase().includes(chapterSearch.toLowerCase()) || String(ch.chapterNumber).includes(chapterSearch))
-    .sort((a, b) => 
-      sortOrder === 'desc' ? b.chapterNumber - a.chapterNumber : a.chapterNumber - b.chapterNumber
-    );
+    .filter(ch => {
+      if (!chapterSearch.trim()) return true;
+      return ch.title.toLowerCase().includes(chapterSearch.toLowerCase()) ||
+             ch.chapterNumber.toString().includes(chapterSearch);
+    })
+    .sort((a, b) => {
+      if (sortOrder === 'desc') {
+        return b.chapterNumber - a.chapterNumber;
+      }
+      return a.chapterNumber - b.chapterNumber;
+    });
 
-  const readingProgress = getReadingProgress(comic.id);
   const bookmarked = isBookmarked(comic.id);
+  const readingProgress = readingHistory.find(r => r.comicId === comic.id);
 
-  // Check whether this comic is free/normal vs 18+ VIP
-  const isNormalComic = comic.contentType === 'normal' || comic.isFree === true;
-
-  // Similar genre comics recommendation
-  const similarComics = getSimilarComics(comic, comics, 4);
-
-  // Check access permissions
+  // Check read access
   const accessCheck = canUserReadComic(comic.id, currentUser);
-  const isAccessAllowed = isNormalComic || accessCheck.allowed;
+  const isAccessAllowed = accessCheck.allowed;
+
+  // Similar Comics based on tags (deduplicated)
+  const similarComics = getSimilarComics(comic, comics, 6);
 
   const handleShare = () => {
-    if (navigator.share) {
-      navigator.share({
-        title: comic.title,
-        text: `Baca komik "${comic.title}" di AntiTimpa!`,
-        url: window.location.href
-      }).catch(() => {});
-    } else {
-      navigator.clipboard?.writeText(window.location.href);
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(window.location.href);
       setCopiedLinkNotice(true);
-      setTimeout(() => setCopiedLinkNotice(false), 2000);
-    }
-  };
-
-  const handleStartReadCTA = () => {
-    if (!isNormalComic && !currentUser) {
-      openLoginModal('🔒 Komik 18+ VIP: Silakan login dengan akun VIP Anda untuk mulai membaca chapter.');
-      return;
-    }
-
-    if (!isAccessAllowed) {
-      openLoginModal(`🔒 ${accessCheck.message || 'Akses dibatasi untuk paket akun Anda.'}`);
-      return;
-    }
-
-    if (readingProgress) {
-      triggerPopunder();
-      startReading(readingProgress.chapterId);
-      navigate(`/read/${comic.id}/${readingProgress.chapterId}`);
-    } else if (rawChaptersList.length > 0) {
-      const ch1 = rawChaptersList.find(c => c.chapterNumber === 1) || rawChaptersList[rawChaptersList.length - 1];
-      triggerPopunder();
-      startReading(ch1.id);
-      navigate(`/read/${comic.id}/${ch1.id}`);
+      setTimeout(() => setCopiedLinkNotice(false), 2500);
     }
   };
 
   const handleChapterClick = (chapterId: string) => {
-    if (!isNormalComic && !currentUser) {
-      openLoginModal('🔒 Komik 18+ VIP: Silakan login dengan akun VIP Anda.');
+    if (!currentUser) {
+      openLoginModal('🔒 Anda harus masuk/login akun terlebih dahulu untuk mulai membaca.');
       return;
     }
+
     if (!isAccessAllowed) {
-      openLoginModal(`🔒 ${accessCheck.message || 'Akses dibatasi untuk paket akun Anda.'}`);
+      openLoginModal(`🔒 ${accessCheck.message || 'Komik ini hanya tersedia untuk paket akun VIP AntiTimpa.'}`);
       return;
     }
-    triggerPopunder();
+
     startReading(chapterId);
     navigate(`/read/${comic.id}/${chapterId}`);
   };
@@ -163,7 +139,7 @@ export const ComicDetailView: React.FC = () => {
             className="p-2 -ml-1 text-slate-300 hover:text-white rounded-xl hover:bg-white/5 active:scale-95 transition-all flex items-center gap-1.5 text-xs font-semibold cursor-pointer"
           >
             <ArrowLeft className="w-4 h-4" />
-            <span>Kembali ke Katalog</span>
+            <span>Kembali</span>
           </button>
 
           <span className="text-xs font-bold text-slate-200 max-w-[240px] sm:max-w-md truncate">
@@ -203,10 +179,7 @@ export const ComicDetailView: React.FC = () => {
           src={comic.bannerImage || comic.coverImage} 
           alt={comic.title} 
           referrerPolicy="no-referrer"
-          className="w-full h-full object-cover filter blur-sm brightness-40 scale-105" 
-          onError={(e) => {
-            (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1534447677768-be436bb09401?w=1200&auto=format&fit=crop&q=80';
-          }}
+          className="w-full h-full object-cover filter blur-md brightness-30 scale-105" 
         />
         <div className="absolute inset-0 bg-gradient-to-t from-[#09090d] via-[#09090d]/80 to-transparent" />
       </div>
@@ -224,10 +197,10 @@ export const ComicDetailView: React.FC = () => {
                   src={comic.coverImage} 
                   alt={comic.title} 
                   referrerPolicy="no-referrer"
-                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" 
-                  onError={(e) => {
-                    (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1544717305-2782549b5136?q=80&w=800&auto=format&fit=crop';
-                  }}
+                  style={{ filter: !isUserAuthenticated ? 'blur(10px)' : 'none' }}
+                  className={`w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 ${
+                    !isUserAuthenticated ? 'scale-110 brightness-75' : ''
+                  }`} 
                 />
 
                 <div className="absolute top-2 left-2 flex flex-col gap-1">
@@ -237,6 +210,16 @@ export const ComicDetailView: React.FC = () => {
                     {comic.status === 'ongoing' ? '🟢 Ongoing' : '🟣 Tamat'}
                   </span>
                 </div>
+
+                {!isUserAuthenticated && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/40 backdrop-blur-[2px] p-4 text-center">
+                    <div className="p-3 rounded-full bg-[#ff5b14]/20 border border-[#ff5b14]/40 text-[#ff5b14] mb-2">
+                      <Lock className="w-6 h-6" />
+                    </div>
+                    <span className="text-xs font-black text-white">Sensor Blur Aktif</span>
+                    <span className="text-[10px] text-slate-300 mt-1">Masuk untuk melihat cover & membaca</span>
+                  </div>
+                )}
 
                 <div className="absolute bottom-2 left-2 px-2 py-1 rounded-md bg-black/80 backdrop-blur-sm text-xs font-bold text-amber-300 flex items-center gap-1 border border-white/10">
                   <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
@@ -248,45 +231,34 @@ export const ComicDetailView: React.FC = () => {
               <div className="space-y-1.5 text-xs text-slate-300 pt-1 border-t border-[#1f1f2e]">
                 <div className="flex justify-between">
                   <span className="text-slate-500">Penulis (Story):</span>
-                  <span className="font-semibold text-white truncate max-w-[160px]">{comic.storyWriter || 'Unknown'}</span>
+                  <span className="font-semibold text-white truncate max-w-[160px]">{comic.storyWriter || comic.author || 'Unknown'}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">Ilustrator (Art):</span>
-                  <span className="font-semibold text-white truncate max-w-[160px]">{comic.artist || 'Unknown'}</span>
+                  <span className="font-semibold text-white truncate max-w-[160px]">{comic.artist || comic.author || 'Unknown'}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">Tipe Komik:</span>
                   <span className="font-semibold text-[#ff7a3d] uppercase">{comic.comicType || comic.type || 'Manga'}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-500">Total Chapter:</span>
-                  <span className="font-semibold text-white">{rawChaptersList.length} Ch.</span>
-                </div>
-                <div className="flex justify-between">
                   <span className="text-slate-500">Total Pembaca:</span>
-                  <span className="font-semibold text-white">{comic.totalReaders?.toLocaleString() || 0}</span>
+                  <span className="font-semibold text-slate-200">{(comic.totalReaders || 0).toLocaleString()} Kali</span>
                 </div>
               </div>
 
-              {/* Action Buttons */}
+              {/* Action Buttons: Baca Sekarang / Lanjut Baca */}
               <div className="space-y-2 pt-2 border-t border-[#1f1f2e]">
-                {isNormalComic ? (
-                  <button
-                    onClick={handleStartReadCTA}
-                    className="w-full py-3 px-4 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs sm:text-sm rounded-xl shadow-lg shadow-emerald-900/30 flex items-center justify-center gap-2 active:scale-98 transition-all cursor-pointer"
-                  >
-                    <BookOpen className="w-4 h-4" />
-                    <span>
-                      {readingProgress 
-                        ? `Lanjut Baca Ch. ${readingProgress.chapterNumber}` 
-                        : `Mulai Baca Ch. 1`}
-                    </span>
-                  </button>
-                ) : currentUser ? (
+                {currentUser ? (
                   isAccessAllowed ? (
                     <button
-                      onClick={handleStartReadCTA}
-                      className="w-full py-3 px-4 bg-gradient-to-r from-[#ff5b14] to-[#f97316] hover:opacity-95 text-white font-black text-xs sm:text-sm rounded-xl shadow-lg shadow-[#ff5b14]/30 flex items-center justify-center gap-2 active:scale-98 transition-all cursor-pointer"
+                      onClick={() => {
+                        const targetCh = readingProgress?.chapterId || rawChaptersList[0]?.id;
+                        if (targetCh) {
+                          handleChapterClick(targetCh);
+                        }
+                      }}
+                      className="w-full py-3 px-4 bg-gradient-to-r from-[#ff5b14] to-[#f97316] hover:opacity-95 text-white font-extrabold text-xs sm:text-sm rounded-xl shadow-lg shadow-[#ff5b14]/30 flex items-center justify-center gap-2 transition-all active:scale-98 cursor-pointer"
                     >
                       <BookOpen className="w-4 h-4" />
                       <span>
@@ -310,7 +282,7 @@ export const ComicDetailView: React.FC = () => {
                     className="w-full py-3 px-4 bg-gradient-to-r from-[#ff5b14] to-[#f95700] hover:opacity-95 text-white font-black text-xs sm:text-sm rounded-xl shadow-lg shadow-[#ff5b14]/30 flex items-center justify-center gap-2 active:scale-98 transition-all cursor-pointer"
                   >
                     <Lock className="w-4 h-4" />
-                    <span>Login VIP untuk Membaca</span>
+                    <span>Login untuk Membaca</span>
                   </button>
                 )}
 
@@ -336,49 +308,9 @@ export const ComicDetailView: React.FC = () => {
                 </button>
               </div>
             </div>
-
-            {/* Similar Comics in Left Sidebar */}
-            {similarComics.length > 0 && (
-              <div className="bg-[#12121a] rounded-2xl border border-[#222232] p-4 space-y-3 shadow-xl">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5 font-bold text-xs text-white">
-                    <Sparkles className="w-3.5 h-3.5 text-[#ff5b14]" />
-                    <span>Rekomendasi Serupa</span>
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  {similarComics.slice(0, 3).map((sComic) => (
-                    <div
-                      key={sComic.id}
-                      onClick={() => {
-                        selectComic(sComic.id);
-                        window.scrollTo({ top: 0, behavior: 'smooth' });
-                      }}
-                      className="p-2 rounded-xl bg-[#181824] hover:bg-[#20202e] border border-[#27273a] flex items-center gap-2.5 cursor-pointer group transition-all"
-                    >
-                      <img 
-                        src={sComic.coverImage} 
-                        alt={sComic.title} 
-                        referrerPolicy="no-referrer"
-                        className="w-10 h-13 rounded-lg object-cover shrink-0" 
-                      />
-                      <div className="flex-1 min-w-0">
-                        <div className="font-bold text-xs text-white truncate group-hover:text-[#ff5b14]">
-                          {sComic.title}
-                        </div>
-                        <div className="text-[10px] text-slate-400 truncate mt-0.5">
-                          {sComic.genres.slice(0, 2).join(', ')}
-                        </div>
-                      </div>
-                      <ChevronRight className="w-4 h-4 text-slate-500 group-hover:text-[#ff5b14] shrink-0" />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
 
-          {/* RIGHT COLUMN: Title, Genre Pills, Synopsis, Chapters & Comments */}
+          {/* RIGHT COLUMN: Title, Genre Pills, Synopsis, Chapters */}
           <div className="lg:col-span-8 space-y-5">
             {/* Ad Banner: Atas Detail Komik */}
             <AdBanner position="detail_top" />
@@ -551,6 +483,60 @@ export const ComicDetailView: React.FC = () => {
             <div className="bg-[#12121a] rounded-2xl border border-[#222232] p-5 sm:p-6 shadow-xl">
               <CommentSection comicId={comic.id} comicTitle={comic.title} />
             </div>
+
+            {/* 🌟 REKOMENDASI KOMIK SERUPA (Ditaruh di Bagian Bawah Kolom Komentar) */}
+            {similarComics.length > 0 && (
+              <div className="bg-[#12121a] rounded-2xl border border-[#222232] p-5 sm:p-6 space-y-4 shadow-xl">
+                <div className="flex items-center justify-between pb-3 border-b border-[#1f1f2e]">
+                  <div className="flex items-center gap-2 font-black text-sm sm:text-base text-white">
+                    <Sparkles className="w-4 h-4 text-[#ff5b14]" />
+                    <span>Rekomendasi Komik Serupa</span>
+                  </div>
+                  <span className="text-xs text-slate-400">
+                    Berdasarkan kesamaan genre & tag
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+                  {similarComics.map((sComic) => (
+                    <div
+                      key={sComic.id}
+                      onClick={() => {
+                        selectComic(sComic.id);
+                        navigate(`/comic/${sComic.slug || sComic.id}`);
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                      }}
+                      className="bg-[#171724] hover:bg-[#1f1f2e] rounded-xl overflow-hidden border border-[#27273a] hover:border-[#ff5b14]/50 cursor-pointer group transition-all flex flex-col justify-between"
+                    >
+                      <div className="relative aspect-[3/4] w-full overflow-hidden bg-[#181824]">
+                        <img 
+                          src={sComic.coverImage} 
+                          alt={sComic.title} 
+                          referrerPolicy="no-referrer"
+                          loading="lazy"
+                          style={{ filter: !isUserAuthenticated ? 'blur(10px)' : 'none' }}
+                          className={`w-full h-full object-cover group-hover:scale-105 transition-transform ${
+                            !isUserAuthenticated ? 'scale-110' : ''
+                          }`} 
+                        />
+                        <div className="absolute bottom-1 left-1 px-1.5 py-0.2 rounded bg-black/70 text-[9px] font-bold text-amber-400 flex items-center gap-0.5">
+                          <Star className="w-2.5 h-2.5 fill-amber-400" />
+                          {sComic.rating ? sComic.rating.toFixed(1) : '4.8'}
+                        </div>
+                      </div>
+                      <div className="p-2">
+                        <h5 className="font-bold text-xs text-white truncate group-hover:text-[#ff5b14]">
+                          {sComic.title}
+                        </h5>
+                        <p className="text-[10px] text-slate-400 truncate mt-0.5">
+                          {sComic.genres.slice(0, 2).join(', ')}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

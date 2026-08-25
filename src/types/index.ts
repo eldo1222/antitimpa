@@ -1,5 +1,5 @@
 export type UserStatus = 'active' | 'locked' | 'expired' | 'inactive';
-export type DurationType = '1_day' | '3_days' | '30_days' | '1_year';
+export type DurationType = '1_day' | '3_days' | '30_days' | '1_year' | 'unlimited' | 'lifetime' | 'custom';
 export type PlanType = 'plan_15k_all' | 'plan_5k_single' | 'custom' | 'none';
 export type AccessType = 'all' | 'specific';
 
@@ -49,6 +49,14 @@ export interface LoginHistoryItem {
   ipAddress: string;
   status: 'success' | 'failed';
   reason?: string;
+}
+
+export interface AdminToastItem {
+  id: string;
+  title: string;
+  message?: string;
+  type: 'success' | 'info' | 'warning' | 'error';
+  timestamp: number;
 }
 
 export type ComicStatus = 'ongoing' | 'completed' | 'Ongoing' | 'Completed' | 'Hiatus';
@@ -143,6 +151,7 @@ export interface Comic {
   status: ComicStatus;
   storyWriter: string;
   artist: string;
+  author?: string; // alias for storyWriter/artist
   rating: number;
   ratingCount: number;
   totalChapters: number;

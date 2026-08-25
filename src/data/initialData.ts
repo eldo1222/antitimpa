@@ -83,7 +83,7 @@ export const generateComicPageSvg = (
 
     <!-- Top Comic Header Strip -->
     <rect x="20" y="20" width="760" height="45" rx="8" fill="#000000" fill-opacity="0.6" stroke="${accentColor}" stroke-width="1.5" />
-    <text x="40" y="50" font-family="'Plus Jakarta Sans', sans-serif" font-weight="bold" font-size="18" fill="#ffffff">KOMIKYUK EXCLUSIVE</text>
+    <text x="40" y="50" font-family="'Plus Jakarta Sans', sans-serif" font-weight="bold" font-size="18" fill="#ffffff">ANTITIMPA EXCLUSIVE</text>
     <text x="400" y="50" font-family="'Plus Jakarta Sans', sans-serif" font-weight="600" font-size="15" fill="${accentColor}" text-anchor="middle">${title.toUpperCase()}</text>
     <text x="750" y="50" font-family="'Plus Jakarta Sans', sans-serif" font-weight="bold" font-size="16" fill="#ff9900" text-anchor="end">PAGE ${pageNum}</text>
 
@@ -145,13 +145,13 @@ export const generateComicPageSvg = (
         "Everything changes from this very breath..."
       </text>
       <text x="140" y="212" font-family="'Plus Jakarta Sans', sans-serif" font-size="13" fill="#555555">
-        - KomikYuk Digital Readers Edition • To be continued next page...
+        - AntiTimpa Digital Readers Edition • To be continued next page...
       </text>
     </g>
 
     <!-- Footer Watermark -->
     <text x="400" y="1170" font-family="'Plus Jakarta Sans', sans-serif" font-size="12" fill="#718096" text-anchor="middle">
-      KomikYuk Webtoon Reader • Hak Cipta Dilindungi Undang-Undang
+      AntiTimpa Webtoon Reader • Hak Cipta Dilindungi Undang-Undang
     </text>
   </svg>`;
 

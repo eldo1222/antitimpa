@@ -5,11 +5,14 @@ import {
   searchJikanManga,
   searchKomikcast,
   getKomikcastDetail,
+  searchDoujindesu,
+  DOUJINDESU_SCRAPE_FEEDS,
   PRESET_SCRAPE_FEEDS, 
   buildComicFromScrape, 
   buildComicFromScrapeAsync,
   ScrapedComicResult 
 } from '../../services/comicScraperService';
+import { getProfessionalComicSkeletonUrl } from '../common/ComicSkeletonBox';
 import { downloadDrivePdf, convertImagesToPdf } from '../../utils/pdfConverter';
 import { 
   Download, 
@@ -53,8 +56,9 @@ export const AdminScraperTab: React.FC = () => {
   const [komikcastCategoryFilter, setKomikcastCategoryFilter] = useState<'all' | 'manga' | 'manhwa' | 'manhua' | 'doujin' | '18plus'>('all');
   const [komikcastOrder, setKomikcastOrder] = useState<'popular' | 'latest' | 'update'>('popular');
 
-  // MangaDex & Preset filters
+  // MangaDex, Doujindesu & Preset filters
   const [mangadexCategoryFilter, setMangadexCategoryFilter] = useState<'all' | '18plus' | 'manhwa' | 'manga' | 'manhua'>('18plus');
+  const [doujindesuCategoryFilter, setDoujindesuCategoryFilter] = useState<'all' | '18plus' | 'doujin' | 'netorare' | 'milf' | 'harem'>('all');
   const [presetCategoryFilter, setPresetCategoryFilter] = useState<'all' | 'manga' | 'manhwa' | 'manhua' | '18plus'>('18plus');
 
   // Custom JSON input
@@ -632,15 +636,20 @@ export const AdminScraperTab: React.FC = () => {
         </button>
 
         <button
-          onClick={() => setActiveSource('presets')}
+          onClick={() => {
+            setActiveSource('presets');
+            if (searchResults.length === 0) {
+              setSearchResults(DOUJINDESU_SCRAPE_FEEDS);
+            }
+          }}
           className={`pb-2.5 px-3.5 font-bold transition-all border-b-2 flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
             activeSource === 'presets'
               ? 'border-[#ff5b14] text-white bg-white/5 rounded-t-lg'
               : 'border-transparent text-slate-400 hover:text-slate-200'
           }`}
         >
-          <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-          <span>Katalog Siap Suntik ({PRESET_SCRAPE_FEEDS.length})</span>
+          <Sparkles className="w-3.5 h-3.5 text-rose-400" />
+          <span>API Doujindesu (18+ &amp; Doujin)</span>
         </button>
 
         <button
@@ -809,7 +818,7 @@ export const AdminScraperTab: React.FC = () => {
                           referrerPolicy="no-referrer"
                           loading="lazy"
                           onError={(e) => {
-                            (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1578632767115-351597cf2477?w=600&auto=format&fit=crop&q=80';
+                            (e.target as HTMLImageElement).src = getProfessionalComicSkeletonUrl(item.title, item.comicType);
                           }}
                           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" 
                         />
@@ -986,7 +995,7 @@ export const AdminScraperTab: React.FC = () => {
                           referrerPolicy="no-referrer"
                           loading="lazy"
                           onError={(e) => {
-                            (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1578632767115-351597cf2477?w=600&auto=format&fit=crop&q=80';
+                            (e.target as HTMLImageElement).src = getProfessionalComicSkeletonUrl(item.title, item.comicType);
                           }}
                           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" 
                         />
@@ -1031,13 +1040,13 @@ export const AdminScraperTab: React.FC = () => {
       )}
 
       {/* ============================================================ */}
-      {/* TAB 3: PRESETS CURATED FEEDS                                 */}
+      {/* TAB 3: API DOUJINDESU & 18+ VIP SCRAPER                      */}
       {/* ============================================================ */}
       {activeSource === 'presets' && (
         <div className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2 bg-[#11111a] p-3 rounded-2xl border border-[#202030]">
             <div className="flex flex-wrap items-center gap-1.5 text-xs">
-              <span className="text-slate-400 font-bold mr-1 text-xs">Filter:</span>
+              <span className="text-slate-400 font-bold mr-1 text-xs">Filter Doujindesu:</span>
               <button
                 onClick={() => setPresetCategoryFilter('all')}
                 className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-all cursor-pointer ${
@@ -1046,7 +1055,7 @@ export const AdminScraperTab: React.FC = () => {
                     : 'bg-[#181824] text-slate-400 hover:text-slate-200 border border-[#262638]'
                 }`}
               >
-                🌟 Semua ({PRESET_SCRAPE_FEEDS.length})
+                🔞 Semua 18+ ({DOUJINDESU_SCRAPE_FEEDS.length})
               </button>
 
               <button
@@ -1057,7 +1066,7 @@ export const AdminScraperTab: React.FC = () => {
                     : 'bg-[#181824] text-slate-400 hover:text-slate-200 border border-[#262638]'
                 }`}
               >
-                🔞 18+ VIP Dewasa
+                🔥 Netorare / NTR &amp; VIP
               </button>
 
               <button
@@ -1068,7 +1077,7 @@ export const AdminScraperTab: React.FC = () => {
                     : 'bg-[#181824] text-slate-400 hover:text-slate-200 border border-[#262638]'
                 }`}
               >
-                🇰🇷 Manhwa
+                👠 MILF / Noona
               </button>
 
               <button
@@ -1079,7 +1088,7 @@ export const AdminScraperTab: React.FC = () => {
                     : 'bg-[#181824] text-slate-400 hover:text-slate-200 border border-[#262638]'
                 }`}
               >
-                🇯🇵 Manga
+                👑 Harem 18+
               </button>
 
               <button
@@ -1090,13 +1099,13 @@ export const AdminScraperTab: React.FC = () => {
                     : 'bg-[#181824] text-slate-400 hover:text-slate-200 border border-[#262638]'
                 }`}
               >
-                🇨🇳 Manhua
+                🌸 Doujinshi Lengkap
               </button>
             </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filteredPresets.map((item, idx) => {
+            {DOUJINDESU_SCRAPE_FEEDS.map((item, idx) => {
               const isImported = importedSlugs[item.slug || item.title] || comics.some(c => c.title.toLowerCase() === item.title.toLowerCase());
 
               return (
@@ -1109,7 +1118,7 @@ export const AdminScraperTab: React.FC = () => {
                         referrerPolicy="no-referrer"
                         loading="lazy"
                         onError={(e) => {
-                          (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1578632767115-351597cf2477?w=600&auto=format&fit=crop&q=80';
+                          (e.target as HTMLImageElement).src = getProfessionalComicSkeletonUrl(item.title, item.comicType);
                         }}
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" 
                       />
@@ -1200,7 +1209,7 @@ export const AdminScraperTab: React.FC = () => {
                           referrerPolicy="no-referrer"
                           loading="lazy"
                           onError={(e) => {
-                            (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1578632767115-351597cf2477?w=600&auto=format&fit=crop&q=80';
+                            (e.target as HTMLImageElement).src = getProfessionalComicSkeletonUrl(item.title, item.comicType);
                           }}
                           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" 
                         />

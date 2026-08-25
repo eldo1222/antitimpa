@@ -13,6 +13,7 @@ import { BottomNav } from './components/common/BottomNav';
 import { RouteLoadingBar } from './components/common/RouteLoadingBar';
 import { HomeView } from './components/frontend/HomeView';
 import { DiscoverView } from './components/frontend/DiscoverView';
+import { GenreView } from './components/frontend/GenreView';
 import { LibraryView } from './components/frontend/LibraryView';
 import { ProfileView } from './components/frontend/ProfileView';
 import { ComicDetailView } from './components/frontend/ComicDetailView';
@@ -31,7 +32,7 @@ const RouteSynchronizer: React.FC = () => {
     const path = location.pathname;
     if (path === '/') {
       setActiveTab('home');
-    } else if (path.startsWith('/discover')) {
+    } else if (path.startsWith('/discover') || path.startsWith('/genre')) {
       setActiveTab('discover');
     } else if (path.startsWith('/library')) {
       setActiveTab('library');
@@ -78,7 +79,7 @@ const MainAppContent: React.FC = () => {
   const isAdminRoute = location.pathname.startsWith('/admin');
 
   return (
-    <div id="komikyuk-app-root" className="min-h-screen bg-[#07070a] text-slate-100 flex flex-col items-center justify-start">
+    <div id="antitimpa-app-root" className="min-h-screen bg-[#07070a] text-slate-100 flex flex-col items-center justify-start">
       <RouteLoadingBar />
       <RouteSynchronizer />
 
@@ -96,7 +97,7 @@ const MainAppContent: React.FC = () => {
             </button>
           </div>
 
-          <div className="w-full max-w-[420px] min-h-[850px] bg-[#0c0c10] border-[10px] border-[#222230] rounded-[48px] shadow-2xl overflow-hidden relative flex flex-col ring-1 ring-white/10">
+          <div className="w-full max-w-[420px] min-h-[850px] bg-[#0c0c10] border-[10px] border-[#222232] rounded-[48px] shadow-2xl overflow-hidden relative flex flex-col ring-1 ring-white/10">
             {/* Phone Top Speaker Notch */}
             <div className="w-full bg-[#12121a] pt-3 pb-1 flex justify-center items-center relative z-40 border-b border-[#1f1f2d]">
               <div className="w-24 h-4 bg-black rounded-full flex items-center justify-end px-3">
@@ -112,6 +113,9 @@ const MainAppContent: React.FC = () => {
                   <Routes>
                     <Route path="/" element={<HomeView />} />
                     <Route path="/discover" element={<DiscoverView />} />
+                    <Route path="/genre" element={<GenreView />} />
+                    <Route path="/genre/:genreName" element={<GenreView />} />
+                    <Route path="/genres" element={<GenreView />} />
                     <Route path="/library" element={<LibraryView />} />
                     <Route path="/profile" element={<ProfileView />} />
                     <Route path="/comic/:comicId" element={<ComicDetailView />} />
@@ -135,6 +139,9 @@ const MainAppContent: React.FC = () => {
               <Routes>
                 <Route path="/" element={<HomeView />} />
                 <Route path="/discover" element={<DiscoverView />} />
+                <Route path="/genre" element={<GenreView />} />
+                <Route path="/genre/:genreName" element={<GenreView />} />
+                <Route path="/genres" element={<GenreView />} />
                 <Route path="/library" element={<LibraryView />} />
                 <Route path="/profile" element={<ProfileView />} />
                 <Route path="/comic/:comicId" element={<ComicDetailView />} />

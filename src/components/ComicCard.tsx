@@ -1,6 +1,7 @@
 import React from 'react';
 import { Star, Lock, Sparkles, BookOpen, User, Palette, CheckCircle } from 'lucide-react';
 import { Comic } from '../types';
+import { getProfessionalComicSkeletonUrl } from './common/ComicSkeletonBox';
 
 interface ComicCardProps {
   comic: Comic;
@@ -34,7 +35,7 @@ export const ComicCard: React.FC<ComicCardProps> = ({
           loading="lazy"
           className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-500"
           onError={(e) => {
-            (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1544717305-2782549b5136?q=80&w=800&auto=format&fit=crop';
+            (e.target as HTMLImageElement).src = getProfessionalComicSkeletonUrl(comic.title, comic.type || comic.comicType);
           }}
         />
 

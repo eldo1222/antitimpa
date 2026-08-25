@@ -664,7 +664,7 @@ export const AdminAdsTab: React.FC = () => {
                   <label className="block font-bold text-slate-300">Nama Pengiklan / Sponsor (Opsional)</label>
                   <input
                     type="text"
-                    placeholder="cth: KomikYuk Official / Game XYZ"
+                    placeholder="cth: AntiTimpa Official / Game XYZ"
                     value={sponsorName}
                     onChange={(e) => setSponsorName(e.target.value)}
                     className="w-full bg-[#181824] border border-[#242436] rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-hidden focus:border-[#ff5b14]"

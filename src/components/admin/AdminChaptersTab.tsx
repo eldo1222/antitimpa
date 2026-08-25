@@ -1,8 +1,9 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import { useApp } from '../../context/AppContext';
 import { Chapter, ChapterSourceType } from '../../types';
 import { formatGoogleDriveEmbedUrl, isGoogleDriveUrl } from '../../utils/driveHelper';
 import { downloadDrivePdf, convertImagesToPdf } from '../../utils/pdfConverter';
+import { getProfessionalComicSkeletonUrl } from '../common/ComicSkeletonBox';
 import { 
   Plus, 
   Trash2, 
@@ -23,7 +24,14 @@ import {
   Loader2,
   CheckSquare,
   Square,
-  ShieldAlert
+  ShieldAlert,
+  Search,
+  Folder,
+  FolderOpen,
+  ArrowLeft,
+  Filter,
+  Layers,
+  BookOpen
 } from 'lucide-react';
 
 export const AdminChaptersTab: React.FC = () => {
@@ -39,7 +47,17 @@ export const AdminChaptersTab: React.FC = () => {
     setIsAdminView 
   } = useApp();
   
+  // View Modes: 'folders' (Comic Folder Explorer) or 'chapters' (Detail Chapter Manager for Selected Comic)
+  const [viewMode, setViewMode] = useState<'folders' | 'chapters'>('folders');
   const [selectedComicId, setSelectedComicId] = useState<string>(comics[0]?.id || '');
+  
+  // Smart Search & Filter States for Comic Folders
+  const [comicSearchQuery, setComicSearchQuery] = useState('');
+  const [comicCategoryFilter, setComicCategoryFilter] = useState<'all' | 'has_chapters' | 'no_chapters' | '18plus' | 'manga' | 'manhwa' | 'doujin'>('all');
+  
+  // Chapter-specific search inside the active comic
+  const [chapterSearchQuery, setChapterSearchQuery] = useState('');
+
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingChapter, setEditingChapter] = useState<Chapter | null>(null);
 
@@ -80,7 +98,45 @@ export const AdminChaptersTab: React.FC = () => {
   const pdfInputRef = useRef<HTMLInputElement>(null);
 
   const currentComic = comics.find(c => c.id === selectedComicId);
-  const currentChapters = [...(chapters[selectedComicId] || [])].sort((a, b) => b.chapterNumber - a.chapterNumber);
+  const allCurrentChapters = [...(chapters[selectedComicId] || [])].sort((a, b) => b.chapterNumber - a.chapterNumber);
+
+  // Filtered Chapters based on search inside active comic
+  const currentChapters = useMemo(() => {
+    if (!chapterSearchQuery.trim()) return allCurrentChapters;
+    const q = chapterSearchQuery.toLowerCase().trim();
+    return allCurrentChapters.filter(ch => 
+      String(ch.chapterNumber).includes(q) ||
+      ch.title.toLowerCase().includes(q) ||
+      ch.sourceType.toLowerCase().includes(q)
+    );
+  }, [allCurrentChapters, chapterSearchQuery]);
+
+  // Filtered Comics for Folder Explorer
+  const filteredComics = useMemo(() => {
+    return comics.filter(c => {
+      const chList = chapters[c.id] || [];
+      const chCount = chList.length;
+
+      // Category / Status Filter
+      if (comicCategoryFilter === 'has_chapters' && chCount === 0) return false;
+      if (comicCategoryFilter === 'no_chapters' && chCount > 0) return false;
+      if (comicCategoryFilter === '18plus' && c.contentType !== '18plus') return false;
+      if (comicCategoryFilter === 'manga' && c.comicType !== 'manga' && c.type !== 'manga') return false;
+      if (comicCategoryFilter === 'manhwa' && c.comicType !== 'manhwa' && c.type !== 'manhwa') return false;
+      if (comicCategoryFilter === 'doujin' && c.comicType !== 'doujin' && c.type !== 'doujin') return false;
+
+      // Search Query
+      if (comicSearchQuery.trim()) {
+        const q = comicSearchQuery.toLowerCase().trim();
+        const matchTitle = c.title.toLowerCase().includes(q);
+        const matchAuthor = (c.storyWriter || '').toLowerCase().includes(q) || (c.artist || '').toLowerCase().includes(q);
+        const matchGenre = (c.genres || []).some(g => g.toLowerCase().includes(q));
+        if (!matchTitle && !matchAuthor && !matchGenre) return false;
+      }
+
+      return true;
+    });
+  }, [comics, chapters, comicCategoryFilter, comicSearchQuery]);
 
   // Selection Logic
   const isAllSelected = currentChapters.length > 0 && currentChapters.every(ch => selectedChapterIds.includes(ch.id));
@@ -97,6 +153,35 @@ export const AdminChaptersTab: React.FC = () => {
     setSelectedChapterIds(prev => 
       prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
     );
+  };
+
+  const handleOpenAddForComic = (comicId: string) => {
+    setSelectedComicId(comicId);
+    setViewMode('chapters');
+    const existingList = chapters[comicId] || [];
+    const highestCh = existingList.reduce((max, ch) => Math.max(max, ch.chapterNumber), 0);
+    setChapterNumber(highestCh + 1);
+    setTitle(`Chapter ${highestCh + 1}`);
+    setEditingChapter(null);
+    setSourceType('images');
+    setImageUploadMode('files');
+    setCustomImageFiles([]);
+    setImageUrlsText('');
+    setPageCount(8);
+    setPdfFileUrl('');
+    setPdfFileName('');
+    setPdfWebUrl('');
+    setDriveUrl('');
+    setDriveAccountId('');
+    setDriveNotes('');
+    setShowAddModal(true);
+  };
+
+  const handleOpenManageForComic = (comicId: string) => {
+    setSelectedComicId(comicId);
+    setSelectedChapterIds([]);
+    setChapterSearchQuery('');
+    setViewMode('chapters');
   };
 
   // Trigger Single Chapter Delete
@@ -339,80 +424,312 @@ export const AdminChaptersTab: React.FC = () => {
 
   return (
     <div className="space-y-4">
-      {/* Header Bar */}
-      <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between pb-2 border-b border-[#1c1c2a]">
-        <div>
-          <h2 className="text-base font-bold text-white flex items-center gap-2">
-            <FileText className="w-4 h-4 text-[#ff5b14]" />
-            <span>Manajemen Chapter Komik</span>
-          </h2>
-          <p className="text-xs text-slate-400">Pilih judul komik dan kelola chapter dengan berbagai opsi unggah (Gambar, PDF, Google Drive)</p>
+      {/* View Mode 1: Folderized Comic Explorer & Smart Search (Designed for scaling to 500+ comics) */}
+      {viewMode === 'folders' ? (
+        <div className="space-y-4 animate-in fade-in">
+          {/* Header Bar */}
+          <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between pb-2 border-b border-[#1c1c2a]">
+            <div>
+              <h2 className="text-base font-bold text-white flex items-center gap-2">
+                <Folder className="w-4 h-4 text-[#ff5b14]" />
+                <span>Katalog Folder Komik & Manajemen Chapter</span>
+              </h2>
+              <p className="text-xs text-slate-400">Pilih folder komik untuk melihat, menambah, atau mengedit daftar chapter di dalamnya</p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="px-3 py-1.5 rounded-xl bg-[#14141f] border border-[#202030] text-xs font-mono text-slate-300">
+                Total: <strong className="text-white">{comics.length}</strong> Komik
+              </span>
+            </div>
+          </div>
+
+          {/* Smart Search Bar & Filter Tabs */}
+          <div className="p-4 bg-[#12121a] rounded-2xl border border-[#1f1f2e] space-y-3 shadow-md">
+            <div className="relative">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Cari dari 500+ judul komik, nama author/artist, atau genre..."
+                value={comicSearchQuery}
+                onChange={(e) => setComicSearchQuery(e.target.value)}
+                className="w-full pl-10 pr-4 py-2.5 bg-[#171724] border border-[#26263a] rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#ff5b14] transition-all"
+              />
+              {comicSearchQuery && (
+                <button
+                  onClick={() => setComicSearchQuery('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+
+            {/* Filter Pills */}
+            <div className="flex items-center gap-1.5 flex-wrap pt-1">
+              {[
+                { id: 'all', label: `🌟 Semua (${comics.length})` },
+                { id: 'has_chapters', label: `📚 Ada Chapter (${comics.filter(c => (chapters[c.id] || []).length > 0).length})` },
+                { id: 'no_chapters', label: `⚠️ Kosong (${comics.filter(c => !(chapters[c.id] || []).length).length})` },
+                { id: '18plus', label: `🔞 18+ VIP (${comics.filter(c => c.contentType === '18plus').length})` },
+                { id: 'manhwa', label: `🇰🇷 Manhwa (${comics.filter(c => c.comicType === 'manhwa' || c.type === 'manhwa').length})` },
+                { id: 'manga', label: `🇯🇵 Manga (${comics.filter(c => c.comicType === 'manga' || c.type === 'manga').length})` },
+                { id: 'doujin', label: `🌸 Doujin (${comics.filter(c => c.comicType === 'doujin' || c.type === 'doujin').length})` }
+              ].map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => setComicCategoryFilter(tab.id as any)}
+                  className={`px-3 py-1 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                    comicCategoryFilter === tab.id
+                      ? 'bg-[#ff5b14] text-white shadow-md shadow-[#ff5b14]/20'
+                      : 'bg-[#181826] text-slate-400 hover:text-slate-200 hover:bg-[#202032] border border-[#252538]'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Folderized Comic Cards Grid */}
+          {filteredComics.length === 0 ? (
+            <div className="p-12 text-center bg-[#12121a] rounded-2xl border border-[#1f1f2e] space-y-3">
+              <FolderOpen className="w-10 h-10 text-slate-600 mx-auto" />
+              <p className="text-sm text-slate-400 font-semibold">Tidak ditemukan komik yang cocok dengan pencarian atau filter Anda.</p>
+              <button
+                onClick={() => {
+                  setComicSearchQuery('');
+                  setComicCategoryFilter('all');
+                }}
+                className="px-4 py-1.5 bg-[#181826] text-slate-300 text-xs font-bold rounded-xl border border-[#28283a] hover:bg-[#202032]"
+              >
+                Reset Filter
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3.5">
+              {filteredComics.map(comic => {
+                const chList = chapters[comic.id] || [];
+                const chCount = chList.length;
+                const is18 = comic.contentType === '18plus';
+
+                return (
+                  <div
+                    key={comic.id}
+                    className="p-3.5 bg-[#12121c] hover:bg-[#151522] border border-[#1f1f2e] hover:border-[#3a3a52] rounded-2xl flex flex-col justify-between transition-all duration-200 shadow-md group"
+                  >
+                    <div>
+                      <div className="flex gap-3 items-start mb-2.5">
+                        <div className="relative w-16 h-22 rounded-xl overflow-hidden shrink-0 bg-[#0d0d14] border border-[#222234]">
+                          <img
+                            src={comic.coverImage}
+                            alt={comic.title}
+                            referrerPolicy="no-referrer"
+                            loading="lazy"
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).src = getProfessionalComicSkeletonUrl(comic.title, comic.comicType || comic.type);
+                            }}
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                          />
+                        </div>
+
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1 mb-1 flex-wrap">
+                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-extrabold uppercase ${
+                              is18 ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30' : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                            }`}>
+                              {is18 ? '18+ VIP' : 'GRATIS'}
+                            </span>
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-[#181826] text-slate-400 border border-[#252538]">
+                              {comic.comicType || comic.type || 'manga'}
+                            </span>
+                          </div>
+
+                          <h4 className="font-bold text-xs text-white truncate group-hover:text-[#ff7a3d] transition-colors" title={comic.title}>
+                            {comic.title}
+                          </h4>
+                          <p className="text-[10px] text-slate-400 truncate mt-0.5">
+                            {comic.genres?.slice(0, 2).join(', ') || 'General'}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Chapter Status Pill */}
+                      <div className="mb-3">
+                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-bold ${
+                          chCount > 0 
+                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/25' 
+                            : 'bg-amber-500/10 text-amber-300 border border-amber-500/25'
+                        }`}>
+                          <Folder className="w-3.5 h-3.5" />
+                          <span>{chCount > 0 ? `${chCount} Chapter Siap Baca` : '0 Chapter (Kosong)'}</span>
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Action Buttons */}
+                    <div className="grid grid-cols-2 gap-2 pt-2 border-t border-[#1a1a28]">
+                      <button
+                        onClick={() => handleOpenManageForComic(comic.id)}
+                        className="w-full py-1.5 bg-[#1a1a2a] hover:bg-[#222236] text-slate-200 hover:text-white text-xs font-bold rounded-xl border border-[#28283c] flex items-center justify-center gap-1 cursor-pointer transition-colors"
+                      >
+                        <FolderOpen className="w-3.5 h-3.5 text-[#ff5b14]" />
+                        <span>Kelola ({chCount})</span>
+                      </button>
+
+                      <button
+                        onClick={() => handleOpenAddForComic(comic.id)}
+                        className="w-full py-1.5 bg-[#ff5b14]/15 hover:bg-[#ff5b14]/25 text-[#ff7a3d] text-xs font-bold rounded-xl border border-[#ff5b14]/30 flex items-center justify-center gap-1 cursor-pointer transition-colors"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>+ Upload</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
+      ) : (
+        /* View Mode 2: Detailed Chapter Manager for Selected Comic */
+        <div className="space-y-4 animate-in fade-in">
+          {/* Top Breadcrumb Header Bar */}
+          <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between pb-2 border-b border-[#1c1c2a]">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setViewMode('folders')}
+                className="px-3 py-1.5 bg-[#161622] hover:bg-[#1e1e2e] text-slate-300 hover:text-white rounded-xl border border-[#252538] text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors shadow"
+              >
+                <ArrowLeft className="w-4 h-4 text-[#ff5b14]" />
+                <span>Semua Folder Komik</span>
+              </button>
 
-        <button
-          onClick={handleOpenAdd}
-          className="px-3.5 py-2 bg-[#ff5b14] hover:bg-[#e04e0e] text-white text-xs font-bold rounded-xl shadow-md flex items-center gap-1.5 transition-all cursor-pointer"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Upload Chapter Baru</span>
-        </button>
-      </div>
+              <div className="hidden sm:block h-5 w-px bg-[#242436]" />
 
-      {/* Select Comic Dropdown & Stats */}
-      <div className="p-3.5 bg-[#12121a] rounded-xl border border-[#1f1f2e] flex flex-col sm:flex-row items-start sm:items-center gap-3">
-        <label className="text-xs font-bold text-slate-300 whitespace-nowrap">Pilih Komik:</label>
-        <select
-          value={selectedComicId}
-          onChange={(e) => {
-            setSelectedComicId(e.target.value);
-            setSelectedChapterIds([]);
-          }}
-          className="flex-1 w-full bg-[#181824] border border-[#28283a] rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-[#ff5b14]"
-        >
-          {comics.map(c => (
-            <option key={c.id} value={c.id}>
-              {c.title} — ({c.status}) • {(chapters[c.id] || []).length} Chapter
-            </option>
-          ))}
-        </select>
+              <div>
+                <h2 className="text-sm font-bold text-white flex items-center gap-2 truncate max-w-md">
+                  <span>📁</span>
+                  <span className="truncate">{currentComic?.title || 'Manajemen Chapter'}</span>
+                </h2>
+                <p className="text-[11px] text-slate-400">Total {allCurrentChapters.length} chapter terdaftar di database</p>
+              </div>
+            </div>
 
-        {currentComic && (
-          <div className="text-xs text-slate-400 flex items-center gap-2">
-            <span className="px-2 py-0.5 rounded bg-[#1c1c2b] text-slate-300 font-semibold text-[11px]">
-              Total: {currentChapters.length} Chapter
-            </span>
-          </div>
-        )}
-      </div>
-
-      {/* Batch Action Toolbar for Chapters */}
-      {selectedChapterIds.length > 0 && (
-        <div className="p-3 bg-[#171724] border border-[#ff5b14]/40 rounded-xl flex items-center justify-between gap-3 animate-in fade-in shadow-lg">
-          <div className="flex items-center gap-2 text-xs text-white">
-            <span className="px-2.5 py-1 rounded-lg bg-[#ff5b14] font-extrabold text-white">
-              {selectedChapterIds.length} Chapter Terpilih
-            </span>
-            <span className="text-slate-400 hidden sm:inline">Pilih tindakan batch:</span>
+            <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
+              <button
+                onClick={handleOpenAdd}
+                className="px-3.5 py-2 bg-[#ff5b14] hover:bg-[#e04e0e] text-white text-xs font-bold rounded-xl shadow-md flex items-center gap-1.5 transition-all cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Upload Chapter Baru</span>
+              </button>
+            </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleRequestBatchDelete}
-              className="px-3.5 py-1.5 bg-red-600/20 hover:bg-red-600/30 text-red-400 border border-red-500/30 text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer transition-colors"
-              title="Hapus bab-bab terpilih sekaligus"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span>Hapus Banyak ({selectedChapterIds.length})</span>
-            </button>
+          {/* Comic Summary Header Card with Quick Switcher */}
+          {currentComic && (
+            <div className="p-4 bg-[#12121c] rounded-2xl border border-[#1f1f2e] flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-md">
+              <div className="flex items-center gap-3.5 min-w-0">
+                <img
+                  src={currentComic.coverImage}
+                  alt={currentComic.title}
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).src = getProfessionalComicSkeletonUrl(currentComic.title, currentComic.comicType || currentComic.type);
+                  }}
+                  className="w-12 h-16 rounded-xl object-cover border border-[#26263a] shrink-0"
+                />
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5 mb-1 flex-wrap">
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-extrabold uppercase ${
+                      currentComic.contentType === '18plus' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30' : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                    }`}>
+                      {currentComic.contentType === '18plus' ? '18+ VIP' : 'GRATIS'}
+                    </span>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-[#181826] text-slate-300 border border-[#252538]">
+                      {currentComic.comicType || currentComic.type || 'manga'}
+                    </span>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-[#181826] text-slate-400">
+                      {allCurrentChapters.length} Chapter
+                    </span>
+                  </div>
+                  <h3 className="font-extrabold text-sm text-white truncate">{currentComic.title}</h3>
+                  <p className="text-xs text-slate-400 truncate mt-0.5">
+                    Penulis: <span className="text-slate-300">{currentComic.storyWriter || 'Official'}</span> • Genre: {currentComic.genres?.slice(0, 3).join(', ')}
+                  </p>
+                </div>
+              </div>
 
-            <button
-              onClick={() => setSelectedChapterIds([])}
-              className="p-1.5 text-slate-400 hover:text-white rounded-lg cursor-pointer"
-              title="Batalkan Pilihan"
-            >
-              <X className="w-4 h-4" />
-            </button>
+              {/* Quick Comic Dropdown Switcher */}
+              <div className="w-full md:w-auto flex items-center gap-2">
+                <label className="text-xs font-bold text-slate-400 whitespace-nowrap">Ganti Komik:</label>
+                <select
+                  value={selectedComicId}
+                  onChange={(e) => {
+                    setSelectedComicId(e.target.value);
+                    setSelectedChapterIds([]);
+                    setChapterSearchQuery('');
+                  }}
+                  className="w-full md:w-64 bg-[#181824] border border-[#28283a] rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-[#ff5b14]"
+                >
+                  {comics.map(c => (
+                    <option key={c.id} value={c.id}>
+                      {c.title} ({(chapters[c.id] || []).length} Ch)
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
+
+          {/* Chapter Quick Search Bar */}
+          <div className="p-3 bg-[#12121a] rounded-xl border border-[#1f1f2e] flex items-center justify-between gap-3">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Cari chapter berdasarkan nomor (#10) atau judul..."
+                value={chapterSearchQuery}
+                onChange={(e) => setChapterSearchQuery(e.target.value)}
+                className="w-full pl-9 pr-4 py-1.5 bg-[#171724] border border-[#26263a] rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#ff5b14]"
+              />
+            </div>
+
+            <div className="text-xs text-slate-400 font-mono shrink-0">
+              Menampilkan: <strong className="text-white">{currentChapters.length}</strong> / {allCurrentChapters.length}
+            </div>
           </div>
+
+          {/* Batch Action Toolbar for Chapters */}
+          {selectedChapterIds.length > 0 && (
+            <div className="p-3 bg-[#171724] border border-[#ff5b14]/40 rounded-xl flex items-center justify-between gap-3 animate-in fade-in shadow-lg">
+              <div className="flex items-center gap-2 text-xs text-white">
+                <span className="px-2.5 py-1 rounded-lg bg-[#ff5b14] font-extrabold text-white">
+                  {selectedChapterIds.length} Chapter Terpilih
+                </span>
+                <span className="text-slate-400 hidden sm:inline">Pilih tindakan batch:</span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleRequestBatchDelete}
+                  className="px-3.5 py-1.5 bg-red-600/20 hover:bg-red-600/30 text-red-400 border border-red-500/30 text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer transition-colors"
+                  title="Hapus bab-bab terpilih sekaligus"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Hapus Banyak ({selectedChapterIds.length})</span>
+                </button>
+
+                <button
+                  onClick={() => setSelectedChapterIds([])}
+                  className="p-1.5 text-slate-400 hover:text-white rounded-lg cursor-pointer"
+                  title="Batalkan Pilihan"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

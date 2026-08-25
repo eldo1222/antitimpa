@@ -9,7 +9,8 @@ import {
   ChevronRight, 
   Play, 
   Clock, 
-  Star 
+  Star,
+  Lock
 } from 'lucide-react';
 
 export const LibraryView: React.FC = () => {
@@ -21,8 +22,13 @@ export const LibraryView: React.FC = () => {
     chapters, 
     selectComic, 
     startReading, 
-    toggleBookmark 
+    toggleBookmark,
+    currentUser,
+    googleUser,
+    openLoginModal
   } = useApp();
+
+  const isUserAuthenticated = !!currentUser || !!googleUser;
 
   const [activeTab, setActiveTab] = useState<'bookmarks' | 'history'>('bookmarks');
 
@@ -85,14 +91,32 @@ export const LibraryView: React.FC = () => {
                       src={comic.coverImage} 
                       alt={comic.title} 
                       referrerPolicy="no-referrer"
+                      style={{ filter: !isUserAuthenticated ? 'blur(10px)' : 'none' }}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" 
                     />
+
+                    {/* Sensor Blur Lock for Unauthenticated Visitors */}
+                    {!isUserAuthenticated && (
+                      <div 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openLoginModal('Daftar / Masuk dengan Akun Google untuk membuka sensor koleksi.');
+                        }}
+                        className="absolute inset-0 flex flex-col items-center justify-center bg-black/40 backdrop-blur-[2px] p-2 text-center"
+                      >
+                        <Lock className="w-4 h-4 text-white drop-shadow-md" />
+                        <span className="text-[8px] font-black text-white uppercase tracking-tighter mt-1 bg-red-600/90 px-1 py-0.2 rounded shadow">
+                          18+ Sensor
+                        </span>
+                      </div>
+                    )}
+
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
                         toggleBookmark(comic.id);
                       }}
-                      className="absolute top-2 right-2 p-1.5 rounded-lg bg-black/60 text-[#ff5b14] hover:bg-black transition-colors cursor-pointer"
+                      className="absolute top-2 right-2 p-1.5 rounded-lg bg-black/60 text-[#ff5b14] hover:bg-black transition-colors cursor-pointer z-10"
                       title="Hapus dari Bookmark"
                     >
                       <Bookmark className="w-3.5 h-3.5 fill-[#ff5b14]" />
@@ -154,12 +178,20 @@ export const LibraryView: React.FC = () => {
                   }}
                   className="p-3 bg-[#12121a] hover:bg-[#161622] border border-[#222232] hover:border-[#ff5b14]/40 rounded-2xl flex gap-3.5 cursor-pointer group transition-all"
                 >
-                  <img 
-                    src={comic.coverImage} 
-                    alt={comic.title} 
-                    referrerPolicy="no-referrer"
-                    className="w-16 h-22 rounded-xl object-cover ring-1 ring-white/10 shrink-0 group-hover:scale-102 transition-transform" 
-                  />
+                  <div className="relative w-16 h-22 rounded-xl overflow-hidden ring-1 ring-white/10 shrink-0 group-hover:scale-102 transition-transform bg-[#181824]">
+                    <img 
+                      src={comic.coverImage} 
+                      alt={comic.title} 
+                      referrerPolicy="no-referrer"
+                      style={{ filter: !isUserAuthenticated ? 'blur(10px)' : 'none' }}
+                      className="w-full h-full object-cover transition-all" 
+                    />
+                    {!isUserAuthenticated && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-black/40 backdrop-blur-[2px]">
+                        <Lock className="w-3.5 h-3.5 text-white drop-shadow" />
+                      </div>
+                    )}
+                  </div>
                   <div className="flex flex-col justify-between flex-1 min-w-0">
                     <div>
                       <h4 className="font-bold text-xs sm:text-sm text-white truncate group-hover:text-[#ff5b14] transition-colors">

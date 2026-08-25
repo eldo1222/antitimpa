@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useApp } from '../../context/AppContext';
 import { ComicPage } from '../../types';
 import { downloadDrivePdf, convertImagesToPdf } from '../../utils/pdfConverter';
+import { getProfessionalComicSkeletonUrl, ComicReaderPageSkeleton } from '../common/ComicSkeletonBox';
 import { AdBanner } from './AdBanner';
 import { 
   ArrowLeft, 
@@ -411,8 +412,8 @@ export const ComicReaderView: React.FC = () => {
       return;
     }
 
-    // Fallback: Clean illustrated placeholder
-    target.src = 'https://images.unsplash.com/photo-1578632767115-351597cf2477?w=800&auto=format&fit=crop&q=80';
+    // Fallback: Professional Dark Comic Storyboard Skeleton
+    target.src = getProfessionalComicSkeletonUrl(currentComic?.title || 'Komik AntiTimpa', currentComic?.comicType || 'manga');
   };
 
   return (
@@ -651,6 +652,13 @@ export const ComicReaderView: React.FC = () => {
         ) : readingMode === 'vertical' ? (
           /* CASE 3: Vertical Webtoon Scroll Mode (JPG / Image Pages) */
           <div className="w-full max-w-2xl mx-auto flex flex-col items-center py-12 px-1 sm:px-2 space-y-3">
+            {isLoadingPages && pages.length === 0 ? (
+              <div className="w-full py-4 space-y-4">
+                <ComicReaderPageSkeleton pageIndex={1} />
+                <ComicReaderPageSkeleton pageIndex={2} />
+              </div>
+            ) : null}
+
             {pages.map((page, idx) => {
               const pageUrl = typeof page === 'string' ? page : page.imageUrl;
               const pageId = typeof page === 'string' ? `page-${idx}` : page.id;

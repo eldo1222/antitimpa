@@ -139,7 +139,7 @@ export const OfflineGuard: React.FC<OfflineGuardProps> = ({ children }) => {
           </h2>
           
           <p className="text-sm text-slate-300 leading-relaxed mb-6">
-            Data internet seluler atau Wi-Fi Anda sedang mati. KomikYuk memerlukan koneksi aktif secara <i>real-time</i> untuk memuat gambar komik, validasi akun, dan perlindungan konten.
+            Data internet seluler atau Wi-Fi Anda sedang mati. AntiTimpa memerlukan koneksi aktif secara <i>real-time</i> untuk memuat gambar komik, validasi akun, dan perlindungan konten.
           </p>
 
           <div className="w-full bg-[#17171f] border border-slate-800 rounded-xl p-3.5 mb-6 text-left flex items-start gap-3">

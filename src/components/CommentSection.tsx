@@ -52,7 +52,7 @@ export const CommentSection: React.FC<CommentSectionProps> = ({
   const activeUser = googleUser || (currentUser ? {
     uid: currentUser.id,
     displayName: currentUser.username,
-    email: `${currentUser.username}@komikyuk.id`,
+    email: `${currentUser.username}@antitimpa.id`,
     photoURL: currentUser.role === 'admin' 
       ? 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80'
       : 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120&auto=format&fit=crop&q=80'
