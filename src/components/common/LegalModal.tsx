@@ -49,10 +49,10 @@ export const LegalModal: React.FC<LegalModalProps> = ({ isOpen, onClose, type })
             <div className="p-3 bg-[#181824] rounded-xl border border-[#262638] space-y-1">
               <h4 className="font-bold text-white flex items-center gap-1.5">
                 <ShieldCheck className="w-3.5 h-3.5 text-[#ff5b14]" />
-                2. Keamanan Akun &amp; Proteksi Sandi (ISO/IEC 27001)
+                2. Keamanan Akun &amp; Perlindungan Kredensial
               </h4>
               <p className="text-[11px] text-slate-400">
-                Sistem menerapkan kebijakan mitigasi brute-force 3-strike lockout, enkripsi transport SSL/TLS, dan pencatatan audit log berstandar keamanan informasi. Setiap aktivitas kritis diaudit untuk mencegah akses tidak sah.
+                Sistem menerapkan kebijakan mitigasi brute-force, transmisi data terenkripsi HTTPS/TLS standar industri, serta pembatasan sesi lokal guna mencegah akses tidak sah terhadap akun Anda.
               </p>
             </div>
 
@@ -81,21 +81,21 @@ export const LegalModal: React.FC<LegalModalProps> = ({ isOpen, onClose, type })
             <div className="p-3 bg-[#181824] rounded-xl border border-[#262638] space-y-1">
               <h4 className="font-bold text-white">1. Batasan Tanggung Jawab Konten</h4>
               <p className="text-[11px] text-slate-400">
-                Seluruh gambar, karakter, nama cerita, dan materi grafis komik (Manga, Manhwa, Manhua) yang ditampilkan dalam website ini merupakan hak cipta eksklusif dari masing-masing kreator, komikus, dan penerbit aslinya. Konten disediakan semata-mata untuk keperluan pratinjau dan edukasi fiksi.
+                Seluruh gambar, karakter, judul seri, dan materi grafis komik (Manga, Manhwa, Manhua) yang diindeks dalam website ini merupakan hak cipta dan merek dagang eksklusif dari masing-masing kreator, komikus, dan penerbit aslinya. Website ini bertindak sebagai antarmuka katalog pratinjau yang merujuk pada feed dan tautan pihak ketiga.
               </p>
             </div>
 
             <div className="p-3 bg-[#181824] rounded-xl border border-[#262638] space-y-1">
               <h4 className="font-bold text-white">2. Kebijakan Dukungan Karya Orisinal</h4>
               <p className="text-[11px] text-slate-400">
-                Kami sangat mengimbau para pembaca untuk senantiasa mendukung komikus dengan membeli buku fisik resmi, komik cetak, atau berlangganan platform orisinal resmi penerbit jika tersedia di wilayah/kota Anda.
+                Kami sangat mengimbau para pembaca untuk senantiasa mendukung komikus dan industri komik dengan membeli komik cetak fisik resmi atau berlangganan platform orisinal berlisensi jika tersedia di wilayah Anda.
               </p>
             </div>
 
             <div className="p-3 bg-[#181824] rounded-xl border border-[#262638] space-y-1">
-              <h4 className="font-bold text-white">3. Permintaan Takedown Hak Cipta (DMCA / Removal)</h4>
+              <h4 className="font-bold text-white">3. Prosedur Pemberitahuan &amp; Penarikan Konten (DMCA / Takedown Notice)</h4>
               <p className="text-[11px] text-slate-400">
-                Jika Anda adalah pemilik hak cipta sah atas salah satu materi dan bermaksud mengajukan penarikan konten, silakan hubungi kontak Administrator kami untuk proses penghapusan instan dalam 1x24 jam.
+                Jika Anda adalah pemilik sah hak cipta atau perwakilan resminya dan ingin mengajukan penarikan konten, silakan kirimkan pemberitahuan resmi (Notice &amp; Takedown) dengan menyertakan bukti kepemilikan dan tautan terkait. Tim kami berkomitmen meninjau dan menghapus tautan atau konten yang dipersengketakan dalam waktu 1x24 jam kerja.
               </p>
             </div>
           </div>

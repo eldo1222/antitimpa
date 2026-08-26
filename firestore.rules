@@ -1,8 +1,70 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /{document=**} {
-      allow read, write: if true;
+
+    function isValidString(val, minLen, maxLen) {
+      return val is string && val.size() >= minLen && val.size() <= maxLen;
+    }
+
+    match /comics/{comicId} {
+      allow read: if true;
+      allow create, update: if request.resource.data.title != null && isValidString(request.resource.data.title, 1, 300);
+      allow delete: if true;
+    }
+
+    match /chapters/{chapterId} {
+      allow read: if true;
+      allow create, update: if request.resource.data.comicId != null;
+      allow delete: if true;
+    }
+
+    match /banners/{bannerId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    match /ads/{adId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    match /adSettings/{docId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    match /systemSettings/{docId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    match /systemMetadata/{docId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    match /driveAccounts/{driveId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    match /activityLogs/{logId} {
+      allow read: if true;
+      allow create: if request.resource.data.action != null;
+      allow update, delete: if true;
+    }
+
+    match /comments/{commentId} {
+      allow read: if true;
+      allow create: if isValidString(request.resource.data.content, 1, 2000)
+                    && request.resource.data.comicId != null;
+      allow update, delete: if true;
+    }
+
+    match /users/{userId} {
+      allow read: if true;
+      allow create, update: if isValidString(request.resource.data.username, 2, 60);
+      allow delete: if true;
     }
   }
 }
