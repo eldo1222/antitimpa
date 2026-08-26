@@ -164,7 +164,7 @@ export const AdminScraperTab: React.FC = () => {
       const contentType = res.headers.get('content-type') || '';
       if (res.ok && contentType.includes('application/json')) {
         const data = await res.json();
-        if (data && data.success) {
+        if (data && data.success && data.mode !== 'client_turbo') {
           serverSuccess = true;
           setAutoScraperInfo(prev => ({ 
             ...prev, 

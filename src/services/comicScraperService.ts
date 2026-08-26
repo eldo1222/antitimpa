@@ -1448,22 +1448,32 @@ export async function runClientSideMassScraper(options: ClientScraperOptions): P
       }
 
       try {
-        const mdUrl = `https://api.mangadex.org/manga?${stream.params}&limit=100&offset=${currentOffset}&includes[]=cover_art&includes[]=author&includes[]=artist`;
-        
         let mdData: any = null;
+        
+        // 1. Try Netlify Serverless Proxy First
         try {
-          const res = await fetch(mdUrl, {
-            headers: { Accept: 'application/json' }
-          });
-          if (res.ok) {
-            mdData = await res.json();
+          const proxyRes = await fetch(`/api/mangadex/search?limit=100&offset=${currentOffset}&${stream.params}`);
+          const contentType = proxyRes.headers.get('content-type') || '';
+          if (proxyRes.ok && contentType.includes('application/json')) {
+            const parsed = await proxyRes.json();
+            if (parsed && Array.isArray(parsed.data) && parsed.data.length > 0) {
+              mdData = parsed;
+            }
           }
-        } catch (fetchErr) {
-          // If direct MangaDex fetch was blocked by CORS, try proxy fallback
+        } catch (_) {}
+
+        // 2. Direct MangaDex API Fallback
+        if (!mdData || !Array.isArray(mdData.data) || mdData.data.length === 0) {
           try {
-            const proxyRes = await fetch(`/api/mangadex/search?limit=100&offset=${currentOffset}&${stream.params}`);
-            if (proxyRes.ok) {
-              mdData = await proxyRes.json();
+            const mdUrl = `https://api.mangadex.org/manga?${stream.params}&limit=100&offset=${currentOffset}&includes[]=cover_art&includes[]=author&includes[]=artist`;
+            const res = await fetch(mdUrl, {
+              headers: { Accept: 'application/json' }
+            });
+            if (res.ok) {
+              const parsed = await res.json();
+              if (parsed && Array.isArray(parsed.data)) {
+                mdData = parsed;
+              }
             }
           } catch (_) {}
         }
@@ -1623,14 +1633,40 @@ export async function runClientSideMassScraper(options: ClientScraperOptions): P
       const curPage = persistentOffsets[jStream.key] || 1;
 
       try {
-        let jUrl = `https://api.jikan.moe/v4/top/manga?page=${curPage}&limit=25`;
-        if (jStream.type) jUrl += `&type=${jStream.type}`;
-        if (jStream.filter) jUrl += `&filter=${jStream.filter}`;
+        let jData: any = null;
 
-        const jRes = await fetch(jUrl, { headers: { Accept: 'application/json' } });
-        if (jRes.ok) {
-          const jData = await jRes.json();
-          const jItems = jData.data || [];
+        // 1. Try Jikan Netlify Serverless Proxy First
+        try {
+          let proxyUrl = `/api/jikan/top?page=${curPage}&limit=25`;
+          if (jStream.type) proxyUrl += `&type=${jStream.type}`;
+          if (jStream.filter) proxyUrl += `&filter=${jStream.filter}`;
+          const pRes = await fetch(proxyUrl);
+          const pType = pRes.headers.get('content-type') || '';
+          if (pRes.ok && pType.includes('application/json')) {
+            const parsed = await pRes.json();
+            if (parsed && Array.isArray(parsed.data) && parsed.data.length > 0) {
+              jData = parsed;
+            }
+          }
+        } catch (_) {}
+
+        // 2. Direct Jikan MOE Fallback
+        if (!jData || !Array.isArray(jData.data) || jData.data.length === 0) {
+          let jUrl = `https://api.jikan.moe/v4/top/manga?page=${curPage}&limit=25`;
+          if (jStream.type) jUrl += `&type=${jStream.type}`;
+          if (jStream.filter) jUrl += `&filter=${jStream.filter}`;
+
+          const jRes = await fetch(jUrl, { headers: { Accept: 'application/json' } });
+          if (jRes.ok) {
+            const parsed = await jRes.json();
+            if (parsed && Array.isArray(parsed.data)) {
+              jData = parsed;
+            }
+          }
+        }
+
+        if (jData && Array.isArray(jData.data)) {
+          const jItems = jData.data;
 
           if (jItems.length > 0) {
             persistentOffsets[jStream.key] = curPage + 1;

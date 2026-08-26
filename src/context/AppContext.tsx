@@ -41,9 +41,11 @@ import {
   subscribeToFirestore,
   fetchUserFromFirestore,
   saveComicToFirestore,
+  batchSaveComicsToFirestore,
   deleteComicFromFirestore,
   batchDeleteComicsFromFirestore,
   saveChapterToFirestore,
+  batchSaveChaptersToFirestore,
   deleteChapterFromFirestore,
   batchDeleteChaptersFromFirestore,
   cleanOrphanDataFromFirestore,
@@ -1694,15 +1696,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       return nextChapters;
     });
 
-    // Persist all to Central Server and Firestore
-    items.forEach(item => {
-      saveComicToFirestore(item.comic);
-      centralSync.saveComic(item.comic);
-      item.chapters.forEach(ch => {
-        saveChapterToFirestore(ch);
-        centralSync.saveChapter(ch);
-      });
-    });
+    // Atomic Batch Persistence to Firestore (Optimized for Netlify & High Capacity)
+    const comicsToSave = items.map(item => item.comic);
+    const chaptersToSave = items.flatMap(item => item.chapters);
+
+    batchSaveComicsToFirestore(comicsToSave).catch(e => console.warn('Batch comics Firestore save error:', e));
+    batchSaveChaptersToFirestore(chaptersToSave).catch(e => console.warn('Batch chapters Firestore save error:', e));
+
+    // Non-blocking background sync for full-stack mode
+    comicsToSave.forEach(c => centralSync.saveComic(c).catch(() => {}));
+    chaptersToSave.forEach(ch => centralSync.saveChapter(ch).catch(() => {}));
 
     showAdminToast('Batch Import Selesai', `Berhasil menyuntikkan ${items.length} komik lengkap ke katalog.`, 'success');
 

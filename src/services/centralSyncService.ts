@@ -98,8 +98,10 @@ class CentralSyncService {
     try {
       const res = await fetch(`/api/data/version?v=${this.lastVersion}`);
       if (!res.ok) return;
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) return;
       const data = await res.json();
-      if (data.hasUpdate) {
+      if (data && data.hasUpdate) {
         await this.fetchFullDatabase();
       }
     } catch (e) {
@@ -111,6 +113,8 @@ class CentralSyncService {
     try {
       const res = await fetch('/api/data');
       if (!res.ok) return null;
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) return null;
       const state: CentralDatabaseState = await res.json();
       if (state) {
         this.lastVersion = state.version || Date.now();
@@ -118,7 +122,7 @@ class CentralSyncService {
         return state;
       }
     } catch (e) {
-      console.warn('[CentralSync] Failed to fetch central database from server:', e);
+      // ignore
     }
     return null;
   }

@@ -1,11 +1,15 @@
 export async function handler(event: any) {
   const query = event.queryStringParameters || {};
   const q = query.q || '';
-  const limit = query.limit || '20';
+  const limit = query.limit || '25';
+  const page = query.page || '1';
+  const type = query.type || '';
+  const filter = query.filter || '';
 
   const headers = {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Content-Type': 'application/json'
   };
 
@@ -14,16 +18,21 @@ export async function handler(event: any) {
   }
 
   try {
-    const url = q.trim()
-      ? `https://api.jikan.moe/v4/manga?q=${encodeURIComponent(q.trim())}&limit=${limit}&sfw=false`
-      : `https://api.jikan.moe/v4/top/manga?limit=${limit}&filter=bypopularity`;
+    let url = '';
+    if (q.trim()) {
+      url = `https://api.jikan.moe/v4/manga?q=${encodeURIComponent(q.trim())}&limit=${limit}&page=${page}&sfw=false`;
+    } else {
+      url = `https://api.jikan.moe/v4/top/manga?limit=${limit}&page=${page}`;
+      if (type) url += `&type=${encodeURIComponent(type)}`;
+      if (filter) url += `&filter=${encodeURIComponent(filter)}`;
+    }
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 7000);
+    const timeout = setTimeout(() => controller.abort(), 8000);
     const response = await fetch(url, {
       signal: controller.signal,
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) KomikYuk-App/1.0',
+        'User-Agent': 'Mozilla/5.0 (compatible; KomikYuk/2.0)',
         'Accept': 'application/json'
       }
     });
@@ -31,9 +40,9 @@ export async function handler(event: any) {
 
     if (!response.ok) {
       return {
-        statusCode: response.status,
+        statusCode: 200,
         headers,
-        body: JSON.stringify({ error: `Jikan API status ${response.status}`, data: [] })
+        body: JSON.stringify({ data: [], error: `Jikan API status ${response.status}` })
       };
     }
 
@@ -45,9 +54,9 @@ export async function handler(event: any) {
     };
   } catch (err: any) {
     return {
-      statusCode: 500,
+      statusCode: 200,
       headers,
-      body: JSON.stringify({ error: err.message, data: [] })
+      body: JSON.stringify({ data: [], error: err.message })
     };
   }
 }

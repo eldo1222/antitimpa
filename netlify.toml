@@ -1,0 +1,49 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+  functions = "netlify/functions"
+
+[[redirects]]
+  from = "/api/mangadex/search*"
+  to = "/.netlify/functions/mangadex-proxy"
+  status = 200
+
+[[redirects]]
+  from = "/api/mangadex/chapters/:mangaId"
+  to = "/.netlify/functions/mangadex-proxy?action=chapters&mangaId=:mangaId"
+  status = 200
+
+[[redirects]]
+  from = "/api/mangadex/pages/:chapterId"
+  to = "/.netlify/functions/mangadex-proxy?action=pages&chapterId=:chapterId"
+  status = 200
+
+[[redirects]]
+  from = "/api/mangadex/*"
+  to = "/.netlify/functions/mangadex-proxy"
+  status = 200
+
+[[redirects]]
+  from = "/api/jikan/*"
+  to = "/.netlify/functions/jikan-proxy"
+  status = 200
+
+[[redirects]]
+  from = "/api/komikcast/*"
+  to = "/.netlify/functions/komikcast-proxy"
+  status = 200
+
+[[redirects]]
+  from = "/api/proxy-image*"
+  to = "/.netlify/functions/image-proxy"
+  status = 200
+
+[[redirects]]
+  from = "/api/scraper/*"
+  to = "/.netlify/functions/scraper-proxy"
+  status = 200
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

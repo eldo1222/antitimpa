@@ -7,16 +7,30 @@ export async function handler(event: any) {
 
   const headers = {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Content-Type': 'application/json'
   };
 
+  if (event.httpMethod === 'OPTIONS') {
+    return { statusCode: 200, headers, body: JSON.stringify({ ok: true }) };
+  }
+
   try {
+    // 1. Chapters Feed for specific Manga
     if (action === 'chapters' && mangaId) {
       const directUrl = `https://api.mangadex.org/manga/${mangaId}/feed?limit=100&order[chapter]=asc&includes[]=scanlation_group`;
-      const res = await fetch(directUrl, { headers: { 'User-Agent': 'AntiTimpa-Client/2.0' } });
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 9000);
+      
+      const res = await fetch(directUrl, {
+        signal: controller.signal,
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; KomikYuk/2.0)', 'Accept': 'application/json' }
+      });
+      clearTimeout(timeout);
+
       if (!res.ok) {
-        return { statusCode: res.status, headers, body: JSON.stringify({ chapters: [] }) };
+        return { statusCode: 200, headers, body: JSON.stringify({ chapters: [] }) };
       }
       const json = await res.json();
       const rawChapters = json.data || [];
@@ -50,7 +64,7 @@ export async function handler(event: any) {
           id: ch.id,
           chapterNumber: chNum,
           title: rawTitle.trim() ? `Chapter ${chNum}: ${rawTitle.trim()}` : `Chapter ${chNum}`,
-          pagesCount: ch.attributes?.pages || 8,
+          pageCount: ch.attributes?.pages || 10,
           releaseDate: (ch.attributes?.publishAt || ch.attributes?.readableAt || new Date().toISOString()).split('T')[0],
           translatedLanguage: ch.attributes?.translatedLanguage || 'en'
         };
@@ -63,10 +77,19 @@ export async function handler(event: any) {
       };
     }
 
+    // 2. Chapter Page Images
     if (action === 'pages' && chapterId) {
-      const atHomeRes = await fetch(`https://api.mangadex.org/at-home/server/${chapterId}`);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 9000);
+
+      const atHomeRes = await fetch(`https://api.mangadex.org/at-home/server/${chapterId}`, {
+        signal: controller.signal,
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; KomikYuk/2.0)', 'Accept': 'application/json' }
+      });
+      clearTimeout(timeout);
+
       if (!atHomeRes.ok) {
-        return { statusCode: atHomeRes.status, headers, body: JSON.stringify({ pages: [] }) };
+        return { statusCode: 200, headers, body: JSON.stringify({ pages: [] }) };
       }
       const atHomeData = await atHomeRes.json();
       const baseUrl = atHomeData.baseUrl;
@@ -87,38 +110,56 @@ export async function handler(event: any) {
       };
     }
 
-    if (action === 'search' || title || query.limit || query.offset || query.originalLanguage || query.includedTags) {
-      let rawQueryString = event.rawQuery || '';
-      if (!rawQueryString) {
-        const p = new URLSearchParams();
-        Object.entries(query).forEach(([k, v]) => {
-          if (k !== 'action') p.append(k, String(v));
-        });
-        rawQueryString = p.toString();
-      }
-      
-      const searchUrl = `https://api.mangadex.org/manga?${rawQueryString}`;
-      const res = await fetch(searchUrl, {
-        headers: { 'User-Agent': 'AntiTimpa-Client/2.0', 'Accept': 'application/json' }
+    // 3. Search / Multi-Stream Listing
+    let rawQueryString = event.rawQuery || '';
+    if (!rawQueryString) {
+      const p = new URLSearchParams();
+      Object.entries(query).forEach(([k, v]) => {
+        if (k !== 'action') p.append(k, String(v));
       });
-      const json = await res.json();
+      rawQueryString = p.toString();
+    }
+
+    if (title && !rawQueryString.includes('title=')) {
+      rawQueryString += (rawQueryString ? '&' : '') + `title=${encodeURIComponent(title)}`;
+    }
+
+    if (!rawQueryString.includes('includes%5B%5D=cover_art') && !rawQueryString.includes('includes[]=cover_art')) {
+      rawQueryString += (rawQueryString ? '&' : '') + 'includes[]=cover_art&includes[]=author&includes[]=artist';
+    }
+
+    const searchUrl = `https://api.mangadex.org/manga?${rawQueryString}`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 9000);
+
+    const res = await fetch(searchUrl, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; KomikYuk/2.0; +https://komikyuk.netlify.app)',
+        'Accept': 'application/json'
+      }
+    });
+    clearTimeout(timeout);
+
+    if (!res.ok) {
       return {
         statusCode: 200,
         headers,
-        body: JSON.stringify(json)
+        body: JSON.stringify({ data: [], error: `MangaDex response ${res.status}` })
       };
     }
 
+    const json = await res.json();
     return {
-      statusCode: 400,
+      statusCode: 200,
       headers,
-      body: JSON.stringify({ error: 'Invalid action or parameters' })
+      body: JSON.stringify(json)
     };
   } catch (err: any) {
     return {
-      statusCode: 500,
+      statusCode: 200,
       headers,
-      body: JSON.stringify({ error: err.message })
+      body: JSON.stringify({ data: [], error: err.message || 'MangaDex Proxy Failed' })
     };
   }
 }
