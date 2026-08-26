@@ -48,7 +48,8 @@ export const Header: React.FC = () => {
     bookmarks,
     isMobileDeviceFrame,
     toggleMobileDeviceFrame,
-    setSelectedGenreFilter
+    setSelectedGenreFilter,
+    systemSettings
   } = useApp();
 
   const isUserAuthenticated = isLoggedIn();
@@ -161,15 +162,27 @@ export const Header: React.FC = () => {
               }}
               className="flex items-center gap-2 focus:outline-none group text-left cursor-pointer"
             >
-              <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-[#ff5b14] to-[#f97316] hidden sm:flex items-center justify-center text-white font-black text-sm shadow-md shadow-[#ff5b14]/30 group-hover:scale-105 transition-transform">
-                AT
-              </div>
+              {systemSettings?.siteLogo || systemSettings?.siteFavicon ? (
+                <img 
+                  src={systemSettings.siteLogo || systemSettings.siteFavicon} 
+                  alt={systemSettings?.siteName || 'Logo'} 
+                  className="w-8 h-8 rounded-xl object-cover ring-1 ring-[#ff5b14]/50 shadow-md shadow-[#ff5b14]/20 group-hover:scale-105 transition-transform shrink-0"
+                />
+              ) : (
+                <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-[#ff5b14] to-[#f97316] hidden sm:flex items-center justify-center text-white font-black text-sm shadow-md shadow-[#ff5b14]/30 group-hover:scale-105 transition-transform shrink-0">
+                  AT
+                </div>
+              )}
               <div className="flex items-baseline gap-1.5">
                 <span className="font-black text-lg sm:text-xl tracking-tight bg-gradient-to-r from-white via-slate-100 to-slate-300 bg-clip-text text-transparent group-hover:text-white transition-all">
-                  Anti<span className="text-[#ff5b14]">Timpa</span>
+                  {systemSettings?.siteName ? (
+                    systemSettings.siteName
+                  ) : (
+                    <>Anti<span className="text-[#ff5b14]">Timpa</span></>
+                  )}
                 </span>
                 <span className="hidden sm:inline-block text-[9px] font-black px-1.5 py-0.2 rounded-md bg-[#ff5b14]/15 text-[#ff7a3d] border border-[#ff5b14]/30 tracking-wider">
-                  KOMIK
+                  PORTAL
                 </span>
               </div>
             </button>
@@ -589,13 +602,23 @@ export const Header: React.FC = () => {
             <div>
               {/* Drawer Header */}
               <div className="flex items-center justify-between pb-4 border-b border-[#222230]">
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-lg bg-[#ff5b14] flex items-center justify-center text-white font-extrabold text-lg">
-                    AT
-                  </div>
+                <div className="flex items-center gap-2.5">
+                  {systemSettings?.siteLogo || systemSettings?.siteFavicon ? (
+                    <img 
+                      src={systemSettings.siteLogo || systemSettings.siteFavicon} 
+                      alt={systemSettings?.siteName || 'Logo'} 
+                      className="w-8 h-8 rounded-lg object-cover ring-1 ring-[#ff5b14]/50 shadow"
+                    />
+                  ) : (
+                    <div className="w-8 h-8 rounded-lg bg-[#ff5b14] flex items-center justify-center text-white font-extrabold text-sm shadow">
+                      AT
+                    </div>
+                  )}
                   <div>
-                    <h2 className="font-extrabold text-base text-white">AntiTimpa</h2>
-                    <p className="text-[11px] text-slate-400">Platform Komik Dewasa Mobile</p>
+                    <h2 className="font-extrabold text-sm text-white">
+                      {systemSettings?.siteName || 'AntiTimpa'}
+                    </h2>
+                    <p className="text-[10px] text-slate-400">Portal Direktori &amp; Reader Komik</p>
                   </div>
                 </div>
                 <button 

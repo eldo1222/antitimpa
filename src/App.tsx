@@ -23,6 +23,7 @@ import { LoginModal } from './components/auth/LoginModal';
 import { GoogleAuthModal } from './components/auth/GoogleAuthModal';
 import { RegisterModal } from './components/auth/RegisterModal';
 import { ProfileSettingsModal } from './components/common/ProfileSettingsModal';
+import { WelcomePopUpModal } from './components/frontend/WelcomePopUpModal';
 import { OfflineGuard } from './components/common/OfflineGuard';
 import { Smartphone } from 'lucide-react';
 
@@ -172,6 +173,7 @@ const MainAppContent: React.FC = () => {
         isOpen={isProfileSettingsModalOpen} 
         onClose={closeProfileSettingsModal} 
       />
+      <WelcomePopUpModal />
     </div>
   );
 };

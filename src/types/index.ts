@@ -27,6 +27,7 @@ export interface User {
   failedAttempts?: number;
   avatar?: string;
   tier?: 'Free Tier' | 'Pro Member' | 'Premium';
+  isVip?: boolean;
   bio?: string;
   stats?: UserStats;
   planType?: PlanType; // 'plan_15k_all' (Akses Semua Komik) | 'plan_5k_single' (1 Judul Tertentu) | 'custom'
@@ -221,9 +222,13 @@ export type AdSlotPosition =
   | 'home_hero_bottom'       // Bagian atas beranda (di bawah banner hero)
   | 'home_between_sections'  // Di sela-sela kategori/bagian beranda
   | 'home_footer'            // Bagian bawah beranda (di bawah katalog komik)
+  | 'welcome_popup'          // Iklan Pop-up saat pertama kali buka web
+  | 'mitra_interstitial'     // Layar transisi iklan saat menuju link mitra
+  | 'chapter_top_a'          // Atas kolom chapter (Provider 1)
+  | 'chapter_top_b'          // Atas kolom chapter (Provider 2)
   | 'detail_top'             // Bagian atas halaman detail komik
   | 'detail_bottom'          // Di bawah daftar chapter pada halaman detail
-  | 'reader_top_bar'         // Bagian atas saat membaca komik
+  | 'reader_top_bar'         // Bagian paling atas saat membaca komik (sebelum page 1)
   | 'reader_bottom_nav'      // Di akhir chapter pembaca sebelum tombol next
   | 'popunder'               // Popunder / Direct link on click
   | 'home_top'               // Alias backward compat
@@ -283,6 +288,9 @@ export interface AdSettings {
   popunderEnabled: boolean; // Saklar master popunder
   popunderCooldownMinutes?: number; // Jeda popunder dalam menit (default 15 menit)
   popunderCooldownHours?: number; // Jeda popunder dalam jam (opsional)
+  welcomePopupEnabled?: boolean; // Saklar popup selamat datang saat pertama kali masuk web
+  mitraInterstitialEnabled?: boolean; // Saklar banner iklan pada layar transisi link mitra
+  dualChapterAdsEnabled?: boolean; // Saklar dual provider banner di atas kolom chapter
   floatingBottomEnabled?: boolean; // Saklar master floating banner
   showAdLabel?: boolean; // Tampilkan label "Sponsor" untuk transparansi
 }

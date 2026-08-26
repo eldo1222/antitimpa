@@ -502,6 +502,16 @@ export const ComicDetailView: React.FC = () => {
 
             {/* Chapters Section */}
             <div className="bg-[#12121a] rounded-2xl border border-[#222232] p-5 sm:p-6 shadow-xl space-y-4">
+              {/* Dual-Provider Banner Ads (Atas Kolom Chapter) */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pb-2 border-b border-[#1f1f2e]">
+                <div className="w-full">
+                  <AdBanner position="chapter_top_a" compact />
+                </div>
+                <div className="w-full">
+                  <AdBanner position="chapter_top_b" compact />
+                </div>
+              </div>
+
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#1f1f2e]">
                 <div className="flex items-center gap-2">
                   <h3 className="font-black text-base sm:text-lg text-white">Daftar Chapter</h3>

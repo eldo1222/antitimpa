@@ -36,6 +36,7 @@ import {
   generateComicPageSvg
 } from '../data/initialData';
 import { formatGoogleDriveEmbedUrl } from '../utils/driveHelper';
+import { updateFavicon } from '../utils/favicon';
 import {
   initializeFirestoreDatabase,
   subscribeToFirestore,
@@ -657,6 +658,20 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   useEffect(() => {
     safeSetItem(STORAGE_KEYS.SETTINGS, systemSettings);
+    // Dynamically update browser tab favicon and document title
+    if (typeof document !== 'undefined') {
+      if (systemSettings?.siteFavicon) {
+        updateFavicon(systemSettings.siteFavicon);
+      } else {
+        updateFavicon();
+      }
+      if (systemSettings?.siteName) {
+        const currentTitle = document.title;
+        if (!currentTitle || currentTitle.includes('AntiTimpa') || currentTitle.includes('Komik')) {
+          document.title = `${systemSettings.siteName} - Platform Portal Komik`;
+        }
+      }
+    }
   }, [systemSettings]);
 
   useEffect(() => {
@@ -2625,25 +2640,33 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const trackAdClick = (id: string) => {
-    setAds(prev => prev.map(ad => {
-      if (ad.id === id) {
-        const updated = { ...ad, clickCount: (ad.clickCount || 0) + 1 };
-        saveAdToFirestore(updated);
-        return updated;
-      }
-      return ad;
-    }));
+    setAds(prev => {
+      const updatedList = prev.map(ad => {
+        if (ad.id === id) {
+          const updated = { ...ad, clickCount: (ad.clickCount || 0) + 1 };
+          saveAdToFirestore(updated);
+          return updated;
+        }
+        return ad;
+      });
+      centralSync.saveAds(updatedList, adSettings);
+      return updatedList;
+    });
   };
 
   const trackAdView = (id: string) => {
-    setAds(prev => prev.map(ad => {
-      if (ad.id === id) {
-        const updated = { ...ad, viewCount: (ad.viewCount || 0) + 1 };
-        saveAdToFirestore(updated);
-        return updated;
-      }
-      return ad;
-    }));
+    setAds(prev => {
+      const updatedList = prev.map(ad => {
+        if (ad.id === id) {
+          const updated = { ...ad, viewCount: (ad.viewCount || 0) + 1 };
+          saveAdToFirestore(updated);
+          return updated;
+        }
+        return ad;
+      });
+      centralSync.saveAds(updatedList, adSettings);
+      return updatedList;
+    });
   };
 
   const isVipUser = (user: User | null): boolean => {

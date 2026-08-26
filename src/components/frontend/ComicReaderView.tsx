@@ -760,6 +760,11 @@ export const ComicReaderView: React.FC = () => {
         ) : readingMode === 'vertical' ? (
           /* CASE 3: Vertical Webtoon Scroll Mode (JPG / Image Pages) */
           <div className="w-full max-w-2xl mx-auto flex flex-col items-center py-12 px-1 sm:px-2 space-y-3">
+            {/* Top Reader Ad Banner (Paling Atas Sebelum Halaman 1) */}
+            <div className="w-full mb-2">
+              <AdBanner position="reader_top_bar" />
+            </div>
+
             {isLoadingPages && pages.length === 0 ? (
               <div className="w-full py-24 flex flex-col items-center justify-center space-y-3">
                 <Loader2 className="w-8 h-8 text-[#ff5b14] animate-spin" />

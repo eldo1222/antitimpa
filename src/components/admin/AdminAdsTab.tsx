@@ -27,13 +27,17 @@ import {
 } from 'lucide-react';
 
 const POSITION_LABELS: Record<string, { label: string; desc: string; icon: string }> = {
+  'welcome_popup': { label: 'Pop-up: Selamat Datang (Awal Masuk Web)', desc: 'Modal pop-up yang muncul saat pembaca pertama kali mengunjungi situs', icon: '🎁' },
+  'mitra_interstitial': { label: 'Transisi Gateway: Pengganti Loading Tautan Luar', desc: 'Layar iklan transisi sponsor saat pembaca menuju Where to Read / Direktori Luar', icon: '⏳' },
+  'chapter_top_a': { label: 'Atas Kolom Chapter: Provider 1 (Ad Network A)', desc: 'Slot iklan banner utama di atas daftar chapter komik', icon: '🅰️' },
+  'chapter_top_b': { label: 'Atas Kolom Chapter: Provider 2 (Ad Network B)', desc: 'Slot iklan banner kedua berdampingan di atas daftar chapter', icon: '🅱️' },
   'home_hero_bottom': { label: 'Beranda: Bawah Slider Hero', desc: 'Tampil tepat setelah carousel banner utama di Beranda', icon: '🏠' },
   'home_between_sections': { label: 'Beranda: Antara Bagian', desc: 'Tampil di sela-sela daftar komik populer & update terbaru', icon: '📑' },
   'home_footer': { label: 'Beranda: Bagian Bawah / Footer', desc: 'Tampil di akhir halaman beranda sebelum footer', icon: '🏁' },
   'detail_top': { label: 'Detail Buku: Bagian Atas', desc: 'Tampil di atas sinopsis komik pada halaman detail komik', icon: '📖' },
   'detail_bottom': { label: 'Detail Buku: Bawah Daftar Chapter', desc: 'Tampil di bawah list chapter komik sebelum kolom komentar', icon: '📚' },
-  'reader_top_bar': { label: 'Reader Komik: Top Bar', desc: 'Banner ringkas di bagian atas reader saat membaca PDF/Webtoon', icon: '👁️' },
-  'reader_bottom_nav': { label: 'Reader Komik: Bawah Tombol Chapter', desc: 'Tampil di navigasi bawah chapter (tidak menutupi halaman gambar)', icon: '🧭' },
+  'reader_top_bar': { label: 'Reader Komik: Paling Atas (Sebelum Page 1)', desc: 'Banner ringkas di bagian atas reader saat membaca PDF/Webtoon', icon: '👁️' },
+  'reader_bottom_nav': { label: 'Reader Komik: Paling Bawah (Setelah Selesai)', desc: 'Tampil di navigasi bawah chapter (tidak menutupi halaman gambar)', icon: '🧭' },
   'popunder': { label: 'Popunder / Direct Link On-Click', desc: 'Membuka tab iklan saat pengguna pertama kali berinteraksi (dengan cooldown anti-spam)', icon: '⚡' },
   'home_top': { label: 'Beranda: Atas (Legacy)', desc: 'Slot iklan beranda bagian atas', icon: '🏠' },
   'home_bottom': { label: 'Beranda: Bawah (Legacy)', desc: 'Slot iklan beranda bagian bawah', icon: '🏁' },
@@ -224,7 +228,7 @@ export const AdminAdsTab: React.FC = () => {
           </span>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {/* Master Switch */}
           <div className="p-3 rounded-xl bg-[#161622] border border-[#242436] flex items-center justify-between">
             <div className="pr-2">
@@ -240,6 +244,48 @@ export const AdminAdsTab: React.FC = () => {
               title="Toggle Global Ads"
             >
               {adSettings.adsEnabled ? <ToggleRight className="w-6 h-6" /> : <ToggleLeft className="w-6 h-6" />}
+            </button>
+          </div>
+
+          {/* Welcome Pop-up Switch */}
+          <div className="p-3 rounded-xl bg-[#161622] border border-[#242436] flex items-center justify-between">
+            <div className="pr-2">
+              <div className="text-xs font-bold text-slate-200 flex items-center gap-1">
+                <Megaphone className="w-3.5 h-3.5 text-amber-400" />
+                Pop-up Selamat Datang
+              </div>
+              <div className="text-[11px] text-slate-400">Modal promo 1x saat buka web (ada [X])</div>
+            </div>
+            <button
+              id="btn-toggle-welcome-popup"
+              onClick={() => updateAdSettings({ welcomePopupEnabled: !adSettings.welcomePopupEnabled })}
+              className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                adSettings.welcomePopupEnabled !== false ? 'text-emerald-400 bg-emerald-500/10' : 'text-slate-500 bg-slate-800'
+              }`}
+              title="Toggle Welcome Popup"
+            >
+              {adSettings.welcomePopupEnabled !== false ? <ToggleRight className="w-6 h-6" /> : <ToggleLeft className="w-6 h-6" />}
+            </button>
+          </div>
+
+          {/* Mitra Interstitial Transition */}
+          <div className="p-3 rounded-xl bg-[#161622] border border-[#242436] flex items-center justify-between">
+            <div className="pr-2">
+              <div className="text-xs font-bold text-slate-200 flex items-center gap-1">
+                <Sparkles className="w-3.5 h-3.5 text-orange-400" />
+                Iklan Transisi Mitra
+              </div>
+              <div className="text-[11px] text-slate-400">Ganti loading polos jadi sponsor Where to Read</div>
+            </div>
+            <button
+              id="btn-toggle-mitra-interstitial"
+              onClick={() => updateAdSettings({ mitraInterstitialEnabled: !adSettings.mitraInterstitialEnabled })}
+              className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                adSettings.mitraInterstitialEnabled !== false ? 'text-emerald-400 bg-emerald-500/10' : 'text-slate-500 bg-slate-800'
+              }`}
+              title="Toggle Mitra Interstitial"
+            >
+              {adSettings.mitraInterstitialEnabled !== false ? <ToggleRight className="w-6 h-6" /> : <ToggleLeft className="w-6 h-6" />}
             </button>
           </div>
 
@@ -364,36 +410,44 @@ export const AdminAdsTab: React.FC = () => {
             Semua Posisi ({ads.length})
           </button>
           <button
+            onClick={() => setSelectedFilter('welcome_popup')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
+              selectedFilter === 'welcome_popup' ? 'bg-[#ff5b14] text-white' : 'bg-[#181824] text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            🎁 Pop-up Masuk
+          </button>
+          <button
+            onClick={() => setSelectedFilter('mitra_interstitial')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
+              selectedFilter === 'mitra_interstitial' ? 'bg-[#ff5b14] text-white' : 'bg-[#181824] text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            ⏳ Transisi Gateway
+          </button>
+          <button
+            onClick={() => setSelectedFilter('chapter_top_a')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
+              selectedFilter === 'chapter_top_a' || selectedFilter === 'chapter_top_b' ? 'bg-[#ff5b14] text-white' : 'bg-[#181824] text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            📚 Atas Chapter (Dual)
+          </button>
+          <button
+            onClick={() => setSelectedFilter('reader_top_bar')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
+              selectedFilter === 'reader_top_bar' || selectedFilter === 'reader_bottom_nav' ? 'bg-[#ff5b14] text-white' : 'bg-[#181824] text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            👁️ Reader Komik
+          </button>
+          <button
             onClick={() => setSelectedFilter('home_hero_bottom')}
             className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
               selectedFilter === 'home_hero_bottom' ? 'bg-[#ff5b14] text-white' : 'bg-[#181824] text-slate-400 hover:text-slate-200'
             }`}
           >
             Beranda: Hero
-          </button>
-          <button
-            onClick={() => setSelectedFilter('home_between_sections')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
-              selectedFilter === 'home_between_sections' ? 'bg-[#ff5b14] text-white' : 'bg-[#181824] text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            Beranda: Sela Komik
-          </button>
-          <button
-            onClick={() => setSelectedFilter('detail_top')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
-              selectedFilter === 'detail_top' ? 'bg-[#ff5b14] text-white' : 'bg-[#181824] text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            Detail Komik
-          </button>
-          <button
-            onClick={() => setSelectedFilter('reader_bottom_nav')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
-              selectedFilter === 'reader_bottom_nav' ? 'bg-[#ff5b14] text-white' : 'bg-[#181824] text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            Reader Bottom
           </button>
           <button
             onClick={() => setSelectedFilter('popunder')}
@@ -681,13 +735,17 @@ export const AdminAdsTab: React.FC = () => {
                     onChange={(e) => setPosition(e.target.value as AdSlotPosition)}
                     className="w-full bg-[#181824] border border-[#242436] rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-hidden focus:border-[#ff5b14]"
                   >
+                    <option value="welcome_popup">🎁 Pop-up: Selamat Datang (Awal Masuk Web)</option>
+                    <option value="mitra_interstitial">⏳ Transisi Mitra: Layar Iklan Interstitial</option>
+                    <option value="chapter_top_a">🅰️ Atas Kolom Chapter: Provider 1 (Ad Alpha)</option>
+                    <option value="chapter_top_b">🅱️ Atas Kolom Chapter: Provider 2 (Ad Beta)</option>
+                    <option value="reader_top_bar">👁️ Reader Komik: Paling Atas (Sebelum Page 1)</option>
+                    <option value="reader_bottom_nav">🧭 Reader Komik: Paling Bawah (Setelah Selesai)</option>
                     <option value="home_hero_bottom">Beranda: Bawah Slider Hero</option>
                     <option value="home_between_sections">Beranda: Antara Komik Populer & Baru</option>
                     <option value="home_footer">Beranda: Bagian Bawah / Footer</option>
                     <option value="detail_top">Detail Komik: Atas Sinopsis</option>
                     <option value="detail_bottom">Detail Komik: Bawah List Chapter</option>
-                    <option value="reader_top_bar">Reader Komik: Top Bar Ringkas</option>
-                    <option value="reader_bottom_nav">Reader Komik: Bawah Tombol Chapter</option>
                     <option value="popunder">Popunder: On-Click Tab Baru</option>
                   </select>
                 </div>

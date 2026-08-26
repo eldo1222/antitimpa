@@ -300,7 +300,7 @@ export const WhereToReadModal: React.FC<WhereToReadModalProps> = ({
                 </span>
               </div>
               <p className="text-[11px] text-slate-400">
-                Penyedia Link Resmi, Partner & Scanlation (Model MyAnimeList)
+                Direktori &amp; Tautan Sumber Eksternal Bebas Netral (Model MyAnimeList)
               </p>
             </div>
           </div>
@@ -349,59 +349,70 @@ export const WhereToReadModal: React.FC<WhereToReadModalProps> = ({
             </div>
           </div>
 
-          {/* ACTIVE REDIRECT GATEWAY INTERSTITIAL (If a provider was selected) */}
+          {/* ACTIVE REDIRECT GATEWAY INTERSTITIAL (Replaces boring loading with an elegant Interstitial Ad) */}
           {activeRedirectingSource ? (
-            <div className="bg-[#161624] border-2 border-[#ff5b14]/50 rounded-2xl p-5 text-center space-y-4 animate-in zoom-in-95 duration-200 shadow-xl">
-              <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-[#ff5b14]/20 text-[#ff5b14] border border-[#ff5b14]/40 animate-pulse">
-                <Globe className="w-7 h-7" />
-              </div>
-
-              <div className="space-y-1">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                  Mengarahkan ke Platform Mitra
-                </span>
-                <h4 className="font-black text-lg text-white">
-                  {activeRedirectingSource.name}
-                </h4>
-                <p className="text-xs text-slate-300 font-mono break-all px-4 py-1.5 bg-black/40 rounded-lg max-w-md mx-auto truncate border border-white/5">
-                  {activeRedirectingSource.url}
-                </p>
-              </div>
-
-              {/* Progress Bar / Countdown */}
-              <div className="space-y-2 max-w-xs mx-auto">
-                <div className="flex items-center justify-between text-xs text-slate-400 font-bold">
-                  <span>Membuka otomatis dalam...</span>
-                  <span className="text-[#ff5b14] font-black text-sm">{countdown}s</span>
+            <div className="bg-[#141422] border-2 border-[#ff5b14]/50 rounded-2xl p-5 text-center space-y-4 animate-in zoom-in-95 duration-200 shadow-2xl">
+              <div className="flex items-center justify-between border-b border-[#252538] pb-3">
+                <div className="flex items-center gap-2 text-left">
+                  <div className="w-8 h-8 rounded-xl bg-[#ff5b14]/20 text-[#ff5b14] border border-[#ff5b14]/40 flex items-center justify-center font-bold">
+                    <Globe className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-extrabold uppercase tracking-wider text-amber-400">
+                      Mengarahkan ke Sumber Eksternal
+                    </span>
+                    <h4 className="font-extrabold text-sm text-white truncate max-w-xs">
+                      {activeRedirectingSource.name}
+                    </h4>
+                  </div>
                 </div>
-                <div className="w-full bg-[#202030] h-2 rounded-full overflow-hidden">
+
+                <div className="text-right">
+                  <span className="text-[10px] text-slate-400 font-semibold block">Otomatis dalam</span>
+                  <span className="text-base font-black text-[#ff5b14] font-mono">{countdown}s</span>
+                </div>
+              </div>
+
+              {/* High-Converting Interstitial Sponsor Banner Slot */}
+              <div className="space-y-2">
+                <div className="text-left flex items-center justify-between text-[10px] text-slate-400 font-bold px-1">
+                  <span className="flex items-center gap-1 text-slate-300">
+                    <Sparkles className="w-3 h-3 text-[#ff5b14]" />
+                    Pesan Iklan / Sponsor
+                  </span>
+                  <span className="text-[9px] text-slate-500 uppercase">Iklan Terverifikasi</span>
+                </div>
+                <AdBanner position="mitra_interstitial" />
+              </div>
+
+              {/* Progress Bar */}
+              <div className="space-y-1.5 max-w-sm mx-auto pt-1">
+                <div className="w-full bg-[#202030] h-2 rounded-full overflow-hidden border border-white/5">
                   <div 
-                    className="bg-gradient-to-r from-[#ff5b14] to-amber-400 h-full transition-all duration-1000 ease-linear"
+                    className="bg-gradient-to-r from-[#ff5b14] via-amber-400 to-emerald-400 h-full transition-all duration-1000 ease-linear"
                     style={{ width: `${((3 - countdown) / 3) * 100}%` }}
                   />
                 </div>
-              </div>
-
-              {/* Ad Banner for Gateway monetization */}
-              <div className="pt-2">
-                <AdBanner position="detail_bottom" />
+                <p className="text-[10px] text-slate-400 font-mono truncate px-2">
+                  Tautan Luar: {activeRedirectingSource.url}
+                </p>
               </div>
 
               {/* Action Buttons */}
-              <div className="flex flex-col sm:flex-row items-center justify-center gap-2 pt-2">
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-2 pt-2 border-t border-[#252538]">
                 <button
                   onClick={() => handleDirectLaunch(activeRedirectingSource)}
-                  className="w-full sm:w-auto px-6 py-2.5 bg-[#ff5b14] hover:bg-[#e04e0e] text-white font-extrabold text-xs rounded-xl shadow-lg flex items-center justify-center gap-2 transition-all active:scale-95 cursor-pointer"
+                  className="w-full sm:w-auto px-6 py-2.5 bg-[#ff5b14] hover:bg-[#e04e0e] text-white font-extrabold text-xs rounded-xl shadow-lg shadow-[#ff5b14]/20 flex items-center justify-center gap-2 transition-all active:scale-95 cursor-pointer"
                 >
                   <ExternalLink className="w-4 h-4" />
-                  <span>Buka Sekarang di Tab Baru</span>
+                  <span>Lewati / Buka Sekarang</span>
                 </button>
 
                 <button
                   onClick={() => setActiveRedirectingSource(null)}
                   className="w-full sm:w-auto px-4 py-2.5 bg-[#202030] hover:bg-[#28283c] text-slate-300 font-bold text-xs rounded-xl transition-colors cursor-pointer"
                 >
-                  Kembali ke Daftar Sumber
+                  Batal & Pilih Sumber Lain
                 </button>
               </div>
             </div>
@@ -411,7 +422,7 @@ export const WhereToReadModal: React.FC<WhereToReadModalProps> = ({
               <div className="flex items-center justify-between gap-2 pb-1">
                 <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
                   <Sparkles className="w-3.5 h-3.5 text-[#ff5b14]" />
-                  <span>Pilihan Platform Penyedia ({filteredSources.length})</span>
+                  <span>Pilihan Sumber Eksternal ({filteredSources.length})</span>
                 </span>
 
                 <div className="flex items-center gap-1 bg-[#151520] p-1 rounded-xl border border-[#232334]">
