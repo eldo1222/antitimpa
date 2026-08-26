@@ -87,9 +87,20 @@ export async function handler(event: any) {
       };
     }
 
-    if (action === 'search' && title) {
-      const searchUrl = `https://api.mangadex.org/manga?title=${encodeURIComponent(title)}&limit=25&order[relevance]=desc&includes[]=cover_art&includes[]=author&includes[]=artist&contentRating[]=safe&contentRating[]=suggestive&contentRating[]=erotica&contentRating[]=pornographic`;
-      const res = await fetch(searchUrl);
+    if (action === 'search' || title || query.limit || query.offset || query.originalLanguage || query.includedTags) {
+      let rawQueryString = event.rawQuery || '';
+      if (!rawQueryString) {
+        const p = new URLSearchParams();
+        Object.entries(query).forEach(([k, v]) => {
+          if (k !== 'action') p.append(k, String(v));
+        });
+        rawQueryString = p.toString();
+      }
+      
+      const searchUrl = `https://api.mangadex.org/manga?${rawQueryString}`;
+      const res = await fetch(searchUrl, {
+        headers: { 'User-Agent': 'AntiTimpa-Client/2.0', 'Accept': 'application/json' }
+      });
       const json = await res.json();
       return {
         statusCode: 200,

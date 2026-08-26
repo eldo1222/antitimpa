@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useApp } from '../../context/AppContext';
 import { 
   searchMangaDex, 
@@ -10,7 +10,11 @@ import {
   PRESET_SCRAPE_FEEDS, 
   buildComicFromScrape, 
   buildComicFromScrapeAsync,
-  ScrapedComicResult 
+  ScrapedComicResult,
+  runClientSideMassScraper,
+  getClientScraperOffsets,
+  saveClientScraperOffsets,
+  resetClientScraperOffsets
 } from '../../services/comicScraperService';
 import { getProfessionalComicSkeletonUrl } from '../common/ComicSkeletonBox';
 import { downloadDrivePdf, convertImagesToPdf } from '../../utils/pdfConverter';
@@ -107,20 +111,28 @@ export const AdminScraperTab: React.FC = () => {
     targetCount: 500,
     currentCategory: 'Standby',
     logs: [],
-    offsets: {}
+    offsets: getClientScraperOffsets()
   });
   const [selectedBatchSize, setSelectedBatchSize] = useState<number>(500);
   const [selectedAutoCategory, setSelectedAutoCategory] = useState<string>('all');
   const [isTriggeringSync, setIsTriggeringSync] = useState(false);
   const [showScraperLogs, setShowScraperLogs] = useState(false);
+  const clientScraperStopRef = useRef(false);
 
-  // Poll Auto-Scraper Status from Server
+  // Poll Auto-Scraper Status from Server (if backend is active)
   const fetchAutoScraperStatus = async () => {
     try {
       const res = await fetch('/api/scraper/auto-status');
-      if (res.ok) {
+      const contentType = res.headers.get('content-type') || '';
+      if (res.ok && contentType.includes('application/json')) {
         const data = await res.json();
-        setAutoScraperInfo(data);
+        if (data && typeof data.totalComicsInDB === 'number') {
+          setAutoScraperInfo(prev => ({
+            ...data,
+            totalComicsInDB: Math.max(data.totalComicsInDB, comics.length),
+            logs: data.logs && data.logs.length > 0 ? data.logs : prev.logs
+          }));
+        }
       }
     } catch (e) {
       // ignore
@@ -133,52 +145,126 @@ export const AdminScraperTab: React.FC = () => {
     return () => clearInterval(interval);
   }, [autoScraperInfo.isRunning]);
 
+  // Dual-Engine Mass Scraper Trigger (Universal for both Netlify SPA & AI Studio Server)
   const handleTriggerAutoSync = async () => {
     setIsTriggeringSync(true);
+    clientScraperStopRef.current = false;
+
+    let serverSuccess = false;
     try {
       const res = await fetch('/api/scraper/auto-sync', { 
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
         body: JSON.stringify({ 
           targetCount: selectedBatchSize, 
           categoryFilter: selectedAutoCategory,
           preFetchChapters: true 
         })
       });
-      if (res.ok) {
+      const contentType = res.headers.get('content-type') || '';
+      if (res.ok && contentType.includes('application/json')) {
         const data = await res.json();
-        setAutoScraperInfo(prev => ({ 
-          ...prev, 
-          isRunning: true, 
-          targetCount: selectedBatchSize,
-          statusMessage: `Memulai mass scraper (Target: ${selectedBatchSize} komik)...` 
-        }));
+        if (data && data.success) {
+          serverSuccess = true;
+          setAutoScraperInfo(prev => ({ 
+            ...prev, 
+            isRunning: true, 
+            targetCount: selectedBatchSize,
+            statusMessage: `Memulai mass scraper server (Target: ${selectedBatchSize} komik)...` 
+          }));
+        }
       }
     } catch (e) {
-      console.error(e);
-    } finally {
-      setIsTriggeringSync(false);
-      setTimeout(fetchAutoScraperStatus, 800);
+      serverSuccess = false;
     }
+
+    // If server-side Express scraper is not running (e.g. Netlify Static SPA hosting), execute Universal Client-Side Turbo Scraper!
+    if (!serverSuccess) {
+      setAutoScraperInfo(prev => ({
+        ...prev,
+        isRunning: true,
+        targetCount: selectedBatchSize,
+        scrapedThisSession: 0,
+        currentCategory: 'Mempersiapkan Aliran Data...',
+        statusMessage: `Memulai Turbo Mass Scraper (Target: ${selectedBatchSize} komik)...`,
+        logs: [`[${new Date().toLocaleTimeString('id-ID')}] 🚀 Memulai Turbo Client Scraper (Target: ${selectedBatchSize} Komik, Filter: ${selectedAutoCategory.toUpperCase()})`, ...prev.logs]
+      }));
+
+      const existingComicIds = new Set(comics.map(c => c.id));
+      const existingTitles = new Set(comics.map(c => (c.title || '').toLowerCase().trim()));
+
+      try {
+        const result = await runClientSideMassScraper({
+          targetCount: selectedBatchSize,
+          categoryFilter: selectedAutoCategory,
+          existingComicIds,
+          existingTitles,
+          defaultContentType,
+          defaultDriveAccountId,
+          shouldStop: () => clientScraperStopRef.current,
+          onLog: (logMsg) => {
+            setAutoScraperInfo(prev => ({
+              ...prev,
+              logs: [logMsg, ...prev.logs.slice(0, 79)]
+            }));
+          },
+          onProgress: ({ scrapedThisSession, targetCount, statusMessage, currentCategory, newlyAddedBatch }) => {
+            if (newlyAddedBatch && newlyAddedBatch.length > 0) {
+              batchInjectComicsWithChapters(newlyAddedBatch);
+            }
+            setAutoScraperInfo(prev => ({
+              ...prev,
+              scrapedThisSession,
+              targetCount,
+              statusMessage,
+              currentCategory,
+              totalComicsInDB: comics.length + scrapedThisSession
+            }));
+          }
+        });
+
+        addActivityLog('comic_create', `Admin menjalankan Mass Scraper: Berhasil menarik ${result.totalAdded} komik baru ke database`);
+      } catch (err: any) {
+        console.error('Client mass scraper error:', err);
+      } finally {
+        setAutoScraperInfo(prev => ({
+          ...prev,
+          isRunning: false,
+          statusMessage: 'Selesai (Siap)'
+        }));
+      }
+    }
+
+    setIsTriggeringSync(false);
   };
 
   const handleStopAutoScraper = async () => {
+    clientScraperStopRef.current = true;
     try {
       await fetch('/api/scraper/auto-stop', { method: 'POST' });
-      fetchAutoScraperStatus();
     } catch (e) {
       // ignore
     }
+    setAutoScraperInfo(prev => ({
+      ...prev,
+      isRunning: false,
+      statusMessage: 'Dihentikan oleh Admin'
+    }));
   };
 
   const handleResetScraperCursor = async () => {
     if (!window.confirm('Reset offset scraper ke awal (offset 0)? Penarikan selanjutnya akan mengambil kembali komik teratas.')) return;
+    resetClientScraperOffsets();
     try {
       await fetch('/api/scraper/auto-reset-cursor', { method: 'POST' });
-      fetchAutoScraperStatus();
     } catch (e) {
       // ignore
     }
+    setAutoScraperInfo(prev => ({
+      ...prev,
+      statusMessage: 'Offset scraper telah direset ke 0',
+      logs: [`[${new Date().toLocaleTimeString('id-ID')}] Offset scraper berhasil direset ke 0.`, ...prev.logs]
+    }));
   };
 
   // Initial mount: load Komikcast popular

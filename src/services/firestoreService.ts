@@ -448,6 +448,42 @@ export async function batchDeleteComicsFromFirestore(comicIds: string[]): Promis
   }
 }
 
+export async function batchSaveComicsToFirestore(comicsList: Comic[]): Promise<void> {
+  if (!comicsList || comicsList.length === 0) return;
+  const CHUNK_SIZE = 400;
+  for (let i = 0; i < comicsList.length; i += CHUNK_SIZE) {
+    const chunk = comicsList.slice(i, i + CHUNK_SIZE);
+    try {
+      const batch = writeBatch(db);
+      chunk.forEach(comic => {
+        const cleaned = sanitizeForFirestore(comic);
+        batch.set(doc(db, COMICS_COLLECTION, comic.id), cleaned);
+      });
+      await batch.commit();
+    } catch (e) {
+      console.error('Failed to batch save comics to Firestore:', e);
+    }
+  }
+}
+
+export async function batchSaveChaptersToFirestore(chaptersList: Chapter[]): Promise<void> {
+  if (!chaptersList || chaptersList.length === 0) return;
+  const CHUNK_SIZE = 400;
+  for (let i = 0; i < chaptersList.length; i += CHUNK_SIZE) {
+    const chunk = chaptersList.slice(i, i + CHUNK_SIZE);
+    try {
+      const batch = writeBatch(db);
+      chunk.forEach(ch => {
+        const cleaned = sanitizeForFirestore(ch);
+        batch.set(doc(db, CHAPTERS_COLLECTION, ch.id), cleaned);
+      });
+      await batch.commit();
+    } catch (e) {
+      console.error('Failed to batch save chapters to Firestore:', e);
+    }
+  }
+}
+
 export async function batchDeleteChaptersFromFirestore(chapterIds: string[]): Promise<void> {
   if (!chapterIds || chapterIds.length === 0) return;
   try {
