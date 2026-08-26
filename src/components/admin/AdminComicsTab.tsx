@@ -1,6 +1,7 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
-import { Comic, ComicCategoryType, ComicContentType } from '../../types';
+import { Comic, ComicCategoryType, ComicContentType, ComicProjectType } from '../../types';
+import { getComicProjectType, getComicProjectTypeLabel } from '../../utils/comicUtils';
 import { PRESET_GENRES } from '../../data/genres';
 import { 
   Plus, 
@@ -24,7 +25,13 @@ import {
   AlertTriangle,
   ShieldAlert,
   CheckCircle2,
-  Lock
+  Lock,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+  Crown,
+  Filter
 } from 'lucide-react';
 
 export const AdminComicsTab: React.FC = () => {
@@ -43,9 +50,13 @@ export const AdminComicsTab: React.FC = () => {
   } = useApp();
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterType, setFilterType] = useState<'all' | 'manga' | 'manhwa' | 'manhua' | '18plus' | 'home' | 'hidden'>('all');
+  const [filterType, setFilterType] = useState<'all' | 'admin_personal' | 'scraped_ready' | 'preview_gateway' | 'manga' | 'manhwa' | 'manhua' | '18plus' | 'normal' | 'home' | 'hidden'>('all');
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingComic, setEditingComic] = useState<Comic | null>(null);
+
+  // Pagination States
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(10);
 
   // Multi-Select & Batch Action States
   const [selectedComicIds, setSelectedComicIds] = useState<string[]>([]);
@@ -63,6 +74,7 @@ export const AdminComicsTab: React.FC = () => {
   const [status, setStatus] = useState<'ongoing' | 'completed'>('ongoing');
   const [contentType, setContentType] = useState<ComicContentType>('18plus');
   const [comicType, setComicType] = useState<ComicCategoryType>('manga');
+  const [projectType, setProjectType] = useState<ComicProjectType>('admin_personal');
   const [isFree, setIsFree] = useState(false);
   const [isVisibleOnHome, setIsVisibleOnHome] = useState(true);
   const [genresText, setGenresText] = useState('');
@@ -81,6 +93,11 @@ export const AdminComicsTab: React.FC = () => {
 
   const coverInputRef = useRef<HTMLInputElement>(null);
   const bannerInputRef = useRef<HTMLInputElement>(null);
+
+  // Reset pagination to page 1 whenever filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, filterType, itemsPerPage]);
 
   const handleCoverFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -129,6 +146,7 @@ export const AdminComicsTab: React.FC = () => {
     setStatus('ongoing');
     setContentType('18plus');
     setComicType('manhwa');
+    setProjectType('admin_personal');
     setIsFree(false);
     setIsVisibleOnHome(true);
     setGenresText('Romance 18+, Drama Dewasa');
@@ -152,6 +170,7 @@ export const AdminComicsTab: React.FC = () => {
     setStatus(comic.status?.toLowerCase() === 'completed' ? 'completed' : 'ongoing');
     setContentType(comic.contentType || (comic.genres.some(g => g.includes('18+') || g.includes('Dewasa')) ? '18plus' : 'normal'));
     setComicType(comic.comicType || (comic.type as ComicCategoryType) || 'manga');
+    setProjectType(getComicProjectType(comic, chapters[comic.id]));
     setIsFree(comic.isFree ?? (comic.contentType === 'normal'));
     setIsVisibleOnHome(comic.isVisibleOnHome !== false && comic.showOnHome !== false);
     setGenresText(comic.genres.join(', '));
@@ -231,6 +250,7 @@ export const AdminComicsTab: React.FC = () => {
         contentType,
         comicType,
         type: comicType,
+        projectType,
         isFree: contentType === 'normal' ? true : isFree,
         isVisibleOnHome,
         showOnHome: isVisibleOnHome,
@@ -252,6 +272,7 @@ export const AdminComicsTab: React.FC = () => {
         contentType,
         comicType,
         type: comicType,
+        projectType,
         isFree: contentType === 'normal' ? true : isFree,
         isVisibleOnHome,
         showOnHome: isVisibleOnHome,
@@ -272,38 +293,100 @@ export const AdminComicsTab: React.FC = () => {
     toggleComicHomeVisibility(comic.id);
   };
 
+  const handleQuickToggle18Plus = (comic: Comic) => {
+    const isCurrentlyNormal = comic.contentType === 'normal' || comic.isFree === true;
+    const nextContentType: ComicContentType = isCurrentlyNormal ? '18plus' : 'normal';
+    const nextIsFree = !isCurrentlyNormal;
+
+    let updatedGenres = [...(comic.genres || [])];
+    if (nextContentType === '18plus') {
+      if (!updatedGenres.some(g => g.toLowerCase().includes('18+') || g.toLowerCase().includes('dewasa'))) {
+        updatedGenres.unshift('Romance 18+');
+      }
+    } else {
+      updatedGenres = updatedGenres.filter(g => !g.toLowerCase().includes('18+') && !g.toLowerCase().includes('dewasa'));
+      if (updatedGenres.length === 0) {
+        updatedGenres = ['Action', 'Adventure'];
+      }
+    }
+
+    updateComic(comic.id, {
+      ...comic,
+      contentType: nextContentType,
+      contentRating: nextContentType,
+      isFree: nextIsFree,
+      genres: updatedGenres
+    });
+  };
+
+  const handleQuickCycleProjectType = (comic: Comic) => {
+    const current = getComicProjectType(comic, chapters[comic.id]);
+    const sequence: ComicProjectType[] = ['admin_personal', 'scraped_ready', 'preview_gateway'];
+    const nextIdx = (sequence.indexOf(current) + 1) % sequence.length;
+    const nextType = sequence[nextIdx];
+
+    updateComic(comic.id, {
+      ...comic,
+      projectType: nextType,
+      hasExternalGateway: nextType === 'preview_gateway' ? true : comic.hasExternalGateway
+    });
+  };
+
   const filteredComics = comics.filter(c => {
     const matchSearch = c.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
                         c.genres.some(g => g.toLowerCase().includes(searchQuery.toLowerCase()));
-    
+    if (!matchSearch) return false;
+
+    const pType = getComicProjectType(c, chapters[c.id]);
+
+    if (filterType === 'admin_personal') {
+      return pType === 'admin_personal';
+    }
+    if (filterType === 'scraped_ready') {
+      return pType === 'scraped_ready';
+    }
+    if (filterType === 'preview_gateway') {
+      return pType === 'preview_gateway';
+    }
     if (filterType === 'manga') {
-      return matchSearch && (c.comicType === 'manga' || c.type === 'manga');
+      return c.comicType === 'manga' || c.type === 'manga';
     }
     if (filterType === 'manhwa') {
-      return matchSearch && (c.comicType === 'manhwa' || c.type === 'manhwa');
+      return c.comicType === 'manhwa' || c.type === 'manhwa';
     }
     if (filterType === 'manhua') {
-      return matchSearch && (c.comicType === 'manhua' || c.type === 'manhua');
+      return c.comicType === 'manhua' || c.type === 'manhua';
     }
     if (filterType === '18plus') {
-      return matchSearch && (c.contentType === '18plus' || !c.contentType);
+      return c.contentType === '18plus' || !c.contentType;
+    }
+    if (filterType === 'normal') {
+      return c.contentType === 'normal' || c.isFree === true;
     }
     if (filterType === 'home') {
-      return matchSearch && (c.isVisibleOnHome !== false && c.showOnHome !== false);
+      return c.isVisibleOnHome !== false && c.showOnHome !== false;
     }
     if (filterType === 'hidden') {
-      return matchSearch && (c.isVisibleOnHome === false || c.showOnHome === false);
+      return c.isVisibleOnHome === false || c.showOnHome === false;
     }
-    return matchSearch;
+    return true;
   });
 
-  const isAllSelected = filteredComics.length > 0 && filteredComics.every(c => selectedComicIds.includes(c.id));
+  // Calculate pagination
+  const totalPages = Math.max(1, Math.ceil(filteredComics.length / itemsPerPage));
+  const validCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
+  const startIndex = (validCurrentPage - 1) * itemsPerPage;
+  const endIndex = Math.min(startIndex + itemsPerPage, filteredComics.length);
+  const paginatedComics = filteredComics.slice(startIndex, endIndex);
+
+  const isAllSelected = paginatedComics.length > 0 && paginatedComics.every(c => selectedComicIds.includes(c.id));
 
   const handleToggleSelectAll = () => {
     if (isAllSelected) {
-      setSelectedComicIds([]);
+      setSelectedComicIds(prev => prev.filter(id => !paginatedComics.some(c => c.id === id)));
     } else {
-      setSelectedComicIds(filteredComics.map(c => c.id));
+      const pageIds = paginatedComics.map(c => c.id);
+      setSelectedComicIds(prev => Array.from(new Set([...prev, ...pageIds])));
     }
   };
 
@@ -360,6 +443,43 @@ export const AdminComicsTab: React.FC = () => {
     setIsAdminView(false);
   };
 
+  const handleQuickCycleCategory = (comic: Comic) => {
+    const currentCategory = comic.comicType || (comic.type as ComicCategoryType) || 'manga';
+    const sequence: ComicCategoryType[] = ['manga', 'manhwa', 'manhua', 'webtoon'];
+    const nextIdx = (sequence.indexOf(currentCategory) + 1) % sequence.length;
+    const nextCat = sequence[nextIdx];
+
+    // Also update genres to reflect type if appropriate
+    let updatedGenres = [...(comic.genres || [])];
+    if (nextCat === 'webtoon' && !updatedGenres.some(g => g.toLowerCase().includes('webtoon'))) {
+      updatedGenres.push('Webtoon');
+    }
+
+    updateComic(comic.id, {
+      ...comic,
+      comicType: nextCat,
+      type: nextCat,
+      genres: updatedGenres
+    });
+  };
+
+  // Generate pagination page numbers with smart ellipsis
+  const getPageNumbers = () => {
+    const pages: (number | string)[] = [];
+    if (totalPages <= 7) {
+      for (let i = 1; i <= totalPages; i++) pages.push(i);
+    } else {
+      if (validCurrentPage <= 4) {
+        pages.push(1, 2, 3, 4, 5, '...', totalPages);
+      } else if (validCurrentPage >= totalPages - 3) {
+        pages.push(1, '...', totalPages - 4, totalPages - 3, totalPages - 2, totalPages - 1, totalPages);
+      } else {
+        pages.push(1, '...', validCurrentPage - 1, validCurrentPage, validCurrentPage + 1, '...', totalPages);
+      }
+    }
+    return pages;
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between pb-2 border-b border-[#1c1c2a]">
@@ -369,7 +489,7 @@ export const AdminComicsTab: React.FC = () => {
             <span>Katalog &amp; Manajemen Komik</span>
           </h2>
           <p className="text-xs text-slate-400">
-            Total {comics.length} judul komik • Kelola visibilitas beranda, status, kategori 18+, dan operasi batch
+            Total {comics.length} judul komik • Halaman {validCurrentPage} dari {totalPages} • Filter Proyek, Visibilitas Beranda &amp; Akses 18+
           </p>
         </div>
 
@@ -430,41 +550,166 @@ export const AdminComicsTab: React.FC = () => {
         </div>
       )}
 
-      <div className="flex flex-col sm:flex-row items-center gap-3 bg-[#12121a] p-3 rounded-xl border border-[#1f1f2e]">
-        <div className="relative flex-1 w-full">
-          <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Cari berdasarkan judul atau genre..."
-            className="w-full pl-9 pr-3 py-1.5 bg-[#181824] border border-[#262638] rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#ff5b14]"
-          />
+      {/* Filter Tabs & Search Bar */}
+      <div className="space-y-2">
+        <div className="flex flex-col sm:flex-row items-center gap-3 bg-[#12121a] p-3 rounded-xl border border-[#1f1f2e]">
+          <div className="relative flex-1 w-full">
+            <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Cari berdasarkan judul, penulis, atau genre..."
+              className="w-full pl-9 pr-3 py-1.5 bg-[#181824] border border-[#262638] rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#ff5b14]"
+            />
+          </div>
+
+          <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end text-xs">
+            <div className="flex items-center gap-1.5 text-slate-400">
+              <span className="text-[11px] whitespace-nowrap">Baris:</span>
+              <select
+                value={itemsPerPage}
+                onChange={(e) => setItemsPerPage(Number(e.target.value))}
+                className="bg-[#181824] border border-[#262638] rounded-lg px-2 py-1 text-white font-bold text-xs focus:outline-none focus:border-[#ff5b14]"
+              >
+                <option value={10}>10 per hal</option>
+                <option value={20}>20 per hal</option>
+                <option value={50}>50 per hal</option>
+                <option value={100}>100 per hal</option>
+              </select>
+            </div>
+          </div>
         </div>
 
-        <div className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto pb-1 sm:pb-0 scrollbar-none text-xs">
-          {(['all', 'manga', 'manhwa', 'manhua', '18plus', 'home', 'hidden'] as const).map(ft => (
-            <button
-              key={ft}
-              onClick={() => setFilterType(ft)}
-              className={`px-3 py-1.5 rounded-lg font-bold capitalize whitespace-nowrap transition-colors cursor-pointer ${
-                filterType === ft
-                  ? 'bg-[#ff5b14] text-white shadow-xs'
-                  : 'bg-[#181824] text-slate-400 hover:text-slate-200 hover:bg-[#202030]'
-              }`}
-            >
-              {ft === 'all' && `Semua (${comics.length})`}
-              {ft === 'manga' && '🇯🇵 Manga'}
-              {ft === 'manhwa' && '🇰🇷 Manhwa'}
-              {ft === 'manhua' && '🇨🇳 Manhua'}
-              {ft === '18plus' && '🔞 18+ VIP'}
-              {ft === 'home' && '👁️ Tampil Beranda'}
-              {ft === 'hidden' && '🚫 Disembunyikan'}
-            </button>
-          ))}
+        {/* Primary Classification Filter Chips */}
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none text-xs">
+          <button
+            onClick={() => setFilterType('all')}
+            className={`px-3 py-1.5 rounded-lg font-bold whitespace-nowrap transition-colors cursor-pointer ${
+              filterType === 'all'
+                ? 'bg-[#ff5b14] text-white shadow-xs'
+                : 'bg-[#181824] text-slate-400 hover:text-slate-200 hover:bg-[#202030]'
+            }`}
+          >
+            Semua ({comics.length})
+          </button>
+
+          <button
+            onClick={() => setFilterType('admin_personal')}
+            className={`px-3 py-1.5 rounded-lg font-bold whitespace-nowrap transition-colors cursor-pointer flex items-center gap-1 ${
+              filterType === 'admin_personal'
+                ? 'bg-amber-500 text-black shadow-xs font-black'
+                : 'bg-[#181824] text-amber-400 hover:bg-amber-500/10 border border-amber-500/20'
+            }`}
+          >
+            <Crown className="w-3.5 h-3.5" />
+            <span>Project Pribadi Admin ({comics.filter(c => getComicProjectType(c, chapters[c.id]) === 'admin_personal').length})</span>
+          </button>
+
+          <button
+            onClick={() => setFilterType('scraped_ready')}
+            className={`px-3 py-1.5 rounded-lg font-bold whitespace-nowrap transition-colors cursor-pointer flex items-center gap-1 ${
+              filterType === 'scraped_ready'
+                ? 'bg-emerald-500 text-black shadow-xs font-black'
+                : 'bg-[#181824] text-emerald-400 hover:bg-emerald-500/10 border border-emerald-500/20'
+            }`}
+          >
+            <Zap className="w-3.5 h-3.5" />
+            <span>Scraping Berhasil ({comics.filter(c => getComicProjectType(c, chapters[c.id]) === 'scraped_ready').length})</span>
+          </button>
+
+          <button
+            onClick={() => setFilterType('preview_gateway')}
+            className={`px-3 py-1.5 rounded-lg font-bold whitespace-nowrap transition-colors cursor-pointer flex items-center gap-1 ${
+              filterType === 'preview_gateway'
+                ? 'bg-sky-500 text-black shadow-xs font-black'
+                : 'bg-[#181824] text-sky-400 hover:bg-sky-500/10 border border-sky-500/20'
+            }`}
+          >
+            <Globe className="w-3.5 h-3.5" />
+            <span>Preview Gateway Saja ({comics.filter(c => getComicProjectType(c, chapters[c.id]) === 'preview_gateway').length})</span>
+          </button>
+
+          <button
+            onClick={() => setFilterType('18plus')}
+            className={`px-3 py-1.5 rounded-lg font-bold whitespace-nowrap transition-colors cursor-pointer ${
+              filterType === '18plus'
+                ? 'bg-rose-500 text-white shadow-xs'
+                : 'bg-[#181824] text-rose-400 hover:bg-[#202030]'
+            }`}
+          >
+            🔞 18+ VIP ({comics.filter(c => c.contentType === '18plus' || !c.contentType).length})
+          </button>
+
+          <button
+            onClick={() => setFilterType('normal')}
+            className={`px-3 py-1.5 rounded-lg font-bold whitespace-nowrap transition-colors cursor-pointer ${
+              filterType === 'normal'
+                ? 'bg-teal-500 text-white shadow-xs'
+                : 'bg-[#181824] text-teal-400 hover:bg-[#202030]'
+            }`}
+          >
+            🟢 Bebas / Normal ({comics.filter(c => c.contentType === 'normal' || c.isFree === true).length})
+          </button>
+
+          <button
+            onClick={() => setFilterType('manga')}
+            className={`px-3 py-1.5 rounded-lg font-bold whitespace-nowrap transition-colors cursor-pointer ${
+              filterType === 'manga'
+                ? 'bg-indigo-500 text-white shadow-xs'
+                : 'bg-[#181824] text-slate-400 hover:text-slate-200 hover:bg-[#202030]'
+            }`}
+          >
+            🇯🇵 Manga
+          </button>
+
+          <button
+            onClick={() => setFilterType('manhwa')}
+            className={`px-3 py-1.5 rounded-lg font-bold whitespace-nowrap transition-colors cursor-pointer ${
+              filterType === 'manhwa'
+                ? 'bg-emerald-500 text-white shadow-xs'
+                : 'bg-[#181824] text-slate-400 hover:text-slate-200 hover:bg-[#202030]'
+            }`}
+          >
+            🇰🇷 Manhwa
+          </button>
+
+          <button
+            onClick={() => setFilterType('manhua')}
+            className={`px-3 py-1.5 rounded-lg font-bold whitespace-nowrap transition-colors cursor-pointer ${
+              filterType === 'manhua'
+                ? 'bg-amber-500 text-white shadow-xs'
+                : 'bg-[#181824] text-slate-400 hover:text-slate-200 hover:bg-[#202030]'
+            }`}
+          >
+            🇨🇳 Manhua
+          </button>
+
+          <button
+            onClick={() => setFilterType('home')}
+            className={`px-3 py-1.5 rounded-lg font-bold whitespace-nowrap transition-colors cursor-pointer ${
+              filterType === 'home'
+                ? 'bg-emerald-600 text-white shadow-xs'
+                : 'bg-[#181824] text-slate-400 hover:text-slate-200 hover:bg-[#202030]'
+            }`}
+          >
+            👁️ Tampil Beranda
+          </button>
+
+          <button
+            onClick={() => setFilterType('hidden')}
+            className={`px-3 py-1.5 rounded-lg font-bold whitespace-nowrap transition-colors cursor-pointer ${
+              filterType === 'hidden'
+                ? 'bg-rose-600 text-white shadow-xs'
+                : 'bg-[#181824] text-slate-400 hover:text-slate-200 hover:bg-[#202030]'
+            }`}
+          >
+            🚫 Disembunyikan
+          </button>
         </div>
       </div>
 
+      {/* Table Container */}
       <div className="bg-[#12121a] rounded-xl border border-[#1f1f2e] overflow-hidden shadow-sm">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
@@ -474,12 +719,13 @@ export const AdminComicsTab: React.FC = () => {
                   <button 
                     onClick={handleToggleSelectAll}
                     className="text-slate-400 hover:text-white cursor-pointer"
-                    title={isAllSelected ? 'Batalkan Pilih Semua' : 'Pilih Semua'}
+                    title={isAllSelected ? 'Batalkan Pilih Semua di Halaman Ini' : 'Pilih Semua di Halaman Ini'}
                   >
-                    {isAllSelected ? <CheckSquare className="w-4 h-4 text-[#ff5b14]" /> : <Square className="w-4 h-4" />}
+                    {isAllSelected ? <CheckSquare className="w-4 h-4 text-[#ff5b14]" /> : <Square className="w-4 h-4 text-slate-500" />}
                   </button>
                 </th>
                 <th className="p-3">Cover &amp; Judul</th>
+                <th className="p-3">Klasifikasi Proyek</th>
                 <th className="p-3">Jenis Komik</th>
                 <th className="p-3">Akses Konten</th>
                 <th className="p-3">Tampil di Beranda</th>
@@ -491,19 +737,20 @@ export const AdminComicsTab: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-[#1b1b28]">
-              {filteredComics.length === 0 ? (
+              {paginatedComics.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="p-8 text-center text-slate-500">
+                  <td colSpan={11} className="p-8 text-center text-slate-500">
                     Tidak ada komik yang sesuai dengan filter atau pencarian.
                   </td>
                 </tr>
               ) : (
-                filteredComics.map(comic => {
+                paginatedComics.map(comic => {
                   const isSelected = selectedComicIds.includes(comic.id);
                   const chCount = (chapters[comic.id] || []).length;
                   const isNormal = comic.contentType === 'normal' || comic.isFree === true;
                   const isHome = comic.isVisibleOnHome !== false && comic.showOnHome !== false;
                   const cType = comic.comicType || (comic.type as ComicCategoryType) || 'manga';
+                  const projType = getComicProjectType(comic, chapters[comic.id]);
 
                   return (
                     <tr key={comic.id} className={`hover:bg-[#161624] transition-colors ${isSelected ? 'bg-[#ff5b14]/5' : ''}`}>
@@ -512,7 +759,7 @@ export const AdminComicsTab: React.FC = () => {
                           onClick={() => handleToggleSelectOne(comic.id)}
                           className="cursor-pointer text-slate-400 hover:text-white"
                         >
-                          {isSelected ? <CheckSquare className="w-4 h-4 text-[#ff5b14]" /> : <Square className="w-4 h-4" />}
+                          {isSelected ? <CheckSquare className="w-4 h-4 text-[#ff5b14]" /> : <Square className="w-4 h-4 text-slate-500" />}
                         </button>
                       </td>
                       <td className="p-3 flex items-center gap-3">
@@ -522,38 +769,71 @@ export const AdminComicsTab: React.FC = () => {
                           className="w-9 h-12 rounded-lg object-cover shrink-0 border border-[#27273a]" 
                         />
                         <div className="min-w-0">
-                          <span className="font-bold text-white text-xs block truncate">{comic.title}</span>
-                          <span className="text-[10px] text-slate-400">{comic.storyWriter} / {comic.artist}</span>
+                          <span className="font-bold text-white text-xs block truncate max-w-[180px] sm:max-w-xs" title={comic.title}>
+                            {comic.title}
+                          </span>
+                          <span className="text-[10px] text-slate-400 truncate block max-w-[180px]">
+                            {comic.storyWriter || 'Author'} / {comic.artist || 'Artist'}
+                          </span>
                         </div>
                       </td>
 
+                      {/* Project Type Classification */}
                       <td className="p-3">
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold border whitespace-nowrap ${
-                          cType === 'manga'
-                            ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
-                            : cType === 'manhwa'
-                              ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
-                              : cType === 'manhua'
-                                ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
-                                : 'bg-rose-500/20 text-rose-300 border-rose-500/30'
-                        }`}>
-                          {cType === 'manga' && '🇯🇵 Manga'}
-                          {cType === 'manhwa' && '🇰🇷 Manhwa'}
-                          {cType === 'manhua' && '🇨🇳 Manhua'}
-                          {cType === 'webtoon' && '🔞 18+ Webtoon'}
-                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleQuickCycleProjectType(comic)}
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold border whitespace-nowrap cursor-pointer transition-all hover:scale-105 active:scale-95 flex items-center gap-1.5 ${
+                            projType === 'admin_personal'
+                              ? 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border-amber-500/40'
+                              : projType === 'scraped_ready'
+                                ? 'bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border-emerald-500/40'
+                                : 'bg-sky-500/15 hover:bg-sky-500/25 text-sky-300 border-sky-500/40'
+                          }`}
+                          title="Klik untuk cepat mengganti jenis klasifikasi (Project Admin / Scraping / Gateway)"
+                        >
+                          {projType === 'admin_personal' && <Crown className="w-3 h-3 text-amber-400" />}
+                          {projType === 'scraped_ready' && <Zap className="w-3 h-3 text-emerald-400" />}
+                          {projType === 'preview_gateway' && <Globe className="w-3 h-3 text-sky-400" />}
+                          <span>{getComicProjectTypeLabel(projType).shortLabel}</span>
+                          <span className="text-[8px] opacity-60">⇄</span>
+                        </button>
                       </td>
 
                       <td className="p-3">
-                        {isNormal ? (
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 whitespace-nowrap">
-                            🟢 Normal (Bebas)
-                          </span>
-                        ) : (
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-500/20 text-rose-300 border border-rose-500/30 whitespace-nowrap">
-                            🔞 18+ VIP
-                          </span>
-                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleQuickCycleCategory(comic)}
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold border whitespace-nowrap cursor-pointer transition-all hover:scale-105 active:scale-95 flex items-center gap-1 ${
+                            cType === 'manga'
+                              ? 'bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 border-indigo-500/40'
+                              : cType === 'manhwa'
+                                ? 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border-emerald-500/40'
+                                : cType === 'manhua'
+                                  ? 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border-amber-500/40'
+                                  : 'bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border-rose-500/40'
+                          }`}
+                          title="Klik untuk cepat mengganti jenis komik (Manga / Manhwa / Manhua / Webtoon)"
+                        >
+                          <span>{cType === 'manga' ? '🇯🇵 Manga' : cType === 'manhwa' ? '🇰🇷 Manhwa' : cType === 'manhua' ? '🇨🇳 Manhua' : '🔞 18+ Webtoon'}</span>
+                          <span className="text-[8px] opacity-60">⇄</span>
+                        </button>
+                      </td>
+
+                      <td className="p-3">
+                        <button
+                          type="button"
+                          onClick={() => handleQuickToggle18Plus(comic)}
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold border whitespace-nowrap cursor-pointer transition-all hover:scale-105 active:scale-95 flex items-center gap-1 ${
+                            isNormal
+                              ? 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border-emerald-500/40'
+                              : 'bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border-rose-500/40'
+                          }`}
+                          title={isNormal ? 'Klik untuk mengubah jadi komik 18+ VIP (Otomatis diblur untuk tamu)' : 'Klik untuk mengubah jadi komik Normal (Bebas / Tanpa sensor)'}
+                        >
+                          <span>{isNormal ? '🟢 Normal (Bebas)' : '🔞 18+ VIP'}</span>
+                          <span className="text-[8px] opacity-60">⇄</span>
+                        </button>
                       </td>
 
                       <td className="p-3">
@@ -606,6 +886,13 @@ export const AdminComicsTab: React.FC = () => {
                           </button>
                           <button
                             onClick={() => handleOpenEdit(comic)}
+                            className="p-1.5 text-slate-400 hover:text-[#ff5b14] hover:bg-[#ff5b14]/10 rounded-lg transition-colors cursor-pointer"
+                            title="Edit Tag & Detail Komik"
+                          >
+                            <Tag className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleOpenEdit(comic)}
                             className="p-1.5 text-slate-400 hover:text-blue-400 hover:bg-blue-500/10 rounded-lg transition-colors cursor-pointer"
                             title="Edit Komik"
                           >
@@ -627,6 +914,85 @@ export const AdminComicsTab: React.FC = () => {
             </tbody>
           </table>
         </div>
+
+        {/* Pagination Footer */}
+        {filteredComics.length > 0 && (
+          <div className="p-3 bg-[#161622] border-t border-[#222234] flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+            <div className="text-slate-400 font-medium">
+              Menampilkan <span className="text-white font-bold">{filteredComics.length === 0 ? 0 : startIndex + 1}</span> - <span className="text-white font-bold">{endIndex}</span> dari <span className="text-white font-bold">{filteredComics.length}</span> judul komik
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              {/* First Page Button */}
+              <button
+                onClick={() => setCurrentPage(1)}
+                disabled={validCurrentPage === 1}
+                className="p-1.5 rounded-lg bg-[#1a1a28] hover:bg-[#252538] text-slate-300 disabled:opacity-40 disabled:hover:bg-[#1a1a28] disabled:cursor-not-allowed cursor-pointer transition-colors"
+                title="Halaman Pertama"
+              >
+                <ChevronsLeft className="w-4 h-4" />
+              </button>
+
+              {/* Prev Page Button */}
+              <button
+                onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                disabled={validCurrentPage === 1}
+                className="p-1.5 rounded-lg bg-[#1a1a28] hover:bg-[#252538] text-slate-300 disabled:opacity-40 disabled:hover:bg-[#1a1a28] disabled:cursor-not-allowed cursor-pointer transition-colors"
+                title="Halaman Sebelumnya"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+
+              {/* Page Number Buttons */}
+              <div className="flex items-center gap-1 mx-1">
+                {getPageNumbers().map((p, idx) => {
+                  if (p === '...') {
+                    return (
+                      <span key={`ellipsis-${idx}`} className="px-2 py-1 text-slate-500 font-bold">
+                        ...
+                      </span>
+                    );
+                  }
+                  const pageNum = p as number;
+                  const isActive = pageNum === validCurrentPage;
+                  return (
+                    <button
+                      key={`page-${pageNum}`}
+                      onClick={() => setCurrentPage(pageNum)}
+                      className={`min-w-[28px] h-7 px-2 rounded-lg font-bold text-xs transition-colors cursor-pointer ${
+                        isActive
+                          ? 'bg-[#ff5b14] text-white shadow-xs'
+                          : 'bg-[#1a1a28] text-slate-400 hover:text-white hover:bg-[#252538]'
+                      }`}
+                    >
+                      {pageNum}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Next Page Button */}
+              <button
+                onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                disabled={validCurrentPage === totalPages}
+                className="p-1.5 rounded-lg bg-[#1a1a28] hover:bg-[#252538] text-slate-300 disabled:opacity-40 disabled:hover:bg-[#1a1a28] disabled:cursor-not-allowed cursor-pointer transition-colors"
+                title="Halaman Berikutnya"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+
+              {/* Last Page Button */}
+              <button
+                onClick={() => setCurrentPage(totalPages)}
+                disabled={validCurrentPage === totalPages}
+                className="p-1.5 rounded-lg bg-[#1a1a28] hover:bg-[#252538] text-slate-300 disabled:opacity-40 disabled:hover:bg-[#1a1a28] disabled:cursor-not-allowed cursor-pointer transition-colors"
+                title="Halaman Terakhir"
+              >
+                <ChevronsRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Add / Edit Modal */}
@@ -653,6 +1019,62 @@ export const AdminComicsTab: React.FC = () => {
                   className="w-full p-2 bg-[#181824] border border-[#27273a] rounded-xl text-white focus:outline-none focus:border-[#ff5b14]"
                   required
                 />
+              </div>
+
+              {/* Klasifikasi Proyek Admin vs Scraping vs Gateway */}
+              <div className="p-3 bg-[#161622] rounded-xl border border-[#27273a] space-y-2">
+                <label className="block text-slate-300 font-bold">
+                  👑 Klasifikasi Jenis Proyek
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setProjectType('admin_personal')}
+                    className={`p-2 rounded-xl text-left border transition-all cursor-pointer ${
+                      projectType === 'admin_personal'
+                        ? 'bg-amber-500/20 border-amber-500/60 text-amber-300'
+                        : 'bg-[#101018] border-[#252538] text-slate-400 hover:bg-[#181824]'
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 font-bold mb-0.5 text-[11px]">
+                      <Crown className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Project Pribadi</span>
+                    </div>
+                    <p className="text-[9px] text-slate-400 leading-tight">Proyek internal admin / upload mandiri</p>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setProjectType('scraped_ready')}
+                    className={`p-2 rounded-xl text-left border transition-all cursor-pointer ${
+                      projectType === 'scraped_ready'
+                        ? 'bg-emerald-500/20 border-emerald-500/60 text-emerald-300'
+                        : 'bg-[#101018] border-[#252538] text-slate-400 hover:bg-[#181824]'
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 font-bold mb-0.5 text-[11px]">
+                      <Zap className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Scraping Siap</span>
+                    </div>
+                    <p className="text-[9px] text-slate-400 leading-tight">Gambar berhasil ditarik via API/Scraper</p>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setProjectType('preview_gateway')}
+                    className={`p-2 rounded-xl text-left border transition-all cursor-pointer ${
+                      projectType === 'preview_gateway'
+                        ? 'bg-sky-500/20 border-sky-500/60 text-sky-300'
+                        : 'bg-[#101018] border-[#252538] text-slate-400 hover:bg-[#181824]'
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 font-bold mb-0.5 text-[11px]">
+                      <Globe className="w-3.5 h-3.5 text-sky-400" />
+                      <span>Preview Gateway</span>
+                    </div>
+                    <p className="text-[9px] text-slate-400 leading-tight">Pratinjau sinopsis &amp; tautan baca mitra</p>
+                  </button>
+                </div>
               </div>
 
               {/* Jenis Komik (Manga, Manhwa, Manhua, Webtoon) */}

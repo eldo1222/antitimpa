@@ -38,7 +38,8 @@ import {
   Loader2,
   ExternalLink,
   BookOpen,
-  ArrowDownToLine
+  ArrowDownToLine,
+  RotateCcw
 } from 'lucide-react';
 import { ComicContentType, ComicCategoryType } from '../../types';
 
@@ -85,6 +86,100 @@ export const AdminScraperTab: React.FC = () => {
   const [selectedChapterIdForPdf, setSelectedChapterIdForPdf] = useState<string>('');
   const [isConvertingChapterPdf, setIsConvertingChapterPdf] = useState(false);
   const [chapterPdfProgress, setChapterPdfProgress] = useState<string | null>(null);
+
+  // Auto-Scraper Background Status State
+  const [autoScraperInfo, setAutoScraperInfo] = useState<{
+    isRunning: boolean;
+    statusMessage: string;
+    totalComicsInDB: number;
+    totalChaptersInDB: number;
+    scrapedThisSession: number;
+    targetCount?: number;
+    currentCategory?: string;
+    logs: string[];
+    offsets?: Record<string, number>;
+  }>({
+    isRunning: false,
+    statusMessage: 'Siap (Idle)',
+    totalComicsInDB: comics.length,
+    totalChaptersInDB: 0,
+    scrapedThisSession: 0,
+    targetCount: 500,
+    currentCategory: 'Standby',
+    logs: [],
+    offsets: {}
+  });
+  const [selectedBatchSize, setSelectedBatchSize] = useState<number>(500);
+  const [selectedAutoCategory, setSelectedAutoCategory] = useState<string>('all');
+  const [isTriggeringSync, setIsTriggeringSync] = useState(false);
+  const [showScraperLogs, setShowScraperLogs] = useState(false);
+
+  // Poll Auto-Scraper Status from Server
+  const fetchAutoScraperStatus = async () => {
+    try {
+      const res = await fetch('/api/scraper/auto-status');
+      if (res.ok) {
+        const data = await res.json();
+        setAutoScraperInfo(data);
+      }
+    } catch (e) {
+      // ignore
+    }
+  };
+
+  React.useEffect(() => {
+    fetchAutoScraperStatus();
+    const interval = setInterval(fetchAutoScraperStatus, autoScraperInfo.isRunning ? 2000 : 8000);
+    return () => clearInterval(interval);
+  }, [autoScraperInfo.isRunning]);
+
+  const handleTriggerAutoSync = async () => {
+    setIsTriggeringSync(true);
+    try {
+      const res = await fetch('/api/scraper/auto-sync', { 
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          targetCount: selectedBatchSize, 
+          categoryFilter: selectedAutoCategory,
+          preFetchChapters: true 
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setAutoScraperInfo(prev => ({ 
+          ...prev, 
+          isRunning: true, 
+          targetCount: selectedBatchSize,
+          statusMessage: `Memulai mass scraper (Target: ${selectedBatchSize} komik)...` 
+        }));
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsTriggeringSync(false);
+      setTimeout(fetchAutoScraperStatus, 800);
+    }
+  };
+
+  const handleStopAutoScraper = async () => {
+    try {
+      await fetch('/api/scraper/auto-stop', { method: 'POST' });
+      fetchAutoScraperStatus();
+    } catch (e) {
+      // ignore
+    }
+  };
+
+  const handleResetScraperCursor = async () => {
+    if (!window.confirm('Reset offset scraper ke awal (offset 0)? Penarikan selanjutnya akan mengambil kembali komik teratas.')) return;
+    try {
+      await fetch('/api/scraper/auto-reset-cursor', { method: 'POST' });
+      fetchAutoScraperStatus();
+    } catch (e) {
+      // ignore
+    }
+  };
 
   // Initial mount: load Komikcast popular
   React.useEffect(() => {
@@ -445,6 +540,195 @@ export const AdminScraperTab: React.FC = () => {
           <span>{batchStatus}</span>
         </div>
       )}
+
+      {/* Auto-Scraping All Catalog Engine (MangaDex & MyAnimeList Background Ingest) */}
+      <div className="p-4 sm:p-5 bg-gradient-to-br from-[#131224] via-[#10101b] to-[#1c1428] rounded-2xl border border-indigo-500/30 shadow-xl space-y-4">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 flex items-center gap-1.5">
+                <span className={`w-2 h-2 rounded-full ${autoScraperInfo.isRunning ? 'bg-amber-400 animate-ping' : 'bg-emerald-400'}`} />
+                {autoScraperInfo.isRunning ? 'Auto-Scraper Berjalan (Continuous Multi-Stream)' : 'Auto-Scraper Standby & Siap Sedot'}
+              </span>
+              <span className="text-[11px] text-slate-400 font-medium">
+                Penyedot Ribuan Komik (MangaDex Multi-Offset + MAL Jikan API)
+              </span>
+            </div>
+            <h3 className="text-sm sm:text-base font-black text-white flex items-center gap-2">
+              <Flame className="w-4 h-4 text-[#ff5b14]" />
+              Mass Auto-Scraper Catalog Engine (Multi-Stream Pagination)
+            </h3>
+            <p className="text-xs text-slate-300 max-w-2xl">
+              Sistem scraper kini menggunakan <strong>Persistent Offset Cursor</strong> yang melompati batasan 20-30 komik. Scraper akan terus menarik komik dari halaman ke-1, 2, 3 hingga puluhan halaman berikutnya tanpa henti sampai target ribuan judul tercapai.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 self-start md:self-center shrink-0">
+            {autoScraperInfo.isRunning ? (
+              <button
+                onClick={handleStopAutoScraper}
+                className="px-4 py-2.5 rounded-xl bg-red-600/90 hover:bg-red-600 text-white font-black text-xs flex items-center gap-2 transition-all cursor-pointer shadow-lg shadow-red-600/20 active:scale-95"
+              >
+                <AlertCircle className="w-4 h-4" />
+                <span>Hentikan Scraper</span>
+              </button>
+            ) : (
+              <button
+                onClick={handleTriggerAutoSync}
+                disabled={isTriggeringSync}
+                className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-[#ff5b14] to-indigo-600 hover:opacity-95 text-white font-black text-xs flex items-center gap-2 transition-all cursor-pointer shadow-lg shadow-indigo-600/20 active:scale-95"
+              >
+                {isTriggeringSync ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-amber-300" />
+                    <span>Menghubungkan...</span>
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="w-4 h-4" />
+                    <span>Jalankan Mass Scraper ({selectedBatchSize} Komik)</span>
+                  </>
+                )}
+              </button>
+            )}
+
+            <button
+              onClick={handleResetScraperCursor}
+              title="Reset offset ke 0 jika ingin memulai penarikan dari halaman pertama lagi"
+              className="px-3 py-2.5 rounded-xl bg-[#1a1a2e] border border-slate-700 hover:border-amber-500 text-slate-300 hover:text-amber-300 font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Reset Cursor (0)</span>
+            </button>
+
+            <button
+              onClick={() => setShowScraperLogs(prev => !prev)}
+              className="px-3 py-2.5 rounded-xl bg-[#1a1a2e] border border-slate-700 hover:border-slate-500 text-slate-300 hover:text-white font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+            >
+              <FileText className="w-3.5 h-3.5" />
+              <span>{showScraperLogs ? 'Tutup Log' : 'Lihat Log Ingest'}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Target Batch Size & Stream Filter Controls */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-3 bg-black/40 rounded-xl border border-white/5">
+          <div className="space-y-1.5">
+            <label className="text-[11px] font-bold text-slate-300 flex items-center gap-1.5">
+              <span>Target Jumlah Komik yang Ditarik:</span>
+              <span className="text-[#ff5b14] font-black">{selectedBatchSize} Komik</span>
+            </label>
+            <div className="flex flex-wrap gap-1.5">
+              {[100, 300, 500, 1000, 2500, 5000, 10000].map(sz => (
+                <button
+                  key={sz}
+                  onClick={() => setSelectedBatchSize(sz)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    selectedBatchSize === sz
+                      ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
+                      : 'bg-[#1b1b2a] text-slate-400 hover:text-white hover:bg-[#25253a]'
+                  }`}
+                >
+                  {sz >= 1000 ? `${sz / 1000}k` : sz} Komik
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-[11px] font-bold text-slate-300 flex items-center gap-1.5">
+              <span>Filter Aliran Sumber (Stream Filter):</span>
+              <span className="text-cyan-400 font-black uppercase">{selectedAutoCategory}</span>
+            </label>
+            <div className="flex flex-wrap gap-1.5">
+              {[
+                { id: 'all', label: 'Semua Kategori (MangaDex + MAL)' },
+                { id: 'manhwa', label: 'Manhwa Korea' },
+                { id: 'manhua', label: 'Manhua China' },
+                { id: 'manga', label: 'Manga Jepang' },
+                { id: '18plus', label: '18+ VIP Dewasa' },
+                { id: 'isekai', label: 'Isekai Fantasy' },
+                { id: 'action', label: 'Action & Murim' }
+              ].map(cat => (
+                <button
+                  key={cat.id}
+                  onClick={() => setSelectedAutoCategory(cat.id)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    selectedAutoCategory === cat.id
+                      ? 'bg-[#ff5b14] text-white shadow-md shadow-[#ff5b14]/30'
+                      : 'bg-[#1b1b2a] text-slate-400 hover:text-white hover:bg-[#25253a]'
+                  }`}
+                >
+                  {cat.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Realtime Stats & Progress Bar */}
+        <div className="space-y-2">
+          {autoScraperInfo.isRunning && (
+            <div className="space-y-1">
+              <div className="flex justify-between text-[11px] font-semibold text-slate-300">
+                <span className="flex items-center gap-1.5 text-amber-300 font-bold">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  Progress Tarik Sesi Ini: {autoScraperInfo.scrapedThisSession || 0} / {autoScraperInfo.targetCount || selectedBatchSize} komik
+                </span>
+                <span className="text-indigo-300 font-bold">
+                  {Math.min(100, Math.round(((autoScraperInfo.scrapedThisSession || 0) / (autoScraperInfo.targetCount || selectedBatchSize || 1)) * 100))}%
+                </span>
+              </div>
+              <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+                <div 
+                  className="h-full bg-gradient-to-r from-[#ff5b14] via-indigo-500 to-cyan-400 transition-all duration-500 rounded-full"
+                  style={{ 
+                    width: `${Math.min(100, Math.round(((autoScraperInfo.scrapedThisSession || 0) / (autoScraperInfo.targetCount || selectedBatchSize || 1)) * 100))}%` 
+                  }}
+                />
+              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-white/5 text-xs">
+            <div className="p-2.5 bg-black/30 rounded-xl border border-white/5 flex flex-col">
+              <span className="text-[10px] text-slate-400">Total Komik di Database:</span>
+              <span className="font-black text-white text-sm text-indigo-300">{autoScraperInfo.totalComicsInDB || comics.length} Judul</span>
+            </div>
+            <div className="p-2.5 bg-black/30 rounded-xl border border-white/5 flex flex-col">
+              <span className="text-[10px] text-slate-400">Status Mesin:</span>
+              <span className="font-bold text-emerald-400 truncate">{autoScraperInfo.statusMessage}</span>
+            </div>
+            <div className="p-2.5 bg-black/30 rounded-xl border border-white/5 flex flex-col">
+              <span className="text-[10px] text-slate-400">Tersedot Sesi Ini:</span>
+              <span className="font-bold text-amber-300">+{autoScraperInfo.scrapedThisSession || 0} Komik Baru</span>
+            </div>
+            <div className="p-2.5 bg-black/30 rounded-xl border border-white/5 flex flex-col">
+              <span className="text-[10px] text-slate-400">Metode Ingest:</span>
+              <span className="font-bold text-cyan-300">Cursor Multi-Stream Loop</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Collapsible Live Log Drawer */}
+        {showScraperLogs && (
+          <div className="p-3 bg-[#0a0a10] rounded-xl border border-slate-800 font-mono text-[11px] text-slate-300 max-h-52 overflow-y-auto space-y-1 scrollbar-thin">
+            <div className="flex items-center justify-between text-[10px] text-slate-500 font-bold border-b border-slate-800 pb-1 mb-1">
+              <span>CONSOLE LOG AUTO-SCRAPER BACKGROUND:</span>
+              <button onClick={fetchAutoScraperStatus} className="text-[#ff5b14] hover:underline cursor-pointer">Refresh Status</button>
+            </div>
+            {autoScraperInfo.logs && autoScraperInfo.logs.length > 0 ? (
+              autoScraperInfo.logs.map((log, idx) => (
+                <div key={idx} className="leading-tight text-slate-400">
+                  {log}
+                </div>
+              ))
+            ) : (
+              <div className="text-slate-500 italic py-2">Belum ada log aktivitas. Klik "Jalankan Mass Scraper" untuk memulai proses ingest.</div>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Expandable Import Configuration Settings */}
       {showConfigSettings && (
@@ -1358,8 +1642,8 @@ export const AdminScraperTab: React.FC = () => {
                   onChange={(e) => setSelectedChapterIdForPdf(e.target.value)}
                   className="w-full p-2.5 bg-[#171724] border border-[#2b2b3e] rounded-xl text-xs text-white focus:border-[#ff5b14] outline-none"
                 >
-                  {(chapters[selectedComicIdForPdf] || []).map(ch => (
-                    <option key={ch.id} value={ch.id}>
+                  {(chapters[selectedComicIdForPdf] || []).map((ch, idx) => (
+                    <option key={`${ch.id || ch.chapterNumber}-${idx}`} value={ch.id}>
                       Ch. {ch.chapterNumber} - {ch.title} ({(ch.pages?.length || 0)} Halaman / {(ch.sourceType || 'manual').toUpperCase()})
                     </option>
                   ))}

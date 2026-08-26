@@ -143,14 +143,11 @@ export const GoogleAuthModal: React.FC = () => {
               </svg>
             </div>
             <div>
-              <h3 className="font-extrabold text-base text-white tracking-tight flex items-center gap-1.5">
-                <span>Masuk dengan Google</span>
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-medium">
-                  Official OAuth
-                </span>
+              <h3 className="font-extrabold text-base text-white tracking-tight">
+                Masuk dengan Akun Google
               </h3>
               <p className="text-[11px] text-slate-400">
-                Otentikasi aman tersinkronisasi database Firebase
+                Simpan bookmark dan lanjutkan riwayat bacaan Anda
               </p>
             </div>
           </div>
@@ -173,7 +170,7 @@ export const GoogleAuthModal: React.FC = () => {
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            Google Popup (Resmi)
+            Masuk Cepat
           </button>
           <button
             onClick={() => setMode('custom')}
@@ -183,7 +180,7 @@ export const GoogleAuthModal: React.FC = () => {
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            Input Email Google
+            Gunakan Email
           </button>
         </div>
 
@@ -204,21 +201,17 @@ export const GoogleAuthModal: React.FC = () => {
             </div>
           )}
 
-          {/* Mode 1: Official Firebase OAuth Popup */}
+          {/* Mode 1: Quick One-Click Google Login */}
           {mode === 'popup' && (
             <div className="space-y-4">
-              <div className="p-4 rounded-2xl bg-[#161622] border border-[#27273a] space-y-2.5 text-xs text-slate-300">
-                <div className="flex items-center gap-2 text-emerald-400 font-bold">
-                  <ShieldCheck className="w-4 h-4" />
-                  <span>Otentikasi Terverifikasi Otomatis</span>
+              <div className="p-4 rounded-2xl bg-[#161622] border border-[#27273a] space-y-2 text-xs text-slate-300">
+                <div className="flex items-center gap-2 text-[#ff5b14] font-bold">
+                  <Sparkles className="w-4 h-4" />
+                  <span>Akses Langsung Komik Favorit</span>
                 </div>
                 <p className="text-[11px] text-slate-300 leading-relaxed">
-                  Google memvalidasi akun secara langsung via prompt Google. Pengguna baru akan diminta membuat <strong>username</strong> dan <strong>password akun</strong> pada pendaftaran pertama.
+                  Hubungkan akun Google Anda untuk membaca ribuan judul komik, menyimpan riwayat chapter, serta membuka semua konten dewasa (18+).
                 </p>
-                <div className="pt-2 border-t border-[#232334] text-[10px] text-slate-400 flex items-center gap-1.5">
-                  <Sparkles className="w-3.5 h-3.5 text-[#ff5b14]" />
-                  <span>Anti-Manipulasi: Email diproteksi oleh token resmi Google OAuth.</span>
-                </div>
               </div>
 
               <button
@@ -252,7 +245,7 @@ export const GoogleAuthModal: React.FC = () => {
             <form onSubmit={handleCustomSubmit} className="space-y-3.5">
               <div>
                 <label className="block text-xs font-bold text-slate-300 mb-1.5">
-                  Email Google Anda
+                  Alamat Email Google
                 </label>
                 <div className="relative">
                   <input
@@ -260,7 +253,7 @@ export const GoogleAuthModal: React.FC = () => {
                     required
                     value={emailInput}
                     onChange={(e) => setEmailInput(e.target.value)}
-                    placeholder="nama.anda@gmail.com"
+                    placeholder="nama@gmail.com"
                     className="w-full pl-10 pr-3.5 py-3 bg-[#171724] border border-[#27273a] rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#ff5b14] transition-colors"
                   />
                   <Mail className="absolute left-3.5 top-3.5 w-4 h-4 text-slate-500 pointer-events-none" />
@@ -269,14 +262,14 @@ export const GoogleAuthModal: React.FC = () => {
 
               <div>
                 <label className="block text-xs font-bold text-slate-300 mb-1.5">
-                  Nama Pengguna (Opsional)
+                  Nama Tampilan (Opsional)
                 </label>
                 <div className="relative">
                   <input
                     type="text"
                     value={nameInput}
                     onChange={(e) => setNameInput(e.target.value)}
-                    placeholder="Nama tampilan di komentar"
+                    placeholder="Nama Anda"
                     className="w-full pl-10 pr-3.5 py-3 bg-[#171724] border border-[#27273a] rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#ff5b14] transition-colors"
                   />
                   <User className="absolute left-3.5 top-3.5 w-4 h-4 text-slate-500 pointer-events-none" />
@@ -288,10 +281,10 @@ export const GoogleAuthModal: React.FC = () => {
                 <div className="p-3.5 rounded-2xl bg-amber-500/15 border border-amber-500/30 space-y-2 animate-in fade-in">
                   <div className="flex items-center gap-2 text-amber-300 text-xs font-bold">
                     <Crown className="w-4 h-4 text-amber-400" />
-                    <span>Akun Pemilik (Super Admin) Terdeteksi</span>
+                    <span>Akun Pengelola Utama</span>
                   </div>
                   <p className="text-[10px] text-amber-200/90 leading-relaxed">
-                    Demi melindungi hak akses admin, masukkan kata sandi Super Admin Anda untuk validasi.
+                    Masukkan kata sandi akun pengelola untuk verifikasi keamanan.
                   </p>
                   <div className="relative">
                     <input
@@ -322,11 +315,11 @@ export const GoogleAuthModal: React.FC = () => {
                 {isLoading ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin text-white" />
-                    <span>Memverifikasi Akun Google...</span>
+                    <span>Memproses...</span>
                   </>
                 ) : (
                   <>
-                    <span>Verifikasi & Lanjutkan</span>
+                    <span>Lanjutkan Masuk</span>
                     <ArrowRight className="w-4 h-4" />
                   </>
                 )}
@@ -339,7 +332,7 @@ export const GoogleAuthModal: React.FC = () => {
         <div className="px-6 py-3.5 bg-[#0d0d12] border-t border-[#20202c] flex items-center justify-between text-[11px] text-slate-400">
           <span className="flex items-center gap-1.5 text-slate-400">
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Google Identity Services</span>
+            <span>Layanan Akun Resmi KomikYuk</span>
           </span>
           <button
             onClick={closeGoogleAuthModal}

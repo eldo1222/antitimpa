@@ -69,6 +69,7 @@ export type ComicContentType = 'normal' | '18plus';
 export type ComicCategoryType = 'manga' | 'manhwa' | 'manhua' | 'doujin' | 'comic' | 'webtoon';
 export type ComicType = ComicCategoryType;
 export type ContentRating = ComicContentType;
+export type ComicProjectType = 'admin_personal' | 'scraped_ready' | 'preview_gateway';
 
 export interface ExternalSource {
   id?: string;
@@ -199,6 +200,7 @@ export interface Comic {
   externalLinks?: ExternalSource[];
   whereToRead?: ExternalSource[];
   hasExternalGateway?: boolean;
+  projectType?: ComicProjectType; // 'admin_personal' = Project Pribadi Admin | 'scraped_ready' = Scraping Berhasil | 'preview_gateway' = Preview Gateway Saja
 }
 
 export interface Banner {

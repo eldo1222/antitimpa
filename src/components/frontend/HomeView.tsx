@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { AdBanner } from './AdBanner';
 import { Chapter, Comic } from '../../types';
+import { isComic18Plus, shouldBlurComic } from '../../utils/comicUtils';
 
 const ITEMS_PER_PAGE = 24;
 
@@ -47,12 +48,21 @@ export const HomeView: React.FC = () => {
   const isUserAuthenticated = !!currentUser || !!googleUser;
 
   const handleOpenComic = (comicId: string) => {
-    selectComic(comicId);
     const comic = comics.find(c => c.id === comicId);
+    if (comic && shouldBlurComic(comic, isUserAuthenticated)) {
+      openLoginModal('🔒 Komik ini berkategori 18+. Silakan masuk / login untuk membuka sensor gambar dan membaca.');
+      return;
+    }
+    selectComic(comicId);
     navigate(`/comic/${comic?.slug || comicId}`);
   };
 
   const handleReadChapter = (comicId: string, chapterId: string) => {
+    const comic = comics.find(c => c.id === comicId);
+    if (comic && shouldBlurComic(comic, isUserAuthenticated)) {
+      openLoginModal('🔒 Komik ini berkategori 18+. Silakan masuk / login untuk membuka sensor gambar dan membaca.');
+      return;
+    }
     selectComic(comicId);
     const success = startReading(chapterId);
     if (success) {
@@ -139,6 +149,8 @@ export const HomeView: React.FC = () => {
   }, [uniqueVisibleComics, statusFilter, sortBy]);
 
   const currentBanner = activeBanners[currentBannerIndex] || activeBanners[0];
+  const bannerTargetComic = currentBanner?.targetComicId ? comics.find(c => c.id === currentBanner.targetComicId) : null;
+  const isBannerBlurred = shouldBlurComic(bannerTargetComic, isUserAuthenticated);
   const totalPages = Math.max(1, Math.ceil(filteredComics.length / ITEMS_PER_PAGE));
 
   return (
@@ -153,9 +165,10 @@ export const HomeView: React.FC = () => {
               <img 
                 src={currentBanner.imageUrl} 
                 alt={currentBanner.title}
-                style={{ filter: !isUserAuthenticated ? 'blur(10px)' : 'none' }}
+                referrerPolicy="no-referrer"
+                style={{ filter: isBannerBlurred ? 'blur(14px)' : 'none' }}
                 className={`w-full h-full object-cover object-center filter brightness-90 group-hover:scale-105 transition-transform duration-700 ${
-                  !isUserAuthenticated ? 'scale-110 brightness-75' : ''
+                  isBannerBlurred ? 'scale-110 brightness-75' : ''
                 }`} 
               />
               <div className="absolute inset-0 bg-gradient-to-t from-[#09090d] via-[#09090d]/70 to-transparent" />
@@ -172,10 +185,10 @@ export const HomeView: React.FC = () => {
                     <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
                     4.9
                   </span>
-                  {!isUserAuthenticated && (
+                  {isBannerBlurred && (
                     <span className="text-[10px] text-amber-300 font-semibold bg-amber-500/20 border border-amber-500/30 px-2 py-0.5 rounded-full flex items-center gap-1">
                       <Lock className="w-3 h-3 text-amber-400" />
-                      Sensor Aktif (Tamu)
+                      18+ Sensor (Login untuk buka)
                     </span>
                   )}
                 </div>
@@ -253,6 +266,7 @@ export const HomeView: React.FC = () => {
               {popularComics.slice(0, 4).map((comic, index) => {
                 const comicChaptersList = chapters[comic.id] || [];
                 const latestChapter = comicChaptersList[0];
+                const isItemBlurred = shouldBlurComic(comic, isUserAuthenticated);
                 const rankColor = 
                   index === 0 ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' :
                   index === 1 ? 'bg-slate-300/20 text-slate-200 border-slate-300/40' :
@@ -274,11 +288,16 @@ export const HomeView: React.FC = () => {
                         src={comic.coverImage} 
                         alt={comic.title}
                         referrerPolicy="no-referrer"
-                        style={{ filter: !isUserAuthenticated ? 'blur(10px)' : 'none' }}
+                        style={{ filter: isItemBlurred ? 'blur(10px)' : 'none' }}
                         className={`w-full h-full object-cover group-hover:scale-105 transition-transform ${
-                          !isUserAuthenticated ? 'scale-110' : ''
+                          isItemBlurred ? 'scale-110' : ''
                         }`} 
                       />
+                      {isItemBlurred && (
+                        <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+                          <Lock className="w-3.5 h-3.5 text-amber-300" />
+                        </div>
+                      )}
                     </div>
 
                     <div className="flex-1 min-w-0">
@@ -344,6 +363,7 @@ export const HomeView: React.FC = () => {
           {popularComics.map((comic, idx) => {
             const comicChaptersList = chapters[comic.id] || [];
             const latestChapter = comicChaptersList[0];
+            const isItemBlurred = shouldBlurComic(comic, isUserAuthenticated);
             return (
               <div
                 key={comic.id}
@@ -355,15 +375,15 @@ export const HomeView: React.FC = () => {
                     src={comic.coverImage}
                     alt={comic.title}
                     referrerPolicy="no-referrer"
-                    style={{ filter: !isUserAuthenticated ? 'blur(10px)' : 'none' }}
+                    style={{ filter: isItemBlurred ? 'blur(10px)' : 'none' }}
                     className={`w-full h-full object-cover group-hover:scale-105 transition-transform ${
-                      !isUserAuthenticated ? 'scale-110' : ''
+                      isItemBlurred ? 'scale-110' : ''
                     }`}
                   />
                   <div className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded-md text-[9px] font-black bg-black/70 text-amber-300 border border-white/10 flex items-center gap-1">
                     #{idx + 1}
                   </div>
-                  {!isUserAuthenticated && (
+                  {isItemBlurred && (
                     <div className="absolute inset-0 flex items-center justify-center bg-black/40">
                       <Lock className="w-4 h-4 text-amber-300 drop-shadow" />
                     </div>
@@ -474,6 +494,7 @@ export const HomeView: React.FC = () => {
                   const bookmarked = isBookmarked(comic.id);
                   const comicChaptersList: Chapter[] = chapters[comic.id] || [];
                   const category = getComicCategory(comic);
+                  const isItemBlurred = shouldBlurComic(comic, isUserAuthenticated);
 
                   // Take top 3 latest chapters (or default placeholder if none)
                   const top3Chapters = comicChaptersList.slice(0, 3);
@@ -493,9 +514,9 @@ export const HomeView: React.FC = () => {
                           alt={comic.title}
                           referrerPolicy="no-referrer"
                           loading="lazy"
-                          style={{ filter: !isUserAuthenticated ? 'blur(10px)' : 'none' }}
+                          style={{ filter: isItemBlurred ? 'blur(10px)' : 'none' }}
                           className={`w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 ${
-                            !isUserAuthenticated ? 'scale-110' : ''
+                            isItemBlurred ? 'scale-110' : ''
                           }`} 
                         />
                         <div className="absolute top-1 left-1 flex flex-col gap-0.5">
@@ -509,7 +530,7 @@ export const HomeView: React.FC = () => {
                           </span>
                         </div>
 
-                        {!isUserAuthenticated && (
+                        {isItemBlurred && (
                           <div className="absolute inset-0 flex items-center justify-center bg-black/40 backdrop-blur-[2px]">
                             <Lock className="w-4 h-4 text-amber-300" />
                           </div>
@@ -555,7 +576,7 @@ export const HomeView: React.FC = () => {
                           {top3Chapters.length > 0 ? (
                             top3Chapters.map((ch, chIdx) => (
                               <button
-                                key={ch.id}
+                                key={`${ch.id || ch.chapterNumber}-${chIdx}`}
                                 onClick={() => handleReadChapter(comic.id, ch.id)}
                                 className={`w-full px-2.5 py-1.5 rounded-lg flex items-center justify-between text-[11px] transition-all cursor-pointer ${
                                   chIdx === 0 
@@ -605,6 +626,7 @@ export const HomeView: React.FC = () => {
                   const category = getComicCategory(comic);
                   const latestChapter = comicChaptersList[0];
                   const prevChapter = comicChaptersList[1];
+                  const isItemBlurred = shouldBlurComic(comic, isUserAuthenticated);
 
                   return (
                     <div
@@ -620,9 +642,9 @@ export const HomeView: React.FC = () => {
                           src={comic.coverImage} 
                           alt={comic.title}
                           referrerPolicy="no-referrer"
-                          style={{ filter: !isUserAuthenticated ? 'blur(10px)' : 'none' }}
+                          style={{ filter: isItemBlurred ? 'blur(10px)' : 'none' }}
                           className={`w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 ${
-                            !isUserAuthenticated ? 'scale-110' : ''
+                            isItemBlurred ? 'scale-110' : ''
                           }`} 
                           loading="lazy"
                         />
@@ -655,7 +677,7 @@ export const HomeView: React.FC = () => {
                           </button>
                         </div>
 
-                        {!isUserAuthenticated && (
+                        {isItemBlurred && (
                           <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/40 backdrop-blur-[2px] pointer-events-none p-2 text-center">
                             <Lock className="w-5 h-5 text-amber-300 drop-shadow mb-1" />
                             <span className="text-[10px] font-bold text-amber-300">Sensor Aktif</span>

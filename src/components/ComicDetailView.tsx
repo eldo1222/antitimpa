@@ -267,9 +267,9 @@ export const ComicDetailView: React.FC<ComicDetailViewProps> = ({
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 max-h-[420px] overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-slate-700">
-            {chapters.map((ch) => (
+            {chapters.map((ch, idx) => (
               <div
-                key={ch.id}
+                key={`${ch.id || ch.chapterNumber}-${idx}`}
                 onClick={() => handleChapterClick(ch)}
                 className={`p-3 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${
                   is18Plus && !accessStatus.allowed

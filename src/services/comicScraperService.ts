@@ -1128,9 +1128,15 @@ export function buildComicFromScrape(
   };
 
   // If real chapters are provided from source (Komikcast, Doujindesu, etc.)
+  const seenChapterIds = new Set<string>();
   const chapters: Chapter[] = rawChapters.map((ch, idx) => {
     const chNum = ch.chapterNumber || (idx + 1);
-    const chId = `ch-${comicId}-${chNum}`;
+    let chId = (ch as any).id || `ch-${comicId}-${chNum}`;
+    if (seenChapterIds.has(chId)) {
+      chId = `${chId}-sub${idx + 1}`;
+    }
+    seenChapterIds.add(chId);
+
     return {
       id: chId,
       comicId: comicId,
@@ -1234,9 +1240,14 @@ export async function buildComicFromScrapeAsync(
         primaryDriveAccountId: customSettings?.primaryDriveAccountId
       };
 
+      const seenAsyncChapterIds = new Set<string>();
       const chapters: Chapter[] = selectedMdChapters.map((mdCh, idx) => {
         const chNum = mdCh.chapterNumber || (idx + 1);
-        const chId = `ch-${comicId}-${chNum}`;
+        let chId = mdCh.id ? `ch-${mdCh.id}` : `ch-${comicId}-${chNum}`;
+        if (seenAsyncChapterIds.has(chId)) {
+          chId = `${chId}-sub${idx + 1}`;
+        }
+        seenAsyncChapterIds.add(chId);
 
         return {
           id: chId,

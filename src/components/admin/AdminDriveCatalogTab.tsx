@@ -557,12 +557,12 @@ export const AdminDriveCatalogTab: React.FC = () => {
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-[#181824]">
-                            {comicChapters.map((ch) => {
+                            {comicChapters.map((ch, idx) => {
                               const chDriveAccount = driveAccounts.find(a => a.id === ch.driveAccountId) || primaryAccount;
                               const hasDrive = ch.sourceType === 'drive' && ch.driveUrl;
 
                               return (
-                                <tr key={ch.id} className="hover:bg-[#141420] transition-colors">
+                                <tr key={`${ch.id || ch.chapterNumber}-${idx}`} className="hover:bg-[#141420] transition-colors">
                                   <td className="py-2.5 px-3 font-black text-[#ff5b14]">
                                     #{ch.chapterNumber}
                                   </td>

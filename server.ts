@@ -42,6 +42,32 @@ if (!fs.existsSync(DATA_DIR)) {
 // In-memory cached database state
 let dbState: CentralDB;
 
+function sanitizeChaptersMap(rawChapters: Record<string, Chapter[]> | undefined): Record<string, Chapter[]> {
+  if (!rawChapters || typeof rawChapters !== "object") return {};
+  const result: Record<string, Chapter[]> = {};
+
+  for (const [comicId, chList] of Object.entries(rawChapters)) {
+    if (!Array.isArray(chList)) continue;
+    const seenIds = new Set<string>();
+    const sanitized: Chapter[] = [];
+    for (let i = 0; i < chList.length; i++) {
+      const ch = chList[i];
+      if (!ch) continue;
+      let chId = ch.id || `ch-${comicId}-${ch.chapterNumber || i + 1}`;
+      if (seenIds.has(chId)) {
+        chId = `${chId}-v${i + 1}`;
+      }
+      seenIds.add(chId);
+      sanitized.push({
+        ...ch,
+        id: chId,
+      });
+    }
+    result[comicId] = sanitized;
+  }
+  return result;
+}
+
 function loadDatabase(): CentralDB {
   if (fs.existsSync(DB_FILE)) {
     try {
@@ -50,7 +76,7 @@ function loadDatabase(): CentralDB {
       if (parsed && Array.isArray(parsed.comics)) {
         return {
           comics: parsed.comics || [],
-          chapters: parsed.chapters || {},
+          chapters: sanitizeChaptersMap(parsed.chapters),
           users: parsed.users || initialUsers,
           banners: parsed.banners || [],
           driveAccounts: parsed.driveAccounts || initialDriveAccounts,
@@ -70,7 +96,7 @@ function loadDatabase(): CentralDB {
   // Initial seed if db.json does not exist
   const initialData: CentralDB = {
     comics: initialComics,
-    chapters: initialChapters,
+    chapters: sanitizeChaptersMap(initialChapters),
     users: initialUsers,
     banners: initialBanners,
     driveAccounts: initialDriveAccounts,
@@ -1072,6 +1098,573 @@ async function startServer() {
       res.status(500).json({ error: "Failed to download Drive PDF", message: error.message });
     }
   });
+
+  // ----------------------------------------------------
+  // AUTOMATED MASS SCRAPER ENGINE (MANGADEX & MAL HIGH-CAPACITY)
+  // ----------------------------------------------------
+  interface AutoScraperState {
+    isRunning: boolean;
+    lastRun: string | null;
+    totalComicsInDB: number;
+    totalChaptersInDB: number;
+    scrapedThisSession: number;
+    targetCount: number;
+    currentCategory: string;
+    statusMessage: string;
+    logs: string[];
+    offsets: Record<string, number>;
+  }
+
+  const SCRAPER_CURSOR_FILE = path.join(DATA_DIR, "scraper-cursor.json");
+
+  function loadScraperCursor(): Record<string, number> {
+    if (fs.existsSync(SCRAPER_CURSOR_FILE)) {
+      try {
+        const parsed = JSON.parse(fs.readFileSync(SCRAPER_CURSOR_FILE, "utf-8"));
+        if (parsed && typeof parsed === "object") return parsed;
+      } catch (e) {
+        // ignore
+      }
+    }
+    return {};
+  }
+
+  function saveScraperCursor(offsets: Record<string, number>) {
+    try {
+      fs.writeFileSync(SCRAPER_CURSOR_FILE, JSON.stringify(offsets, null, 2), "utf-8");
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  let persistentOffsets: Record<string, number> = loadScraperCursor();
+  let stopScraperRequested = false;
+
+  const autoScraperState: AutoScraperState = {
+    isRunning: false,
+    lastRun: null,
+    totalComicsInDB: dbState.comics.length,
+    totalChaptersInDB: Object.values(dbState.chapters).reduce((acc, c) => acc + (c?.length || 0), 0),
+    scrapedThisSession: 0,
+    targetCount: 500,
+    currentCategory: "Standby",
+    statusMessage: "Siap (Idle)",
+    logs: [],
+    offsets: persistentOffsets,
+  };
+
+  function addScraperLog(msg: string) {
+    const timestamp = new Date().toLocaleTimeString("id-ID");
+    autoScraperState.logs = [`[${timestamp}] ${msg}`, ...autoScraperState.logs.slice(0, 79)];
+    console.log(`[AutoScraper] ${msg}`);
+  }
+
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  async function fetchMangaDexChaptersInternal(mangaId: string): Promise<Chapter[]> {
+    try {
+      const url = `https://api.mangadex.org/manga/${mangaId}/feed?limit=96&order[chapter]=asc&includes[]=scanlation_group`;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000);
+      const res = await fetch(url, {
+        signal: controller.signal,
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 AntiTimpa/2.0",
+          Accept: "application/json",
+        },
+      });
+      clearTimeout(timeout);
+
+      if (!res.ok) return [];
+      const json = await res.json();
+      if (!json || !json.data || !Array.isArray(json.data)) return [];
+
+      const chapterMap = new Map<string, any>();
+      for (const item of json.data) {
+        const chNumStr = item.attributes?.chapter || "1";
+        const itemLang = item.attributes?.translatedLanguage || "";
+        const existing = chapterMap.get(chNumStr);
+        if (!existing) {
+          chapterMap.set(chNumStr, item);
+        } else if (itemLang === "id") {
+          chapterMap.set(chNumStr, item);
+        } else if (itemLang === "en" && existing.attributes?.translatedLanguage !== "id") {
+          chapterMap.set(chNumStr, item);
+        }
+      }
+
+      const deduplicated = Array.from(chapterMap.values()).sort((a, b) => {
+        const numA = parseFloat(a.attributes?.chapter || "0");
+        const numB = parseFloat(b.attributes?.chapter || "0");
+        return numA - numB;
+      });
+
+      const now = new Date().toISOString().split("T")[0];
+      const seenChapterIds = new Set<string>();
+
+      return deduplicated.map((ch: any, idx: number) => {
+        const rawChNum = parseFloat(ch.attributes?.chapter || String(idx + 1));
+        const chNum = isNaN(rawChNum) ? idx + 1 : rawChNum;
+        const rawTitle = ch.attributes?.title || "";
+        const displayTitle = rawTitle.trim() ? `Chapter ${chNum}: ${rawTitle.trim()}` : `Chapter ${chNum}`;
+        
+        let uniqueId = ch.id ? `ch-${ch.id}` : `ch-${mangaId}-${chNum}`;
+        if (seenChapterIds.has(uniqueId)) {
+          uniqueId = `${uniqueId}-${idx + 1}`;
+        }
+        seenChapterIds.add(uniqueId);
+
+        return {
+          id: uniqueId,
+          comicId: `comic-md-${mangaId}`,
+          chapterNumber: chNum,
+          title: displayTitle,
+          pagesCount: ch.attributes?.pages || 10,
+          releaseDate: (ch.attributes?.publishAt || now).split("T")[0],
+          isNew: idx >= deduplicated.length - 2,
+          isLocked: false,
+          sourceType: "images" as const,
+          pages: [],
+          viewsCount: Math.floor(Math.random() * 800) + 120,
+          mangadexChapterId: ch.id,
+          mangadexMangaId: mangaId,
+        };
+      });
+    } catch (err) {
+      return [];
+    }
+  }
+
+  // All diverse MangaDex query streams (High capacity 100 limit each)
+  const MANGADEX_STREAMS = [
+    { key: "md_manhwa_popular", label: "Top Korean Manhwa (Populer)", params: "originalLanguage[]=ko&order[followedCount]=desc&contentRating[]=safe&contentRating[]=suggestive" },
+    { key: "md_manhwa_rating", label: "Top Korean Manhwa (Rating Tinggi)", params: "originalLanguage[]=ko&order[rating]=desc&contentRating[]=safe&contentRating[]=suggestive" },
+    { key: "md_manhwa_latest", label: "Korean Manhwa (Rilis Terbaru)", params: "originalLanguage[]=ko&order[latestUploadedChapter]=desc&contentRating[]=safe&contentRating[]=suggestive" },
+    { key: "md_manhua_popular", label: "Top Chinese Manhua (Populer)", params: "originalLanguage[]=zh&originalLanguage[]=zh-hk&order[followedCount]=desc&contentRating[]=safe&contentRating[]=suggestive" },
+    { key: "md_manhua_rating", label: "Top Chinese Manhua (Rating)", params: "originalLanguage[]=zh&originalLanguage[]=zh-hk&order[rating]=desc&contentRating[]=safe&contentRating[]=suggestive" },
+    { key: "md_manga_popular", label: "Top Japanese Manga (Populer)", params: "originalLanguage[]=ja&order[followedCount]=desc&contentRating[]=safe&contentRating[]=suggestive" },
+    { key: "md_manga_rating", label: "Top Japanese Manga (Rating)", params: "originalLanguage[]=ja&order[rating]=desc&contentRating[]=safe&contentRating[]=suggestive" },
+    { key: "md_18plus_popular", label: "18+ VIP Dewasa / Erotica (Populer)", params: "contentRating[]=erotica&contentRating[]=pornographic&order[followedCount]=desc" },
+    { key: "md_18plus_rating", label: "18+ VIP Dewasa / Erotica (Rating)", params: "contentRating[]=erotica&contentRating[]=pornographic&order[rating]=desc" },
+    { key: "md_action_fantasy", label: "Action & Fantasy Super", params: "includedTags[]=391b0423-d847-456f-aff0-8b04c36f3b7b&order[followedCount]=desc&contentRating[]=safe&contentRating[]=suggestive" },
+    { key: "md_isekai", label: "Isekai & Reincarnation", params: "includedTags[]=0a39e5ac-30ab-443a-96e7-b6e7732a0313&order[followedCount]=desc&contentRating[]=safe&contentRating[]=suggestive" },
+    { key: "md_martial_arts", label: "Murim & Martial Arts", params: "includedTags[]=799c43e2-a302-490d-854f-e271a32237ce&order[followedCount]=desc&contentRating[]=safe&contentRating[]=suggestive" },
+    { key: "md_romance_drama", label: "Romance & Drama Favorit", params: "includedTags[]=423e2eae-a7a2-4a8b-ac03-a8351462d71d&order[followedCount]=desc&contentRating[]=safe&contentRating[]=suggestive" },
+    { key: "md_all_rating", label: "Semua Komik (Rating Tertinggi)", params: "order[rating]=desc&contentRating[]=safe&contentRating[]=suggestive&contentRating[]=erotica" },
+    { key: "md_all_latest", label: "Semua Komik (Update Terbaru)", params: "order[latestUploadedChapter]=desc&contentRating[]=safe&contentRating[]=suggestive&contentRating[]=erotica" },
+  ];
+
+  // MAL / Jikan Stream categories
+  const JIKAN_STREAMS = [
+    { key: "jikan_top_manga", label: "MAL Top Japanese Manga", type: "manga" },
+    { key: "jikan_top_manhwa", label: "MAL Top Korean Manhwa", type: "manhwa" },
+    { key: "jikan_top_manhua", label: "MAL Top Chinese Manhua", type: "manhua" },
+    { key: "jikan_top_doujin", label: "MAL Top 18+ Doujinshi", type: "doujin" },
+    { key: "jikan_top_popular", label: "MAL Top by Popularity", filter: "bypopularity" },
+    { key: "jikan_top_favorite", label: "MAL Top by Favorite", filter: "favorite" },
+  ];
+
+  async function runBackgroundAutoScraper(options: { 
+    force?: boolean; 
+    targetCount?: number; 
+    categoryFilter?: string;
+    preFetchChapters?: boolean;
+  } = {}) {
+    if (autoScraperState.isRunning) {
+      addScraperLog("Auto-scraper sedang berjalan di background...");
+      return;
+    }
+
+    const targetLimit = options.targetCount && options.targetCount > 0 ? options.targetCount : 500;
+    const catFilter = (options.categoryFilter || "all").toLowerCase();
+    stopScraperRequested = false;
+
+    autoScraperState.isRunning = true;
+    autoScraperState.targetCount = targetLimit;
+    autoScraperState.scrapedThisSession = 0;
+    autoScraperState.statusMessage = `Memulai penarikan massal (Target: ${targetLimit} Komik)...`;
+    addScraperLog(`🚀 Memulai Mass Ingest Scraper — Target: ${targetLimit} komik baru (Filter: ${catFilter.toUpperCase()})`);
+
+    let newlyAdded = 0;
+    const now = new Date().toISOString().split("T")[0];
+
+    // Filter active streams
+    let activeMdStreams = MANGADEX_STREAMS;
+    let activeJikanStreams = JIKAN_STREAMS;
+
+    if (catFilter === "manhwa") {
+      activeMdStreams = MANGADEX_STREAMS.filter(s => s.key.includes("manhwa"));
+      activeJikanStreams = JIKAN_STREAMS.filter(s => s.type === "manhwa");
+    } else if (catFilter === "manhua") {
+      activeMdStreams = MANGADEX_STREAMS.filter(s => s.key.includes("manhua"));
+      activeJikanStreams = JIKAN_STREAMS.filter(s => s.type === "manhua");
+    } else if (catFilter === "manga") {
+      activeMdStreams = MANGADEX_STREAMS.filter(s => s.key.includes("manga"));
+      activeJikanStreams = JIKAN_STREAMS.filter(s => s.type === "manga");
+    } else if (catFilter === "18plus") {
+      activeMdStreams = MANGADEX_STREAMS.filter(s => s.key.includes("18plus"));
+      activeJikanStreams = JIKAN_STREAMS.filter(s => s.type === "doujin");
+    } else if (catFilter === "isekai") {
+      activeMdStreams = MANGADEX_STREAMS.filter(s => s.key.includes("isekai"));
+      activeJikanStreams = [];
+    } else if (catFilter === "action") {
+      activeMdStreams = MANGADEX_STREAMS.filter(s => s.key.includes("action") || s.key.includes("martial"));
+      activeJikanStreams = [];
+    }
+
+    try {
+      let streamIndex = 0;
+      let consecutiveEmptyBatches = 0;
+
+      // CONTINUOUS MULTI-STREAM MASS INGESTION LOOP
+      while (newlyAdded < targetLimit && !stopScraperRequested) {
+        // Stop if all streams exhausted
+        if (consecutiveEmptyBatches >= activeMdStreams.length * 3 && activeMdStreams.length > 0) {
+          addScraperLog("ℹ️ Seluruh halaman kategori telah dicapai atau tidak ada item baru.");
+          break;
+        }
+
+        // 1. MANGA DEX STREAM INGESTION (Limit=100 per request)
+        if (activeMdStreams.length > 0) {
+          const stream = activeMdStreams[streamIndex % activeMdStreams.length];
+          const currentOffset = persistentOffsets[stream.key] || 0;
+
+          autoScraperState.currentCategory = `${stream.label} (Offset: ${currentOffset})`;
+          autoScraperState.statusMessage = `Sedang menyedot ${stream.label} (Offset ${currentOffset})...`;
+
+          try {
+            const mdUrl = `https://api.mangadex.org/manga?${stream.params}&limit=100&offset=${currentOffset}&includes[]=cover_art&includes[]=author&includes[]=artist`;
+            
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 12000);
+            const res = await fetch(mdUrl, {
+              signal: controller.signal,
+              headers: {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AntiTimpa-App/3.0",
+                Accept: "application/json",
+              },
+            });
+            clearTimeout(timeout);
+
+            if (res.ok) {
+              const data = await res.json();
+              const items = data.data || [];
+
+              if (items.length === 0) {
+                consecutiveEmptyBatches++;
+                // Reset stream offset if reached end (> 10000)
+                persistentOffsets[stream.key] = 0;
+              } else {
+                consecutiveEmptyBatches = 0;
+                // Advance cursor by 100 for this category stream
+                persistentOffsets[stream.key] = (currentOffset + 100) % 10000;
+                saveScraperCursor(persistentOffsets);
+
+                let batchAdded = 0;
+                for (const item of items) {
+                  if (newlyAdded >= targetLimit || stopScraperRequested) break;
+
+                  const mangaId = item.id;
+                  const attributes = item.attributes || {};
+                  const titleObj = attributes.title || {};
+                  const altTitles = attributes.altTitles || [];
+                  let title = titleObj.en || titleObj.ja || titleObj.ko || titleObj.zh || titleObj.id || Object.values(titleObj)[0];
+                  if (!title && altTitles.length > 0) {
+                    for (const alt of altTitles) {
+                      if (alt.en || alt.ja || alt.ko || alt.id || alt.zh) {
+                        title = alt.en || alt.ja || alt.ko || alt.id || alt.zh;
+                        break;
+                      }
+                    }
+                  }
+                  if (!title) title = "Manga Title";
+
+                  // Check if already in DB
+                  const existing = dbState.comics.find(
+                    (c) => c.mangaDexId === mangaId || c.id === `comic-md-${mangaId}` || c.title.toLowerCase() === title.toLowerCase()
+                  );
+                  if (existing) continue;
+
+                  const descObj = attributes.description || {};
+                  let synopsis = descObj.en || descObj.id || descObj.ja || descObj.ko || Object.values(descObj)[0] || "";
+                  if (!synopsis || synopsis.trim().length < 10) {
+                    synopsis = `${title} adalah serial komik resmi terpopuler dari jaringan MangaDex dengan pembaruan berkala.`;
+                  }
+
+                  let coverFileName = "";
+                  let authorName = "Official Writer";
+                  let artistName = "Official Artist";
+
+                  if (Array.isArray(item.relationships)) {
+                    for (const rel of item.relationships) {
+                      if (rel.type === "cover_art" && rel.attributes?.fileName) {
+                        coverFileName = rel.attributes.fileName;
+                      }
+                      if (rel.type === "author" && rel.attributes?.name) {
+                        authorName = rel.attributes.name;
+                      }
+                      if (rel.type === "artist" && rel.attributes?.name) {
+                        artistName = rel.attributes.name;
+                      }
+                    }
+                  }
+
+                  const coverImage = coverFileName
+                    ? `https://uploads.mangadex.org/covers/${mangaId}/${coverFileName}.512.jpg`
+                    : `https://images.unsplash.com/photo-1578632767115-351597cf2477?w=600&auto=format&fit=crop&q=80`;
+
+                  const genres = (attributes.tags || [])
+                    .map((t: any) => t.attributes?.name?.en)
+                    .filter(Boolean);
+
+                  const contentRating = attributes.contentRating || "safe";
+                  const isAdult = contentRating === "erotica" || contentRating === "pornographic";
+                  const rawOriginalLang = (attributes.originalLanguage || "").toLowerCase();
+                  let comicType: "manga" | "manhwa" | "manhua" | "doujin" | "webtoon" = "manga";
+                  if (rawOriginalLang === "ko") comicType = "manhwa";
+                  else if (rawOriginalLang === "zh" || rawOriginalLang === "zh-hk") comicType = "manhua";
+                  else if (isAdult) comicType = "doujin";
+
+                  const comicId = `comic-md-${mangaId}`;
+                  const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+
+                  // If user requests pre-fetching chapters for the first few items
+                  let realChapters: Chapter[] = [];
+                  if (options.preFetchChapters && newlyAdded < 20) {
+                    await sleep(200);
+                    realChapters = await fetchMangaDexChaptersInternal(mangaId);
+                  }
+
+                  const newComic: Comic = {
+                    id: comicId,
+                    title,
+                    slug,
+                    coverImage,
+                    bannerImage: coverImage,
+                    synopsis: synopsis.slice(0, 500),
+                    genres: genres.length > 0 ? genres.slice(0, 5) : [comicType === "manhwa" ? "Manhwa" : "Action", "Drama"],
+                    status: attributes.status === "completed" ? "completed" : "ongoing",
+                    storyWriter: authorName,
+                    artist: artistName,
+                    rating: isAdult ? 4.9 : 4.88,
+                    ratingCount: Math.floor(Math.random() * 4000) + 1200,
+                    totalChapters: realChapters.length > 0 ? realChapters.length : (attributes.lastChapter ? parseFloat(attributes.lastChapter) || 0 : 0),
+                    totalReaders: Math.floor(Math.random() * 15000) + 3500,
+                    createdAt: now,
+                    updatedAt: now,
+                    isTrending: true,
+                    isFeatured: true,
+                    contentType: isAdult ? "18plus" : "normal",
+                    comicType,
+                    type: comicType,
+                    isFree: !isAdult,
+                    isVisibleOnHome: true,
+                    showOnHome: true,
+                    isPublished: true,
+                    sourceApi: "MangaDex Live API",
+                    sourceUrl: `https://mangadex.org/title/${mangaId}`,
+                    mangaDexId: mangaId,
+                  };
+
+                  dbState.comics = [newComic, ...dbState.comics.filter((c) => c.id !== newComic.id)];
+                  if (realChapters.length > 0) {
+                    dbState.chapters[comicId] = realChapters;
+                  }
+                  newlyAdded++;
+                  batchAdded++;
+                  autoScraperState.scrapedThisSession = newlyAdded;
+                  autoScraperState.totalComicsInDB = dbState.comics.length;
+
+                  if (newlyAdded % 25 === 0) {
+                    addScraperLog(`📦 [${newlyAdded}/${targetLimit}] Menyimpan batch DB (Total: ${dbState.comics.length} komik)`);
+                    broadcastDatabaseUpdate({
+                      comics: dbState.comics,
+                      chapters: dbState.chapters,
+                    });
+                  }
+                }
+
+                if (batchAdded > 0) {
+                  addScraperLog(`+ [MangaDex] +${batchAdded} komik baru dari "${stream.label}" (Offset: ${currentOffset})`);
+                }
+              }
+            } else {
+              addScraperLog(`MangaDex response HTTP ${res.status} pada ${stream.label}`);
+            }
+          } catch (streamErr: any) {
+            addScraperLog(`Stream error (${stream.label}): ${streamErr.message}`);
+          }
+        }
+
+        // 2. JIKAN / MYANIMELIST INGESTION
+        if (activeJikanStreams.length > 0 && newlyAdded < targetLimit && !stopScraperRequested) {
+          const jStream = activeJikanStreams[streamIndex % activeJikanStreams.length];
+          const curPage = persistentOffsets[jStream.key] || 1;
+
+          try {
+            let jUrl = `https://api.jikan.moe/v4/top/manga?page=${curPage}&limit=25`;
+            if (jStream.type) jUrl += `&type=${jStream.type}`;
+            if (jStream.filter) jUrl += `&filter=${jStream.filter}`;
+
+            const jRes = await fetch(jUrl, {
+              headers: {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AntiTimpa-App/3.0",
+                Accept: "application/json",
+              },
+            });
+
+            if (jRes.ok) {
+              const jData = await jRes.json();
+              const jItems = jData.data || [];
+
+              if (jItems.length > 0) {
+                persistentOffsets[jStream.key] = curPage + 1;
+                saveScraperCursor(persistentOffsets);
+
+                let jAdded = 0;
+                for (const item of jItems) {
+                  if (newlyAdded >= targetLimit || stopScraperRequested) break;
+
+                  const malId = item.mal_id;
+                  const title = item.title_english || item.title || "Manga Title";
+                  const existing = dbState.comics.find(
+                    (c) => c.id === `comic-mal-${malId}` || c.title.toLowerCase() === title.toLowerCase()
+                  );
+                  if (existing) continue;
+
+                  const genres = (item.genres || []).map((g: any) => (typeof g === "string" ? g : g.name)).filter(Boolean);
+                  const isAdult = (item.explicit_genres && item.explicit_genres.length > 0) ||
+                    genres.some((g: string) => /hentai|ecchi|erotica|adult/i.test(g));
+
+                  const typeLower = (item.type || "").toLowerCase();
+                  let comicType: "manga" | "manhwa" | "manhua" | "doujin" | "webtoon" = "manga";
+                  if (typeLower === "manhwa") comicType = "manhwa";
+                  else if (typeLower === "manhua") comicType = "manhua";
+
+                  const comicId = `comic-mal-${malId}`;
+                  const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+                  const coverImage = item.images?.webp?.large_image_url || item.images?.jpg?.large_image_url || "https://images.unsplash.com/photo-1578632767115-351597cf2477?w=600&auto=format&fit=crop&q=80";
+
+                  const newComic: Comic = {
+                    id: comicId,
+                    title,
+                    slug,
+                    coverImage,
+                    bannerImage: coverImage,
+                    synopsis: (item.synopsis || `Sinopsis resmi ${title} dari database MyAnimeList.`).slice(0, 500),
+                    genres: genres.length > 0 ? genres.slice(0, 5) : ["Action", "Fantasy"],
+                    status: item.publishing ? "ongoing" : "completed",
+                    storyWriter: item.authors?.[0]?.name || "Official Author",
+                    artist: item.authors?.[1]?.name || item.authors?.[0]?.name || "Official Artist",
+                    rating: item.score ? Math.min(5, Math.max(1, item.score / 2)) : 4.85,
+                    ratingCount: item.scored_by || 2500,
+                    totalChapters: item.chapters || 0,
+                    totalReaders: item.members || 5000,
+                    createdAt: now,
+                    updatedAt: now,
+                    isTrending: true,
+                    isFeatured: true,
+                    contentType: isAdult ? "18plus" : "normal",
+                    comicType,
+                    type: comicType,
+                    isFree: !isAdult,
+                    isVisibleOnHome: true,
+                    showOnHome: true,
+                    isPublished: true,
+                    sourceApi: "MyAnimeList (MAL Official)",
+                    sourceUrl: item.url || `https://myanimelist.net/manga/${malId}`,
+                  };
+
+                  dbState.comics = [newComic, ...dbState.comics.filter((c) => c.id !== newComic.id)];
+                  newlyAdded++;
+                  jAdded++;
+                  autoScraperState.scrapedThisSession = newlyAdded;
+                  autoScraperState.totalComicsInDB = dbState.comics.length;
+                }
+
+                if (jAdded > 0) {
+                  addScraperLog(`+ [MAL] +${jAdded} komik baru dari "${jStream.label}" (Page: ${curPage})`);
+                }
+              }
+            }
+          } catch (malErr) {
+            // ignore
+          }
+        }
+
+        streamIndex++;
+        // Polite delay between batch requests (350ms)
+        await sleep(350);
+      }
+
+      // Final save and broadcast
+      autoScraperState.totalComicsInDB = dbState.comics.length;
+      autoScraperState.totalChaptersInDB = Object.values(dbState.chapters).reduce((acc, c) => acc + (c?.length || 0), 0);
+      autoScraperState.lastRun = new Date().toISOString();
+      autoScraperState.statusMessage = stopScraperRequested
+        ? `Dihentikan oleh admin. Menambahkan ${newlyAdded} komik. Total DB: ${dbState.comics.length}.`
+        : `Selesai! Berhasil menambahkan ${newlyAdded} komik baru. Total DB: ${dbState.comics.length} judul.`;
+
+      broadcastDatabaseUpdate({
+        comics: dbState.comics,
+        chapters: dbState.chapters,
+      });
+
+      addScraperLog(`🎉 Selesai Ingest! Berhasil menambahkan ${newlyAdded} komik baru. Total komik sekarang: ${dbState.comics.length} judul di database.`);
+    } catch (globalErr: any) {
+      autoScraperState.statusMessage = `Error: ${globalErr.message}`;
+      addScraperLog(`❌ Auto-Scraper Error: ${globalErr.message}`);
+    } finally {
+      autoScraperState.isRunning = false;
+      stopScraperRequested = false;
+      autoScraperState.offsets = persistentOffsets;
+    }
+  }
+
+  // Auto-Scraper REST endpoints
+  app.get("/api/scraper/auto-status", (_req, res) => {
+    autoScraperState.totalComicsInDB = dbState.comics.length;
+    autoScraperState.totalChaptersInDB = Object.values(dbState.chapters).reduce((acc, c) => acc + (c?.length || 0), 0);
+    autoScraperState.offsets = persistentOffsets;
+    res.json(autoScraperState);
+  });
+
+  app.post("/api/scraper/auto-sync", async (req, res) => {
+    if (autoScraperState.isRunning) {
+      return res.json({ message: "Auto-scraper sedang berjalan", state: autoScraperState });
+    }
+    const targetCount = req.body?.targetCount ? parseInt(req.body.targetCount) : 500;
+    const categoryFilter = req.body?.categoryFilter || "all";
+    const preFetchChapters = req.body?.preFetchChapters ?? true;
+
+    // Launch non-blocking background scraper
+    runBackgroundAutoScraper({ 
+      force: true, 
+      targetCount, 
+      categoryFilter, 
+      preFetchChapters 
+    });
+    res.json({ message: "Auto-scraper dimulai di background", targetCount, state: autoScraperState });
+  });
+
+  app.post("/api/scraper/auto-stop", (_req, res) => {
+    stopScraperRequested = true;
+    addScraperLog("⚠️ Permintaan penghentian scraper diterima dari admin.");
+    res.json({ message: "Permintaan stop dikirim", state: autoScraperState });
+  });
+
+  app.post("/api/scraper/auto-reset-cursor", (_req, res) => {
+    persistentOffsets = {};
+    saveScraperCursor({});
+    autoScraperState.offsets = {};
+    addScraperLog("🔄 Seluruh offset cursor scraper telah direset ke 0 (Mulai dari awal).");
+    res.json({ message: "Offset cursor berhasil direset", state: autoScraperState });
+  });
+
+  // Launch initial background auto-scraper 2.5 seconds after server boots
+  setTimeout(() => {
+    runBackgroundAutoScraper({ targetCount: 150 });
+  }, 2500);
 
   // Universal Proxy image helper for external images
   app.get("/api/proxy-image", async (req, res) => {

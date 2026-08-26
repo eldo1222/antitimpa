@@ -144,8 +144,8 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
               }}
               className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-xs text-slate-200 focus:outline-none"
             >
-              {allChapters.map((c) => (
-                <option key={c.id} value={c.id}>
+              {allChapters.map((c, idx) => (
+                <option key={`${c.id || c.chapterNumber}-${idx}`} value={c.id}>
                   Ch. {c.chapterNumber}
                 </option>
               ))}

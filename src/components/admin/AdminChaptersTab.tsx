@@ -1,6 +1,7 @@
 import React, { useState, useRef, useMemo } from 'react';
 import { useApp } from '../../context/AppContext';
 import { Chapter, ChapterSourceType } from '../../types';
+import { getComicProjectType, getComicProjectTypeLabel } from '../../utils/comicUtils';
 import { formatGoogleDriveEmbedUrl, isGoogleDriveUrl } from '../../utils/driveHelper';
 import { downloadDrivePdf, convertImagesToPdf } from '../../utils/pdfConverter';
 import { getProfessionalComicSkeletonUrl } from '../common/ComicSkeletonBox';
@@ -32,7 +33,13 @@ import {
   Filter,
   Layers,
   BookOpen,
-  Globe
+  Globe,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+  Crown,
+  Zap
 } from 'lucide-react';
 
 export const AdminChaptersTab: React.FC = () => {
@@ -54,10 +61,18 @@ export const AdminChaptersTab: React.FC = () => {
   
   // Smart Search & Filter States for Comic Folders
   const [comicSearchQuery, setComicSearchQuery] = useState('');
-  const [comicCategoryFilter, setComicCategoryFilter] = useState<'all' | 'has_chapters' | 'no_chapters' | '18plus' | 'manga' | 'manhwa' | 'doujin'>('all');
+  const [comicCategoryFilter, setComicCategoryFilter] = useState<'all' | 'admin_personal' | 'scraped_ready' | 'preview_gateway' | 'has_chapters' | 'no_chapters' | '18plus' | 'normal' | 'manga' | 'manhwa' | 'doujin'>('all');
   
+  // Pagination State for Folder Mode
+  const [folderPage, setFolderPage] = useState<number>(1);
+  const [foldersPerPage, setFoldersPerPage] = useState<number>(12);
+
   // Chapter-specific search inside the active comic
   const [chapterSearchQuery, setChapterSearchQuery] = useState('');
+  
+  // Pagination State for Chapter Table Mode
+  const [chapterPage, setChapterPage] = useState<number>(1);
+  const [chaptersPerPage, setChaptersPerPage] = useState<number>(15);
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingChapter, setEditingChapter] = useState<Chapter | null>(null);
@@ -117,16 +132,30 @@ export const AdminChaptersTab: React.FC = () => {
     );
   }, [allCurrentChapters, chapterSearchQuery]);
 
+  // Chapter Pagination Calculations
+  const totalChapterPages = Math.ceil(currentChapters.length / chaptersPerPage) || 1;
+  const validChapterPage = Math.min(Math.max(1, chapterPage), totalChapterPages);
+  const chapterStartIndex = (validChapterPage - 1) * chaptersPerPage;
+  const chapterEndIndex = Math.min(chapterStartIndex + chaptersPerPage, currentChapters.length);
+  const paginatedChapters = useMemo(() => {
+    return currentChapters.slice(chapterStartIndex, chapterEndIndex);
+  }, [currentChapters, chapterStartIndex, chapterEndIndex]);
+
   // Filtered Comics for Folder Explorer
   const filteredComics = useMemo(() => {
     return comics.filter(c => {
       const chList = chapters[c.id] || [];
       const chCount = chList.length;
+      const projType = getComicProjectType(c, chList);
 
       // Category / Status Filter
+      if (comicCategoryFilter === 'admin_personal' && projType !== 'admin_personal') return false;
+      if (comicCategoryFilter === 'scraped_ready' && projType !== 'scraped_ready') return false;
+      if (comicCategoryFilter === 'preview_gateway' && projType !== 'preview_gateway') return false;
       if (comicCategoryFilter === 'has_chapters' && chCount === 0) return false;
       if (comicCategoryFilter === 'no_chapters' && chCount > 0) return false;
       if (comicCategoryFilter === '18plus' && c.contentType !== '18plus') return false;
+      if (comicCategoryFilter === 'normal' && c.contentType === '18plus') return false;
       if (comicCategoryFilter === 'manga' && c.comicType !== 'manga' && c.type !== 'manga') return false;
       if (comicCategoryFilter === 'manhwa' && c.comicType !== 'manhwa' && c.type !== 'manhwa') return false;
       if (comicCategoryFilter === 'doujin' && c.comicType !== 'doujin' && c.type !== 'doujin') return false;
@@ -143,6 +172,38 @@ export const AdminChaptersTab: React.FC = () => {
       return true;
     });
   }, [comics, chapters, comicCategoryFilter, comicSearchQuery]);
+
+  // Folder Pagination Calculations
+  const totalFolderPages = Math.ceil(filteredComics.length / foldersPerPage) || 1;
+  const validFolderPage = Math.min(Math.max(1, folderPage), totalFolderPages);
+  const folderStartIndex = (validFolderPage - 1) * foldersPerPage;
+  const folderEndIndex = Math.min(folderStartIndex + foldersPerPage, filteredComics.length);
+  const paginatedFolderComics = useMemo(() => {
+    return filteredComics.slice(folderStartIndex, folderEndIndex);
+  }, [filteredComics, folderStartIndex, folderEndIndex]);
+
+  // Reset pagination on search or filter change
+  React.useEffect(() => {
+    setFolderPage(1);
+  }, [comicSearchQuery, comicCategoryFilter, foldersPerPage]);
+
+  React.useEffect(() => {
+    setChapterPage(1);
+  }, [selectedComicId, chapterSearchQuery, chaptersPerPage]);
+
+  // Generate dynamic page numbers helper
+  const getPageNumbers = (currentP: number, totalP: number) => {
+    const delta = 2;
+    const range: (number | string)[] = [];
+    for (let i = Math.max(2, currentP - delta); i <= Math.min(totalP - 1, currentP + delta); i++) {
+      range.push(i);
+    }
+    if (currentP - delta > 2) range.unshift('...');
+    range.unshift(1);
+    if (currentP + delta < totalP - 1) range.push('...');
+    if (totalP > 1) range.push(totalP);
+    return range;
+  };
 
   // Selection Logic
   const isAllSelected = currentChapters.length > 0 && currentChapters.every(ch => selectedChapterIds.includes(ch.id));
@@ -499,9 +560,13 @@ export const AdminChaptersTab: React.FC = () => {
             <div className="flex items-center gap-1.5 flex-wrap pt-1">
               {[
                 { id: 'all', label: `🌟 Semua (${comics.length})` },
+                { id: 'admin_personal', label: `👑 Proyek Pribadi (${comics.filter(c => getComicProjectType(c, chapters[c.id] || []) === 'admin_personal').length})` },
+                { id: 'scraped_ready', label: `⚡ Scraping Berhasil (${comics.filter(c => getComicProjectType(c, chapters[c.id] || []) === 'scraped_ready').length})` },
+                { id: 'preview_gateway', label: `🌐 Gateway Preview (${comics.filter(c => getComicProjectType(c, chapters[c.id] || []) === 'preview_gateway').length})` },
                 { id: 'has_chapters', label: `📚 Ada Chapter (${comics.filter(c => (chapters[c.id] || []).length > 0).length})` },
                 { id: 'no_chapters', label: `⚠️ Kosong (${comics.filter(c => !(chapters[c.id] || []).length).length})` },
                 { id: '18plus', label: `🔞 18+ VIP (${comics.filter(c => c.contentType === '18plus').length})` },
+                { id: 'normal', label: `✨ Normal (${comics.filter(c => c.contentType !== '18plus').length})` },
                 { id: 'manhwa', label: `🇰🇷 Manhwa (${comics.filter(c => c.comicType === 'manhwa' || c.type === 'manhwa').length})` },
                 { id: 'manga', label: `🇯🇵 Manga (${comics.filter(c => c.comicType === 'manga' || c.type === 'manga').length})` },
                 { id: 'doujin', label: `🌸 Doujin (${comics.filter(c => c.comicType === 'doujin' || c.type === 'doujin').length})` }
@@ -537,88 +602,190 @@ export const AdminChaptersTab: React.FC = () => {
               </button>
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3.5">
-              {filteredComics.map(comic => {
-                const chList = chapters[comic.id] || [];
-                const chCount = chList.length;
-                const is18 = comic.contentType === '18plus';
+            <>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3.5">
+                {paginatedFolderComics.map(comic => {
+                  const chList = chapters[comic.id] || [];
+                  const chCount = chList.length;
+                  const is18 = comic.contentType === '18plus';
+                  const projType = getComicProjectType(comic, chList);
 
-                return (
-                  <div
-                    key={comic.id}
-                    className="p-3.5 bg-[#12121c] hover:bg-[#151522] border border-[#1f1f2e] hover:border-[#3a3a52] rounded-2xl flex flex-col justify-between transition-all duration-200 shadow-md group"
-                  >
-                    <div>
-                      <div className="flex gap-3 items-start mb-2.5">
-                        <div className="relative w-16 h-22 rounded-xl overflow-hidden shrink-0 bg-[#0d0d14] border border-[#222234]">
-                          <img
-                            src={comic.coverImage}
-                            alt={comic.title}
-                            referrerPolicy="no-referrer"
-                            loading="lazy"
-                            onError={(e) => {
-                              (e.target as HTMLImageElement).src = getProfessionalComicSkeletonUrl(comic.title, comic.comicType || comic.type);
-                            }}
-                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                          />
+                  return (
+                    <div
+                      key={comic.id}
+                      className="p-3.5 bg-[#12121c] hover:bg-[#151522] border border-[#1f1f2e] hover:border-[#3a3a52] rounded-2xl flex flex-col justify-between transition-all duration-200 shadow-md group"
+                    >
+                      <div>
+                        <div className="flex gap-3 items-start mb-2.5">
+                          <div className="relative w-16 h-22 rounded-xl overflow-hidden shrink-0 bg-[#0d0d14] border border-[#222234]">
+                            <img
+                              src={comic.coverImage}
+                              alt={comic.title}
+                              referrerPolicy="no-referrer"
+                              loading="lazy"
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).src = getProfessionalComicSkeletonUrl(comic.title, comic.comicType || comic.type);
+                              }}
+                              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                            />
+                          </div>
+
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1 mb-1 flex-wrap">
+                              <span className={`px-1.5 py-0.5 rounded text-[9px] font-extrabold uppercase ${
+                                is18 ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30' : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                              }`}>
+                                {is18 ? '18+ VIP' : 'GRATIS'}
+                              </span>
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-[#181826] text-slate-400 border border-[#252538]">
+                                {comic.comicType || comic.type || 'manga'}
+                              </span>
+                            </div>
+
+                            <h4 className="font-bold text-xs text-white truncate group-hover:text-[#ff7a3d] transition-colors" title={comic.title}>
+                              {comic.title}
+                            </h4>
+                            <p className="text-[10px] text-slate-400 truncate mt-0.5">
+                              {comic.genres?.slice(0, 2).join(', ') || 'General'}
+                            </p>
+                          </div>
                         </div>
 
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-1 mb-1 flex-wrap">
-                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-extrabold uppercase ${
-                              is18 ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30' : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                        {/* Project Type & Chapter Status Pills */}
+                        <div className="flex flex-col gap-1.5 mb-3">
+                          <div className="flex items-center gap-1 flex-wrap">
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold ${
+                              projType === 'admin_personal' 
+                                ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30' 
+                                : projType === 'scraped_ready' 
+                                ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30' 
+                                : 'bg-sky-500/15 text-sky-300 border border-sky-500/30'
                             }`}>
-                              {is18 ? '18+ VIP' : 'GRATIS'}
-                            </span>
-                            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-[#181826] text-slate-400 border border-[#252538]">
-                              {comic.comicType || comic.type || 'manga'}
+                              {projType === 'admin_personal' && <Crown className="w-2.5 h-2.5 text-amber-400" />}
+                              {projType === 'scraped_ready' && <Zap className="w-2.5 h-2.5 text-emerald-400" />}
+                              {projType === 'preview_gateway' && <Globe className="w-2.5 h-2.5 text-sky-400" />}
+                              <span>{getComicProjectTypeLabel(projType).shortLabel}</span>
                             </span>
                           </div>
 
-                          <h4 className="font-bold text-xs text-white truncate group-hover:text-[#ff7a3d] transition-colors" title={comic.title}>
-                            {comic.title}
-                          </h4>
-                          <p className="text-[10px] text-slate-400 truncate mt-0.5">
-                            {comic.genres?.slice(0, 2).join(', ') || 'General'}
-                          </p>
+                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-bold ${
+                            chCount > 0 
+                              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/25' 
+                              : 'bg-amber-500/10 text-amber-300 border border-amber-500/25'
+                          }`}>
+                            <Folder className="w-3.5 h-3.5" />
+                            <span>{chCount > 0 ? `${chCount} Chapter Siap Baca` : '0 Chapter (Kosong)'}</span>
+                          </span>
                         </div>
                       </div>
 
-                      {/* Chapter Status Pill */}
-                      <div className="mb-3">
-                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-bold ${
-                          chCount > 0 
-                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/25' 
-                            : 'bg-amber-500/10 text-amber-300 border border-amber-500/25'
-                        }`}>
-                          <Folder className="w-3.5 h-3.5" />
-                          <span>{chCount > 0 ? `${chCount} Chapter Siap Baca` : '0 Chapter (Kosong)'}</span>
-                        </span>
+                      {/* Action Buttons */}
+                      <div className="grid grid-cols-2 gap-2 pt-2 border-t border-[#1a1a28]">
+                        <button
+                          onClick={() => handleOpenManageForComic(comic.id)}
+                          className="w-full py-1.5 bg-[#1a1a2a] hover:bg-[#222236] text-slate-200 hover:text-white text-xs font-bold rounded-xl border border-[#28283c] flex items-center justify-center gap-1 cursor-pointer transition-colors"
+                        >
+                          <FolderOpen className="w-3.5 h-3.5 text-[#ff5b14]" />
+                          <span>Kelola ({chCount})</span>
+                        </button>
+
+                        <button
+                          onClick={() => handleOpenAddForComic(comic.id)}
+                          className="w-full py-1.5 bg-[#ff5b14]/15 hover:bg-[#ff5b14]/25 text-[#ff7a3d] text-xs font-bold rounded-xl border border-[#ff5b14]/30 flex items-center justify-center gap-1 cursor-pointer transition-colors"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>+ Upload</span>
+                        </button>
                       </div>
                     </div>
+                  );
+                })}
+              </div>
 
-                    {/* Action Buttons */}
-                    <div className="grid grid-cols-2 gap-2 pt-2 border-t border-[#1a1a28]">
-                      <button
-                        onClick={() => handleOpenManageForComic(comic.id)}
-                        className="w-full py-1.5 bg-[#1a1a2a] hover:bg-[#222236] text-slate-200 hover:text-white text-xs font-bold rounded-xl border border-[#28283c] flex items-center justify-center gap-1 cursor-pointer transition-colors"
-                      >
-                        <FolderOpen className="w-3.5 h-3.5 text-[#ff5b14]" />
-                        <span>Kelola ({chCount})</span>
-                      </button>
-
-                      <button
-                        onClick={() => handleOpenAddForComic(comic.id)}
-                        className="w-full py-1.5 bg-[#ff5b14]/15 hover:bg-[#ff5b14]/25 text-[#ff7a3d] text-xs font-bold rounded-xl border border-[#ff5b14]/30 flex items-center justify-center gap-1 cursor-pointer transition-colors"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                        <span>+ Upload</span>
-                      </button>
-                    </div>
+              {/* Folder Grid Pagination Bar */}
+              {totalFolderPages > 1 && (
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-3.5 bg-[#12121a] rounded-2xl border border-[#1f1f2e] shadow-sm text-xs mt-4">
+                  <div className="text-slate-400 text-xs">
+                    Menampilkan <strong className="text-white">{folderStartIndex + 1}</strong> - <strong className="text-white">{folderEndIndex}</strong> dari <strong className="text-white">{filteredComics.length}</strong> folder komik
                   </div>
-                );
-              })}
-            </div>
+
+                  <div className="flex items-center gap-1.5">
+                    {/* Rows per page selector */}
+                    <div className="flex items-center gap-1.5 mr-2">
+                      <span className="text-slate-500 text-[11px]">Per halaman:</span>
+                      <select
+                        value={foldersPerPage}
+                        onChange={(e) => setFoldersPerPage(Number(e.target.value))}
+                        className="bg-[#181826] border border-[#26263a] rounded-lg px-2 py-1 text-slate-300 text-xs focus:outline-none focus:border-[#ff5b14]"
+                      >
+                        <option value={8}>8</option>
+                        <option value={12}>12</option>
+                        <option value={24}>24</option>
+                        <option value={48}>48</option>
+                      </select>
+                    </div>
+
+                    {/* Pagination Buttons */}
+                    <button
+                      onClick={() => setFolderPage(1)}
+                      disabled={validFolderPage === 1}
+                      className="p-1.5 rounded-lg bg-[#181826] border border-[#252538] text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                      title="Halaman Pertama"
+                    >
+                      <ChevronsLeft className="w-3.5 h-3.5" />
+                    </button>
+
+                    <button
+                      onClick={() => setFolderPage(prev => Math.max(1, prev - 1))}
+                      disabled={validFolderPage === 1}
+                      className="p-1.5 rounded-lg bg-[#181826] border border-[#252538] text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                      title="Halaman Sebelumnya"
+                    >
+                      <ChevronLeft className="w-3.5 h-3.5" />
+                    </button>
+
+                    {/* Numbered Page Buttons */}
+                    <div className="flex items-center gap-1">
+                      {getPageNumbers(validFolderPage, totalFolderPages).map((p, idx) => (
+                        typeof p === 'number' ? (
+                          <button
+                            key={idx}
+                            onClick={() => setFolderPage(p)}
+                            className={`min-w-[28px] h-7 px-1.5 rounded-lg font-bold text-xs transition-all cursor-pointer ${
+                              validFolderPage === p
+                                ? 'bg-[#ff5b14] text-white shadow-md shadow-[#ff5b14]/20'
+                                : 'bg-[#181826] border border-[#252538] text-slate-400 hover:text-slate-200 hover:bg-[#202032]'
+                            }`}
+                          >
+                            {p}
+                          </button>
+                        ) : (
+                          <span key={idx} className="px-1 text-slate-500 font-bold select-none">...</span>
+                        )
+                      ))}
+                    </div>
+
+                    <button
+                      onClick={() => setFolderPage(prev => Math.min(totalFolderPages, prev + 1))}
+                      disabled={validFolderPage === totalFolderPages}
+                      className="p-1.5 rounded-lg bg-[#181826] border border-[#252538] text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                      title="Halaman Berikutnya"
+                    >
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+
+                    <button
+                      onClick={() => setFolderPage(totalFolderPages)}
+                      disabled={validFolderPage === totalFolderPages}
+                      className="p-1.5 rounded-lg bg-[#181826] border border-[#252538] text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                      title="Halaman Terakhir"
+                    >
+                      <ChevronsRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </div>
       ) : (
@@ -794,10 +961,10 @@ export const AdminChaptersTab: React.FC = () => {
                   </td>
                 </tr>
               ) : (
-                currentChapters.map(ch => {
+                paginatedChapters.map((ch, idx) => {
                   const isSelected = selectedChapterIds.includes(ch.id);
                   return (
-                    <tr key={ch.id} className={`hover:bg-[#161624] transition-colors ${isSelected ? 'bg-[#ff5b14]/5' : ''}`}>
+                    <tr key={`${ch.id || ch.chapterNumber}-${idx}`} className={`hover:bg-[#161624] transition-colors ${isSelected ? 'bg-[#ff5b14]/5' : ''}`}>
                       <td className="p-3 text-center">
                         <button 
                           onClick={() => handleToggleSelectOne(ch.id)}
@@ -889,6 +1056,90 @@ export const AdminChaptersTab: React.FC = () => {
             </tbody>
           </table>
         </div>
+
+        {/* Chapter Table Pagination Bar */}
+        {totalChapterPages > 1 && (
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-3.5 bg-[#161624] border-t border-[#202032] text-xs">
+            <div className="text-slate-400 text-xs">
+              Menampilkan <strong className="text-white">{chapterStartIndex + 1}</strong> - <strong className="text-white">{chapterEndIndex}</strong> dari <strong className="text-white">{currentChapters.length}</strong> chapter
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              {/* Rows per page selector */}
+              <div className="flex items-center gap-1.5 mr-2">
+                <span className="text-slate-500 text-[11px]">Per halaman:</span>
+                <select
+                  value={chaptersPerPage}
+                  onChange={(e) => setChaptersPerPage(Number(e.target.value))}
+                  className="bg-[#181826] border border-[#26263a] rounded-lg px-2 py-1 text-slate-300 text-xs focus:outline-none focus:border-[#ff5b14]"
+                >
+                  <option value={10}>10</option>
+                  <option value={15}>15</option>
+                  <option value={25}>25</option>
+                  <option value={50}>50</option>
+                </select>
+              </div>
+
+              {/* Pagination Buttons */}
+              <button
+                onClick={() => setChapterPage(1)}
+                disabled={validChapterPage === 1}
+                className="p-1.5 rounded-lg bg-[#181826] border border-[#252538] text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                title="Halaman Pertama"
+              >
+                <ChevronsLeft className="w-3.5 h-3.5" />
+              </button>
+
+              <button
+                onClick={() => setChapterPage(prev => Math.max(1, prev - 1))}
+                disabled={validChapterPage === 1}
+                className="p-1.5 rounded-lg bg-[#181826] border border-[#252538] text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                title="Halaman Sebelumnya"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" />
+              </button>
+
+              {/* Numbered Page Buttons */}
+              <div className="flex items-center gap-1">
+                {getPageNumbers(validChapterPage, totalChapterPages).map((p, idx) => (
+                  typeof p === 'number' ? (
+                    <button
+                      key={idx}
+                      onClick={() => setChapterPage(p)}
+                      className={`min-w-[28px] h-7 px-1.5 rounded-lg font-bold text-xs transition-all cursor-pointer ${
+                        validChapterPage === p
+                          ? 'bg-[#ff5b14] text-white shadow-md shadow-[#ff5b14]/20'
+                          : 'bg-[#181826] border border-[#252538] text-slate-400 hover:text-slate-200 hover:bg-[#202032]'
+                      }`}
+                    >
+                      {p}
+                    </button>
+                  ) : (
+                    <span key={idx} className="px-1 text-slate-500 font-bold select-none">...</span>
+                  )
+                ))}
+              </div>
+
+              <button
+                onClick={() => setChapterPage(prev => Math.min(totalChapterPages, prev + 1))}
+                disabled={validChapterPage === totalChapterPages}
+                className="p-1.5 rounded-lg bg-[#181826] border border-[#252538] text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                title="Halaman Berikutnya"
+              >
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+
+              <button
+                onClick={() => setChapterPage(totalChapterPages)}
+                disabled={validChapterPage === totalChapterPages}
+                className="p-1.5 rounded-lg bg-[#181826] border border-[#252538] text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                title="Halaman Terakhir"
+              >
+                <ChevronsRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* PDF Toast Notification Banner */}
@@ -1401,8 +1652,8 @@ export const AdminChaptersTab: React.FC = () => {
                   : `Hapus Massal ${chaptersToDelete.length} Chapter Terpilih`}
               </p>
               <div className="max-h-24 overflow-y-auto space-y-0.5 text-[11px] text-red-200/90 pl-1 font-mono">
-                {chaptersToDelete.map(ch => (
-                  <p key={ch.id} className="truncate">• Ch #{ch.chapterNumber} — {ch.title}</p>
+                {chaptersToDelete.map((ch, idx) => (
+                  <p key={`${ch.id || ch.chapterNumber}-${idx}`} className="truncate">• Ch #{ch.chapterNumber} — {ch.title}</p>
                 ))}
               </div>
               <p className="text-[10px] text-red-300/80 pt-1">

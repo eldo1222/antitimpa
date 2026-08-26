@@ -323,6 +323,32 @@ function deduplicateById<T extends { id: string }>(items: T[]): T[] {
   });
 }
 
+function sanitizeChaptersMap(rawChapters: Record<string, Chapter[]> | undefined | null): Record<string, Chapter[]> {
+  if (!rawChapters || typeof rawChapters !== 'object') return {};
+  const result: Record<string, Chapter[]> = {};
+
+  for (const [comicId, chList] of Object.entries(rawChapters)) {
+    if (!Array.isArray(chList)) continue;
+    const seenIds = new Set<string>();
+    const sanitized: Chapter[] = [];
+    for (let i = 0; i < chList.length; i++) {
+      const ch = chList[i];
+      if (!ch) continue;
+      let chId = ch.id || `ch-${comicId}-${ch.chapterNumber || (i + 1)}`;
+      if (seenIds.has(chId)) {
+        chId = `${chId}-v${i + 1}`;
+      }
+      seenIds.add(chId);
+      sanitized.push({
+        ...ch,
+        id: chId
+      });
+    }
+    result[comicId] = sanitized;
+  }
+  return result;
+}
+
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   // Load from localStorage or fallback to initial data safely
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
@@ -339,7 +365,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   });
 
   const [chapters, setChapters] = useState<Record<string, Chapter[]>>(() => {
-    return safeParseJson<Record<string, Chapter[]>>(STORAGE_KEYS.CHAPTERS, {});
+    const raw = safeParseJson<Record<string, Chapter[]>>(STORAGE_KEYS.CHAPTERS, {});
+    return sanitizeChaptersMap(raw);
   });
 
   const [users, setUsers] = useState<User[]>(() => {
@@ -493,7 +520,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         setComics(deduplicateById(remoteData.comics));
       }
       if (remoteData.chapters) {
-        setChapters(remoteData.chapters);
+        setChapters(sanitizeChaptersMap(remoteData.chapters));
       }
       if (remoteData.users && Array.isArray(remoteData.users)) {
         setUsers(remoteData.users);
@@ -539,7 +566,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       },
       onChapters: (remoteChapters) => {
         if (remoteChapters && Object.keys(remoteChapters).length > 0) {
-          setChapters(remoteChapters);
+          setChapters(sanitizeChaptersMap(remoteChapters));
         }
       },
       onUsers: (remoteUsers) => {

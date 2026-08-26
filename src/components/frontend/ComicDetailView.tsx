@@ -34,6 +34,7 @@ export const ComicDetailView: React.FC = () => {
   const { 
     comics, 
     chapters, 
+    injectComicWithChapters,
     selectComic, 
     toggleBookmark, 
     isBookmarked,
@@ -55,10 +56,77 @@ export const ComicDetailView: React.FC = () => {
   const [chapterSearch, setChapterSearch] = useState('');
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
   const [copiedLinkNotice, setCopiedLinkNotice] = useState(false);
+  const [isLoadingChapters, setIsLoadingChapters] = useState(false);
 
   // Where to Read / Watch Modal State (MAL Style Gateway)
   const [isWhereToReadOpen, setIsWhereToReadOpen] = useState(false);
   const [selectedGatewayChapter, setSelectedGatewayChapter] = useState<Chapter | null>(null);
+
+  // Dynamic On-Demand MangaDex Chapters Ingestion
+  useEffect(() => {
+    if (!comic) return;
+    const currentList = chapters[comic.id] || [];
+    const targetMdId = comic.mangaDexId || (comic.id.startsWith('comic-md-') ? comic.id.replace('comic-md-', '') : '');
+    
+    if (currentList.length === 0 && targetMdId) {
+      let isMounted = true;
+      setIsLoadingChapters(true);
+
+      const fetchLiveChapters = async () => {
+        try {
+          // 1. Try server internal endpoint
+          const res = await fetch(`/api/mangadex/chapters/${targetMdId}`);
+          if (res.ok) {
+            const data = await res.json();
+            if (isMounted && Array.isArray(data) && data.length > 0) {
+              injectComicWithChapters(comic, data);
+              setIsLoadingChapters(false);
+              return;
+            }
+          }
+
+          // 2. Direct MangaDex Feed fallback
+          const directRes = await fetch(`https://api.mangadex.org/manga/${targetMdId}/feed?limit=96&order[chapter]=asc`);
+          if (directRes.ok) {
+            const json = await directRes.json();
+            if (isMounted && json && Array.isArray(json.data) && json.data.length > 0) {
+              const now = new Date().toISOString().split('T')[0];
+              const seenIds = new Set<string>();
+              const parsed: Chapter[] = json.data.map((item: any, idx: number) => {
+                const chNum = parseFloat(item.attributes?.chapter || String(idx + 1)) || (idx + 1);
+                const titleStr = item.attributes?.title ? `Chapter ${chNum}: ${item.attributes.title}` : `Chapter ${chNum}`;
+                let chId = item.id ? `ch-${item.id}` : `ch-${targetMdId}-${chNum}`;
+                if (seenIds.has(chId)) chId = `${chId}-idx${idx + 1}`;
+                seenIds.add(chId);
+                return {
+                  id: chId,
+                  comicId: comic.id,
+                  chapterNumber: chNum,
+                  title: titleStr,
+                  pagesCount: item.attributes?.pages || 10,
+                  releaseDate: (item.attributes?.publishAt || now).split('T')[0],
+                  isNew: idx >= json.data.length - 2,
+                  isLocked: false,
+                  sourceType: 'images',
+                  pages: [],
+                  mangadexChapterId: item.id,
+                  mangadexMangaId: targetMdId
+                };
+              });
+              injectComicWithChapters(comic, parsed);
+            }
+          }
+        } catch (e) {
+          // ignore
+        } finally {
+          if (isMounted) setIsLoadingChapters(false);
+        }
+      };
+
+      fetchLiveChapters();
+      return () => { isMounted = false; };
+    }
+  }, [comic?.id, comic?.mangaDexId, chapters[comic?.id || '']?.length]);
 
   // Scroll to top upon opening
   useEffect(() => {
@@ -87,12 +155,20 @@ export const ComicDetailView: React.FC = () => {
 
   const rawChaptersList: Chapter[] = chapters[comic.id] || [];
   
-  // Sort and filter chapters
+  // Sort and filter chapters (with unique deduplication)
+  const seenFilteredIds = new Set<string>();
   const chaptersList = [...rawChaptersList]
     .filter(ch => {
+      if (!ch) return false;
       if (!chapterSearch.trim()) return true;
       return ch.title.toLowerCase().includes(chapterSearch.toLowerCase()) ||
              ch.chapterNumber.toString().includes(chapterSearch);
+    })
+    .filter(ch => {
+      const chKey = ch.id || `num-${ch.chapterNumber}`;
+      if (seenFilteredIds.has(chKey)) return false;
+      seenFilteredIds.add(chKey);
+      return true;
     })
     .sort((a, b) => {
       if (sortOrder === 'desc') {
@@ -455,8 +531,14 @@ export const ComicDetailView: React.FC = () => {
                 )}
               </div>
 
-              {/* If 0 local chapters exist (e.g. from Jikan / MAL API Scrape) */}
-              {rawChaptersList.length === 0 ? (
+              {/* Loading live chapters state */}
+              {isLoadingChapters ? (
+                <div className="p-8 bg-[#161622] rounded-xl border border-indigo-500/30 text-center space-y-3 animate-pulse">
+                  <div className="w-10 h-10 rounded-full border-2 border-indigo-400 border-t-transparent animate-spin mx-auto" />
+                  <p className="text-xs font-bold text-indigo-300">Menghubungkan & memuat daftar chapter dari MangaDex...</p>
+                  <p className="text-[11px] text-slate-400">Sinkronisasi chapter sedang berlangsung secara instan.</p>
+                </div>
+              ) : rawChaptersList.length === 0 ? (
                 <div className="p-6 bg-[#161622] rounded-xl border border-[#28283c] text-center space-y-3">
                   <div className="w-12 h-12 rounded-2xl bg-[#ff5b14]/20 border border-[#ff5b14]/40 flex items-center justify-center text-[#ff5b14] mx-auto">
                     <Globe className="w-6 h-6" />
@@ -480,13 +562,13 @@ export const ComicDetailView: React.FC = () => {
               ) : (
                 /* Chapters List */
                 <div className="space-y-2 max-h-[600px] overflow-y-auto pr-1">
-                  {chaptersList.map((chapter) => {
+                  {chaptersList.map((chapter, idx) => {
                     const isCurrentReading = readingProgress?.chapterId === chapter.id;
                     const isExternalChapter = chapter.sourceType === 'external' || !!chapter.externalUrl || (chapter.externalSources && chapter.externalSources.length > 0);
 
                     return (
                       <div
-                        key={chapter.id}
+                        key={`${chapter.id || chapter.chapterNumber}-${idx}`}
                         onClick={() => handleChapterClick(chapter)}
                         className={`p-3.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between group ${
                           isCurrentReading 
