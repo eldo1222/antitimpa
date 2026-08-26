@@ -31,7 +31,8 @@ import {
   ChevronsLeft,
   ChevronsRight,
   Crown,
-  Filter
+  Filter,
+  Flame
 } from 'lucide-react';
 
 export const AdminComicsTab: React.FC = () => {
@@ -46,7 +47,9 @@ export const AdminComicsTab: React.FC = () => {
     toggleComicHomeVisibility,
     selectComic, 
     setIsAdminView,
-    currentUser 
+    currentUser,
+    banners,
+    addBanner
   } = useApp();
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -329,6 +332,29 @@ export const AdminComicsTab: React.FC = () => {
       ...comic,
       projectType: nextType,
       hasExternalGateway: nextType === 'preview_gateway' ? true : comic.hasExternalGateway
+    });
+  };
+
+  const handleQuickPromoteToBanner = (comic: Comic) => {
+    const existing = banners.find(b => (b.linkComicId === comic.id || b.targetComicId === comic.id));
+    if (existing) {
+      alert(`Komik "${comic.title}" sudah terdaftar sebagai Banner Beranda!`);
+      return;
+    }
+    let cleanSubtitle = comic.synopsis ? comic.synopsis.replace(/\n+/g, ' ').trim() : 'Baca petualangan serunya sekarang!';
+    if (cleanSubtitle.length > 130) {
+      cleanSubtitle = cleanSubtitle.slice(0, 130) + '...';
+    }
+    addBanner({
+      title: comic.title,
+      subtitle: cleanSubtitle,
+      imageUrl: comic.bannerImage || comic.coverImage || 'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=1200&auto=format&fit=crop&q=80',
+      linkComicId: comic.id,
+      targetComicId: comic.id,
+      badgeText: comic.contentType === '18plus' ? '🔞 18+ VIP SERIES' : (comic.isTrending ? '⭐ TRENDING' : '🔥 HOT RELEASE'),
+      badge: comic.contentType === '18plus' ? '🔞 18+ VIP SERIES' : (comic.isTrending ? '⭐ TRENDING' : '🔥 HOT RELEASE'),
+      isActive: true,
+      priority: banners.length + 1
     });
   };
 
@@ -877,6 +903,13 @@ export const AdminComicsTab: React.FC = () => {
 
                       <td className="p-3 text-right">
                         <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            onClick={() => handleQuickPromoteToBanner(comic)}
+                            className="p-1.5 text-slate-400 hover:text-amber-400 hover:bg-amber-500/10 rounded-lg transition-colors cursor-pointer"
+                            title="⚡ 1-Klik: Jadikan Banner Slider Beranda"
+                          >
+                            <Flame className="w-3.5 h-3.5" />
+                          </button>
                           <button
                             onClick={() => handleViewFrontend(comic.id)}
                             className="p-1.5 text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/10 rounded-lg transition-colors cursor-pointer"

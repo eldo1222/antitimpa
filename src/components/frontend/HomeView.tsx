@@ -107,9 +107,13 @@ export const HomeView: React.FC = () => {
     return result;
   }, [comics]);
 
-  const activeBanners = banners.filter(b => 
-    b.isActive && (!b.targetComicId || uniqueVisibleComics.some(c => c.id === b.targetComicId))
-  );
+  // Active hero banners from DB / AppContext with fallback support for both targetComicId and linkComicId
+  const activeBanners = banners.filter(b => {
+    if (!b.isActive) return false;
+    const targetId = b.targetComicId || b.linkComicId;
+    if (!targetId) return true;
+    return uniqueVisibleComics.some(c => c.id === targetId);
+  });
 
   // Auto slide banner every 5s
   useEffect(() => {
@@ -149,7 +153,8 @@ export const HomeView: React.FC = () => {
   }, [uniqueVisibleComics, statusFilter, sortBy]);
 
   const currentBanner = activeBanners[currentBannerIndex] || activeBanners[0];
-  const bannerTargetComic = currentBanner?.targetComicId ? comics.find(c => c.id === currentBanner.targetComicId) : null;
+  const bannerTargetComicId = currentBanner ? (currentBanner.targetComicId || currentBanner.linkComicId) : undefined;
+  const bannerTargetComic = bannerTargetComicId ? comics.find(c => c.id === bannerTargetComicId) : null;
   const isBannerBlurred = shouldBlurComic(bannerTargetComic, isUserAuthenticated);
   const totalPages = Math.max(1, Math.ceil(filteredComics.length / ITEMS_PER_PAGE));
 
@@ -203,7 +208,11 @@ export const HomeView: React.FC = () => {
 
                 <div className="flex items-center gap-3">
                   <button
-                    onClick={() => handleOpenComic(currentBanner.targetComicId)}
+                    onClick={() => {
+                      if (bannerTargetComicId) {
+                        handleOpenComic(bannerTargetComicId);
+                      }
+                    }}
                     className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#ff5b14] to-[#f97316] hover:opacity-95 active:scale-95 text-white text-xs sm:text-sm font-black flex items-center gap-2 shadow-xl shadow-[#ff5b14]/30 transition-all cursor-pointer"
                   >
                     <Play className="w-4 h-4 fill-white" />
@@ -211,7 +220,11 @@ export const HomeView: React.FC = () => {
                   </button>
 
                   <button
-                    onClick={() => handleOpenComic(currentBanner.targetComicId)}
+                    onClick={() => {
+                      if (bannerTargetComicId) {
+                        handleOpenComic(bannerTargetComicId);
+                      }
+                    }}
                     className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 text-slate-200 text-xs sm:text-sm font-bold backdrop-blur-md border border-white/10 transition-all cursor-pointer"
                   >
                     Detail Komik
