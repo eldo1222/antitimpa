@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
 import { Chapter, ChapterSourceType } from '../../types';
 import { getComicProjectType, getComicProjectTypeLabel } from '../../utils/comicUtils';
@@ -52,6 +52,7 @@ export const AdminChaptersTab: React.FC = () => {
     updateChapter, 
     deleteChapter, 
     batchDeleteChapters,
+    batchDeleteComics,
     startReading, 
     setIsAdminView 
   } = useApp();
@@ -68,6 +69,11 @@ export const AdminChaptersTab: React.FC = () => {
   const [folderPage, setFolderPage] = useState<number>(1);
   const [foldersPerPage, setFoldersPerPage] = useState<number>(12);
 
+  // Multi-Select for Comic Folders
+  const [selectedFolderComicIds, setSelectedFolderComicIds] = useState<string[]>([]);
+  const [showFolderDeleteModal, setShowFolderDeleteModal] = useState(false);
+  const [folderDeleteReason, setFolderDeleteReason] = useState('');
+
   // Chapter-specific search inside the active comic
   const [chapterSearchQuery, setChapterSearchQuery] = useState('');
   
@@ -78,7 +84,7 @@ export const AdminChaptersTab: React.FC = () => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingChapter, setEditingChapter] = useState<Chapter | null>(null);
 
-  // Multi-Select & Batch Delete States
+  // Multi-Select & Batch Delete States for Chapters
   const [selectedChapterIds, setSelectedChapterIds] = useState<string[]>([]);
   const [showDeleteConfirmModal, setShowDeleteConfirmModal] = useState(false);
   const [chaptersToDelete, setChaptersToDelete] = useState<Chapter[]>([]);
@@ -182,6 +188,70 @@ export const AdminChaptersTab: React.FC = () => {
   const paginatedFolderComics = useMemo(() => {
     return filteredComics.slice(folderStartIndex, folderEndIndex);
   }, [filteredComics, folderStartIndex, folderEndIndex]);
+
+  // Progressive render streaming limit for 60fps folder view
+  const [renderedFoldersCount, setRenderedFoldersCount] = useState<number>(36);
+  useEffect(() => {
+    setRenderedFoldersCount(Math.min(36, paginatedFolderComics.length));
+    if (paginatedFolderComics.length > 36) {
+      let current = 36;
+      const interval = setInterval(() => {
+        current += 48;
+        setRenderedFoldersCount(current);
+        if (current >= paginatedFolderComics.length) {
+          clearInterval(interval);
+        }
+      }, 16);
+      return () => clearInterval(interval);
+    }
+  }, [paginatedFolderComics.length, validFolderPage, comicCategoryFilter, comicSearchQuery, foldersPerPage]);
+
+  const visibleFolderComics = paginatedFolderComics.slice(0, renderedFoldersCount);
+
+  // Progressive render streaming limit for 60fps chapter table view
+  const [renderedChaptersCount, setRenderedChaptersCount] = useState<number>(50);
+  useEffect(() => {
+    setRenderedChaptersCount(Math.min(50, paginatedChapters.length));
+    if (paginatedChapters.length > 50) {
+      let current = 50;
+      const interval = setInterval(() => {
+        current += 75;
+        setRenderedChaptersCount(current);
+        if (current >= paginatedChapters.length) {
+          clearInterval(interval);
+        }
+      }, 16);
+      return () => clearInterval(interval);
+    }
+  }, [paginatedChapters.length, validChapterPage, selectedComicId, chapterSearchQuery, chaptersPerPage]);
+
+  const visibleChapters = paginatedChapters.slice(0, renderedChaptersCount);
+
+  // Folder multi-select helpers
+  const isAllFoldersSelected = paginatedFolderComics.length > 0 && paginatedFolderComics.every(c => selectedFolderComicIds.includes(c.id));
+  
+  const handleToggleFolderSelectAll = () => {
+    if (isAllFoldersSelected) {
+      setSelectedFolderComicIds(prev => prev.filter(id => !paginatedFolderComics.some(c => c.id === id)));
+    } else {
+      const pageIds = paginatedFolderComics.map(c => c.id);
+      setSelectedFolderComicIds(prev => Array.from(new Set([...prev, ...pageIds])));
+    }
+  };
+
+  const handleToggleFolderSelectOne = (id: string) => {
+    setSelectedFolderComicIds(prev => 
+      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+    );
+  };
+
+  const handleConfirmDeleteFolders = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (selectedFolderComicIds.length === 0) return;
+    batchDeleteComics(selectedFolderComicIds, folderDeleteReason.trim() || 'Penghapusan batch folder komik oleh Administrator');
+    setShowFolderDeleteModal(false);
+    setSelectedFolderComicIds([]);
+  };
 
   // Reset pagination on search or filter change
   React.useEffect(() => {
@@ -604,8 +674,42 @@ export const AdminChaptersTab: React.FC = () => {
             </div>
           ) : (
             <>
+              {/* Folder Multi-Select & Batch Toolbar */}
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3 bg-[#161622] rounded-xl border border-[#222234]">
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={handleToggleFolderSelectAll}
+                    className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#1c1c2c] hover:bg-[#25253a] text-slate-300 text-xs font-bold transition-all border border-[#2a2a40] cursor-pointer"
+                  >
+                    {isAllFoldersSelected ? <CheckSquare className="w-4 h-4 text-[#ff5b14]" /> : <Square className="w-4 h-4 text-slate-500" />}
+                    <span>{isAllFoldersSelected ? 'Batal Pilih Semua' : 'Pilih Semua di Halaman'}</span>
+                  </button>
+                  {selectedFolderComicIds.length > 0 && (
+                    <span className="text-xs text-[#ff7a3d] font-bold">
+                      {selectedFolderComicIds.length} Folder Komik Terpilih
+                    </span>
+                  )}
+                </div>
+
+                {selectedFolderComicIds.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFolderDeleteReason('');
+                      setShowFolderDeleteModal(true);
+                    }}
+                    className="px-3.5 py-1.5 bg-red-600 hover:bg-red-500 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-md transition-all active:scale-95 cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Hapus Batch Folder ({selectedFolderComicIds.length})</span>
+                  </button>
+                )}
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3.5">
-                {paginatedFolderComics.map(comic => {
+                {visibleFolderComics.map(comic => {
+                  const isSelectedFolder = selectedFolderComicIds.includes(comic.id);
                   const chList = chapters[comic.id] || [];
                   const chCount = chList.length;
                   const is18 = comic.contentType === '18plus';
@@ -614,7 +718,10 @@ export const AdminChaptersTab: React.FC = () => {
                   return (
                     <div
                       key={comic.id}
-                      className="p-3.5 bg-[#12121c] hover:bg-[#151522] border border-[#1f1f2e] hover:border-[#3a3a52] rounded-2xl flex flex-col justify-between transition-all duration-200 shadow-md group"
+                      className={`p-3.5 bg-[#12121c] hover:bg-[#151522] border rounded-2xl flex flex-col justify-between transition-all duration-200 shadow-md group ${
+                        isSelectedFolder ? 'border-[#ff5b14] bg-[#ff5b14]/5' : 'border-[#1f1f2e] hover:border-[#3a3a52]'
+                      }`}
+                      style={{ contentVisibility: 'auto', containIntrinsicSize: '0 220px' }}
                     >
                       <div>
                         <div className="flex gap-3 items-start mb-2.5">
@@ -629,6 +736,22 @@ export const AdminChaptersTab: React.FC = () => {
                               }}
                               className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                             />
+                            {/* Quick Select Checkbox overlay */}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleToggleFolderSelectOne(comic.id);
+                              }}
+                              className="absolute top-1 left-1 p-1 rounded-md bg-black/70 hover:bg-black text-white cursor-pointer shadow-sm backdrop-blur-xs"
+                              title={isSelectedFolder ? 'Batalkan pilihan' : 'Pilih folder ini'}
+                            >
+                              {isSelectedFolder ? (
+                                <CheckSquare className="w-3.5 h-3.5 text-[#ff5b14]" />
+                              ) : (
+                                <Square className="w-3.5 h-3.5 text-slate-400 hover:text-white" />
+                              )}
+                            </button>
                           </div>
 
                           <div className="flex-1 min-w-0">
@@ -706,8 +829,13 @@ export const AdminChaptersTab: React.FC = () => {
               {/* Folder Grid Pagination Bar */}
               {filteredComics.length > 0 && (
                 <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-3.5 bg-[#12121a] rounded-2xl border border-[#1f1f2e] shadow-sm text-xs mt-4">
-                  <div className="text-slate-400 text-xs">
-                    Menampilkan <strong className="text-white">{folderStartIndex + 1}</strong> - <strong className="text-white">{folderEndIndex}</strong> dari <strong className="text-white">{filteredComics.length}</strong> folder komik
+                  <div className="text-slate-400 text-xs flex items-center gap-2 flex-wrap">
+                    <span>Menampilkan <strong className="text-white">{folderStartIndex + 1}</strong> - <strong className="text-white">{folderEndIndex}</strong> dari <strong className="text-white">{filteredComics.length}</strong> folder komik</span>
+                    {renderedFoldersCount < paginatedFolderComics.length && (
+                      <span className="text-[10px] bg-[#ff5b14]/20 text-[#ff7a3d] px-2 py-0.5 rounded-full font-bold animate-pulse">
+                        Streaming {renderedFoldersCount}/{paginatedFolderComics.length} folder...
+                      </span>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-1.5">
@@ -976,17 +1104,21 @@ export const AdminChaptersTab: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-[#1b1b28]">
-              {currentChapters.length === 0 ? (
+              {visibleChapters.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="p-8 text-center text-slate-500">
                     Belum ada chapter untuk komik ini. Silakan klik "Upload Chapter Baru".
                   </td>
                 </tr>
               ) : (
-                paginatedChapters.map((ch, idx) => {
+                visibleChapters.map((ch, idx) => {
                   const isSelected = selectedChapterIds.includes(ch.id);
                   return (
-                    <tr key={`${ch.id || ch.chapterNumber}-${idx}`} className={`hover:bg-[#161624] transition-colors ${isSelected ? 'bg-[#ff5b14]/5' : ''}`}>
+                    <tr 
+                      key={`${ch.id || ch.chapterNumber}-${idx}`} 
+                      className={`hover:bg-[#161624] transition-colors ${isSelected ? 'bg-[#ff5b14]/5' : ''}`}
+                      style={{ contentVisibility: 'auto', containIntrinsicSize: '0 52px' }}
+                    >
                       <td className="p-3 text-center">
                         <button 
                           onClick={() => handleToggleSelectOne(ch.id)}
@@ -1082,8 +1214,13 @@ export const AdminChaptersTab: React.FC = () => {
         {/* Chapter Table Pagination Bar */}
         {currentChapters.length > 0 && (
           <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-3.5 bg-[#161624] border-t border-[#202032] text-xs">
-            <div className="text-slate-400 text-xs">
-              Menampilkan <strong className="text-white">{chapterStartIndex + 1}</strong> - <strong className="text-white">{chapterEndIndex}</strong> dari <strong className="text-white">{currentChapters.length}</strong> chapter
+            <div className="text-slate-400 text-xs flex items-center gap-2 flex-wrap">
+              <span>Menampilkan <strong className="text-white">{chapterStartIndex + 1}</strong> - <strong className="text-white">{chapterEndIndex}</strong> dari <strong className="text-white">{currentChapters.length}</strong> chapter</span>
+              {renderedChaptersCount < paginatedChapters.length && (
+                <span className="text-[10px] bg-[#ff5b14]/20 text-[#ff7a3d] px-2 py-0.5 rounded-full font-bold animate-pulse">
+                  Streaming {renderedChaptersCount}/{paginatedChapters.length} baris...
+                </span>
+              )}
             </div>
 
             <div className="flex items-center gap-1.5">
@@ -1717,6 +1854,75 @@ export const AdminChaptersTab: React.FC = () => {
               >
                 <Trash2 className="w-3.5 h-3.5" />
                 <span>Konfirmasi Hapus ({chaptersToDelete.length})</span>
+              </button>
+            </div>
+          </form>
+        </div>
+      </AdminModalPortal>
+      {/* Folder Batch Delete Confirmation Modal */}
+      <AdminModalPortal isOpen={showFolderDeleteModal} onClose={() => setShowFolderDeleteModal(false)} maxWidth="max-w-md">
+        <div className="w-full bg-[#12121a] border border-red-500/30 rounded-2xl p-5 text-slate-200 space-y-4 shadow-2xl">
+          <div className="flex items-center justify-between pb-3 border-b border-[#202030]">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-xl bg-red-500/10 border border-red-500/30 flex items-center justify-center text-red-400">
+                <Trash2 className="w-4 h-4" />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-sm text-white">Konfirmasi Hapus Batch Folder Komik</h3>
+                <p className="text-[10px] text-slate-400">Hapus Folder Komik Beserta Seluruh Chapternya</p>
+              </div>
+            </div>
+            <button 
+              onClick={() => setShowFolderDeleteModal(false)} 
+              className="p-1 text-slate-400 hover:text-white rounded-lg cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          <div className="p-3 bg-red-500/10 rounded-xl border border-red-500/25 text-xs text-red-200 space-y-1.5">
+            <p className="font-bold flex items-center gap-1.5 text-red-400">
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+              <span>Hapus Massal {selectedFolderComicIds.length} Folder Komik Terpilih</span>
+            </p>
+            <div className="max-h-28 overflow-y-auto space-y-0.5 text-[11px] text-red-200/90 pl-1 font-mono">
+              {comics.filter(c => selectedFolderComicIds.includes(c.id)).map((c, idx) => (
+                <p key={c.id} className="truncate">• {c.title} ({(chapters[c.id] || []).length} Chapter)</p>
+              ))}
+            </div>
+            <p className="text-[10px] text-red-300/80 pt-1">
+              ⚠️ Seluruh data komik, sampul, dan bab di dalam folder terpilih akan dihapus permanen.
+            </p>
+          </div>
+
+          <form onSubmit={handleConfirmDeleteFolders} className="space-y-3 text-xs">
+            <div>
+              <label className="block text-slate-400 mb-1 font-semibold">
+                Alasan Penghapusan (Audit Trail):
+              </label>
+              <input
+                type="text"
+                value={folderDeleteReason}
+                onChange={(e) => setFolderDeleteReason(e.target.value)}
+                placeholder="Contoh: Pembersihan komik duplikat / rusak..."
+                className="w-full p-2 bg-[#181824] border border-[#27273a] rounded-xl text-white text-xs focus:outline-none focus:border-[#ff5b14]"
+              />
+            </div>
+
+            <div className="pt-2 flex items-center justify-end gap-2 border-t border-[#1f1f2e]">
+              <button
+                type="button"
+                onClick={() => setShowFolderDeleteModal(false)}
+                className="px-3.5 py-2 rounded-xl text-xs text-slate-400 hover:text-white bg-[#181824] cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="submit"
+                className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-md cursor-pointer transition-all active:scale-95"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Konfirmasi Hapus ({selectedFolderComicIds.length} Folder)</span>
               </button>
             </div>
           </form>

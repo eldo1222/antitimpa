@@ -406,6 +406,26 @@ export const AdminComicsTab: React.FC = () => {
   const endIndex = Math.min(startIndex + itemsPerPage, filteredComics.length);
   const paginatedComics = filteredComics.slice(startIndex, endIndex);
 
+  // Progressive streaming limit for ultra-smooth 60fps rendering even with 5000+ items
+  const [renderedCount, setRenderedCount] = useState<number>(50);
+
+  useEffect(() => {
+    setRenderedCount(Math.min(50, paginatedComics.length));
+    if (paginatedComics.length > 50) {
+      let current = 50;
+      const interval = setInterval(() => {
+        current += 75;
+        setRenderedCount(current);
+        if (current >= paginatedComics.length) {
+          clearInterval(interval);
+        }
+      }, 16);
+      return () => clearInterval(interval);
+    }
+  }, [paginatedComics.length, validCurrentPage, filterType, searchQuery, itemsPerPage]);
+
+  const visibleComics = paginatedComics.slice(0, renderedCount);
+
   const isAllSelected = paginatedComics.length > 0 && paginatedComics.every(c => selectedComicIds.includes(c.id));
 
   const handleToggleSelectAll = () => {
@@ -790,14 +810,14 @@ export const AdminComicsTab: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-[#1b1b28]">
-              {paginatedComics.length === 0 ? (
+              {visibleComics.length === 0 ? (
                 <tr>
                   <td colSpan={11} className="p-8 text-center text-slate-500">
                     Tidak ada komik yang sesuai dengan filter atau pencarian.
                   </td>
                 </tr>
               ) : (
-                paginatedComics.map(comic => {
+                visibleComics.map(comic => {
                   const isSelected = selectedComicIds.includes(comic.id);
                   const chCount = (chapters[comic.id] || []).length;
                   const isNormal = comic.contentType === 'normal' || comic.isFree === true;
@@ -806,7 +826,11 @@ export const AdminComicsTab: React.FC = () => {
                   const projType = getComicProjectType(comic, chapters[comic.id]);
 
                   return (
-                    <tr key={comic.id} className={`hover:bg-[#161624] transition-colors ${isSelected ? 'bg-[#ff5b14]/5' : ''}`}>
+                    <tr 
+                      key={comic.id} 
+                      className={`hover:bg-[#161624] transition-colors ${isSelected ? 'bg-[#ff5b14]/5' : ''}`}
+                      style={{ contentVisibility: 'auto', containIntrinsicSize: '0 65px' }}
+                    >
                       <td className="p-3 text-center">
                         <button 
                           onClick={() => handleToggleSelectOne(comic.id)}
@@ -978,8 +1002,13 @@ export const AdminComicsTab: React.FC = () => {
         {/* Pagination Footer */}
         {filteredComics.length > 0 && (
           <div className="p-3 bg-[#161622] border-t border-[#222234] flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
-            <div className="text-slate-400 font-medium">
-              Menampilkan <span className="text-white font-bold">{filteredComics.length === 0 ? 0 : startIndex + 1}</span> - <span className="text-white font-bold">{endIndex}</span> dari <span className="text-white font-bold">{filteredComics.length}</span> judul komik
+            <div className="text-slate-400 font-medium flex items-center gap-2 flex-wrap">
+              <span>Menampilkan <span className="text-white font-bold">{filteredComics.length === 0 ? 0 : startIndex + 1}</span> - <span className="text-white font-bold">{endIndex}</span> dari <span className="text-white font-bold">{filteredComics.length}</span> judul komik</span>
+              {renderedCount < paginatedComics.length && (
+                <span className="text-[10px] bg-[#ff5b14]/20 text-[#ff7a3d] px-2 py-0.5 rounded-full font-bold animate-pulse">
+                  Streaming {renderedCount}/{paginatedComics.length} baris...
+                </span>
+              )}
             </div>
 
             <div className="flex items-center gap-1.5">

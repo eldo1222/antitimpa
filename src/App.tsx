@@ -25,6 +25,7 @@ import { RegisterModal } from './components/auth/RegisterModal';
 import { ProfileSettingsModal } from './components/common/ProfileSettingsModal';
 import { WelcomePopUpModal } from './components/frontend/WelcomePopUpModal';
 import { OfflineGuard } from './components/common/OfflineGuard';
+import { AdminInactivityGuard } from './components/admin/AdminInactivityGuard';
 import { Smartphone } from 'lucide-react';
 
 // Sync current URL path with AppContext activeTab and selected items
@@ -166,6 +167,7 @@ const MainAppContent: React.FC = () => {
       )}
 
       {/* Global Login & Auth Modals */}
+      <AdminInactivityGuard />
       <LoginModal />
       <GoogleAuthModal />
       <RegisterModal />

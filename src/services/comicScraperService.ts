@@ -1086,6 +1086,58 @@ export async function fetchMangaDexChapters(mangaId: string): Promise<any[]> {
   return [];
 }
 
+// Fetch real chapter image pages from MangaDex At-Home Server
+export async function fetchMangaDexPages(chapterId: string): Promise<any[]> {
+  // Attempt 1: Express Server API Proxy
+  try {
+    const res = await fetch(`/api/mangadex/pages/${chapterId}`);
+    if (res.ok && res.headers.get('content-type')?.includes('application/json')) {
+      const data = await res.json();
+      if (data.pages && Array.isArray(data.pages) && data.pages.length > 0) {
+        return data.pages;
+      }
+    }
+  } catch (err) {
+    // try next
+  }
+
+  // Attempt 2: Netlify Function Proxy
+  try {
+    const netlifyRes = await fetch(`/.netlify/functions/mangadex-proxy?action=pages&chapterId=${chapterId}`);
+    if (netlifyRes.ok && netlifyRes.headers.get('content-type')?.includes('application/json')) {
+      const data = await netlifyRes.json();
+      if (data.pages && Array.isArray(data.pages) && data.pages.length > 0) {
+        return data.pages;
+      }
+    }
+  } catch (err) {
+    // try next
+  }
+
+  // Attempt 3: Direct MangaDex At-Home server API
+  try {
+    const directRes = await fetch(`https://api.mangadex.org/at-home/server/${chapterId}`, {
+      headers: { 'Accept': 'application/json' }
+    });
+    if (directRes.ok) {
+      const atHomeData = await directRes.json();
+      const baseUrl = atHomeData.baseUrl;
+      const hash = atHomeData.chapter?.hash;
+      const fileNames = atHomeData.chapter?.data || [];
+      return fileNames.map((fn: string, pIdx: number) => ({
+        id: `p-${chapterId}-${pIdx + 1}`,
+        pageNumber: pIdx + 1,
+        imageUrl: `${baseUrl}/data/${hash}/${fn}`,
+        caption: `Halaman ${pIdx + 1}`
+      }));
+    }
+  } catch (directErr) {
+    console.warn('Direct MangaDex pages fetch failed:', directErr);
+  }
+
+  return [];
+}
+
 // Helper to determine if a comic is a Doujinshi / Short 18+ Oneshot (1 - 3 chapters only)
 export function isDoujinshiOrOneshot(scraped: ScrapedComicResult): boolean {
   const genresStr = (scraped.genres || []).join(' ').toLowerCase();
