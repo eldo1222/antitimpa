@@ -529,8 +529,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         setUsers(remoteData.users);
         setCurrentUser(prev => {
           if (!prev) return null;
-          const match = remoteData.users?.find(u => u.id === prev.id || (u.role === 'admin' && prev.role === 'admin'));
-          if (!match) return null;
+          const match = remoteData.users?.find(u => 
+            u.id === prev.id || 
+            (u.role === 'admin' && prev.role === 'admin') || 
+            ((u.username || '').toLowerCase() === (prev.username || '').toLowerCase())
+          );
+          if (!match) return prev;
+          safeSetItem(STORAGE_KEYS.CURRENT_USER, match);
           return match;
         });
       }
@@ -563,28 +568,33 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     // 3. Subscribe to Firestore updates
     const unsubscribeFirestore = subscribeToFirestore({
       onComics: (remoteComics) => {
-        if (Array.isArray(remoteComics) && remoteComics.length > 0) {
+        if (Array.isArray(remoteComics)) {
           setComics(deduplicateById(remoteComics));
         }
       },
       onChapters: (remoteChapters) => {
-        if (remoteChapters && Object.keys(remoteChapters).length > 0) {
+        if (remoteChapters && typeof remoteChapters === 'object') {
           setChapters(sanitizeChaptersMap(remoteChapters));
         }
       },
       onUsers: (remoteUsers) => {
-        if (Array.isArray(remoteUsers) && remoteUsers.length > 0) {
+        if (Array.isArray(remoteUsers)) {
           setUsers(remoteUsers);
           setCurrentUser(prev => {
             if (!prev) return null;
-            const match = remoteUsers.find(u => u.id === prev.id || (u.role === 'admin' && prev.role === 'admin'));
-            if (!match) return null;
+            const match = remoteUsers.find(u => 
+              u.id === prev.id || 
+              (u.role === 'admin' && prev.role === 'admin') || 
+              ((u.username || '').toLowerCase() === (prev.username || '').toLowerCase())
+            );
+            if (!match) return prev;
+            safeSetItem(STORAGE_KEYS.CURRENT_USER, match);
             return match;
           });
         }
       },
       onDrives: (remoteDrives) => {
-        if (Array.isArray(remoteDrives) && remoteDrives.length > 0) {
+        if (Array.isArray(remoteDrives)) {
           setDriveAccounts(remoteDrives);
         }
       },
@@ -604,7 +614,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         }
       },
       onAds: (remoteAds) => {
-        if (Array.isArray(remoteAds) && remoteAds.length > 0) {
+        if (Array.isArray(remoteAds)) {
           setAds(remoteAds);
         }
       },
@@ -2293,11 +2303,26 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       ...modified
     };
 
-    setUsers(prev => prev.map(u => u.id === userId ? updatedUser : u));
+    setUsers(prev => {
+      const cleanUsername = (updatedUser.username || '').toLowerCase();
+      const filtered = prev.filter(u => 
+        u.id !== userId && 
+        u.id !== updatedUser.id && 
+        (u.username || '').toLowerCase() !== cleanUsername &&
+        (updatedUser.role === 'admin' ? u.role !== 'admin' : true)
+      );
+      return [updatedUser, ...filtered];
+    });
+
     saveUserToFirestore(updatedUser);
     centralSync.saveUser(updatedUser);
 
-    if (currentUser && currentUser.id === userId) {
+    if (updatedUser.role === 'admin' && updatedUser.id !== 'user-admin') {
+      saveUserToFirestore({ ...updatedUser, id: 'user-admin' });
+      centralSync.saveUser({ ...updatedUser, id: 'user-admin' });
+    }
+
+    if (currentUser && (currentUser.id === userId || (currentUser.role === 'admin' && updatedUser.role === 'admin'))) {
       setCurrentUser(updatedUser);
       safeSetItem(STORAGE_KEYS.CURRENT_USER, updatedUser);
     }

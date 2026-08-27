@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
+import { AdminModalPortal } from '../common/AdminModalPortal';
 import { 
   KeyRound, 
   X, 
@@ -73,8 +74,8 @@ export const AdminPasswordModal: React.FC<AdminPasswordModalProps> = ({ isOpen, 
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
-      <div className="w-full max-w-md bg-[#12121a] border border-[#28283c] rounded-2xl p-5 text-slate-200 space-y-4 shadow-2xl">
+    <AdminModalPortal isOpen={isOpen} onClose={onClose} maxWidth="max-w-md">
+      <div className="w-full bg-[#12121a] border border-[#28283c] rounded-2xl p-5 text-slate-200 space-y-4 shadow-2xl">
         {/* Header */}
         <div className="flex items-center justify-between pb-3 border-b border-[#1f1f2e]">
           <div className="flex items-center gap-2.5">
@@ -90,7 +91,7 @@ export const AdminPasswordModal: React.FC<AdminPasswordModalProps> = ({ isOpen, 
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-white/5 transition-colors"
+            className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-white/5 transition-colors cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
@@ -119,7 +120,7 @@ export const AdminPasswordModal: React.FC<AdminPasswordModalProps> = ({ isOpen, 
               <button
                 type="button"
                 onClick={() => setShowPasswordText(!showPasswordText)}
-                className="text-[10px] text-slate-400 hover:text-white flex items-center gap-1"
+                className="text-[10px] text-slate-400 hover:text-white flex items-center gap-1 cursor-pointer"
               >
                 {showPasswordText ? <EyeOff className="w-3 h-3 text-amber-400" /> : <Eye className="w-3 h-3" />}
                 <span>{showPasswordText ? 'Tutup' : 'Lihat'}</span>
@@ -170,14 +171,14 @@ export const AdminPasswordModal: React.FC<AdminPasswordModalProps> = ({ isOpen, 
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 rounded-xl bg-[#191926] hover:bg-[#222234] text-slate-300 text-xs font-semibold transition-colors"
+              className="px-4 py-2 rounded-xl bg-[#191926] hover:bg-[#222234] text-slate-300 text-xs font-semibold transition-colors cursor-pointer"
             >
               Batal
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
-              className="px-4 py-2 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white text-xs font-bold rounded-xl shadow-md transition-all active:scale-95 flex items-center gap-1.5"
+              className="px-4 py-2 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white text-xs font-bold rounded-xl shadow-md transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer"
             >
               {isSubmitting ? (
                 <span className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -191,6 +192,6 @@ export const AdminPasswordModal: React.FC<AdminPasswordModalProps> = ({ isOpen, 
           </div>
         </form>
       </div>
-    </div>
+    </AdminModalPortal>
   );
 };

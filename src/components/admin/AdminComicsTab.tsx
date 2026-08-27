@@ -3,6 +3,7 @@ import { useApp } from '../../context/AppContext';
 import { Comic, ComicCategoryType, ComicContentType, ComicProjectType } from '../../types';
 import { getComicProjectType, getComicProjectTypeLabel } from '../../utils/comicUtils';
 import { PRESET_GENRES } from '../../data/genres';
+import { AdminModalPortal } from '../common/AdminModalPortal';
 import { 
   Plus, 
   Trash2, 
@@ -529,22 +530,32 @@ export const AdminComicsTab: React.FC = () => {
       </div>
 
       {selectedComicIds.length > 0 && (
-        <div className="p-3 bg-[#171724] border border-[#ff5b14]/40 rounded-xl flex flex-wrap items-center justify-between gap-3 animate-in fade-in shadow-lg">
+        <div className="p-3 bg-[#171724] border border-[#ff5b14]/50 rounded-xl flex flex-wrap items-center justify-between gap-3 animate-in fade-in shadow-xl sticky top-2 z-30">
           <div className="flex items-center gap-2 text-xs text-white">
-            <span className="px-2.5 py-1 rounded-lg bg-[#ff5b14] font-extrabold text-white">
+            <span className="px-2.5 py-1 rounded-lg bg-[#ff5b14] font-extrabold text-white shadow-xs">
               {selectedComicIds.length} Komik Terpilih
             </span>
             <span className="text-slate-400 hidden sm:inline">Pilih tindakan massal:</span>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            {selectedComicIds.length < filteredComics.length && (
+              <button
+                onClick={() => setSelectedComicIds(filteredComics.map(c => c.id))}
+                className="px-2.5 py-1.5 bg-[#1f1f30] hover:bg-[#282840] text-slate-300 hover:text-white border border-[#353548] text-xs font-semibold rounded-xl cursor-pointer transition-colors"
+                title={`Pilih semua ${filteredComics.length} komik dalam filter aktif saat ini`}
+              >
+                <span>Pilih Semua Komik di Filter ({filteredComics.length})</span>
+              </button>
+            )}
+
             <button
               onClick={handleBatchHideFromHome}
               className="px-3 py-1.5 bg-[#1f1f30] hover:bg-[#282840] text-amber-300 hover:text-amber-200 border border-amber-500/30 text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer transition-colors"
               title="Tarik dan sembunyikan komik terpilih dari halaman beranda pembaca"
             >
               <EyeOff className="w-3.5 h-3.5" />
-              <span>Tarik / Sembunyikan dari Beranda</span>
+              <span>Sembunyikan dari Beranda</span>
             </button>
 
             <button
@@ -558,16 +569,16 @@ export const AdminComicsTab: React.FC = () => {
 
             <button
               onClick={handleRequestBatchDelete}
-              className="px-3 py-1.5 bg-red-600/20 hover:bg-red-600/30 text-red-400 border border-red-500/30 text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer transition-colors"
+              className="px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer transition-all shadow-md active:scale-95"
               title="Hapus komik terpilih beserta chapternya"
             >
               <Trash2 className="w-3.5 h-3.5" />
-              <span>Hapus Banyak ({selectedComicIds.length})</span>
+              <span>Hapus Batch ({selectedComicIds.length})</span>
             </button>
 
             <button
               onClick={() => setSelectedComicIds([])}
-              className="p-1.5 text-slate-400 hover:text-white rounded-lg cursor-pointer"
+              className="px-2 py-1.5 text-slate-400 hover:text-white bg-[#111118] hover:bg-[#1a1a24] rounded-lg text-xs cursor-pointer transition-colors"
               title="Batalkan Pilihan"
             >
               <X className="w-4 h-4" />
@@ -602,6 +613,9 @@ export const AdminComicsTab: React.FC = () => {
                 <option value={20}>20 per hal</option>
                 <option value={50}>50 per hal</option>
                 <option value={100}>100 per hal</option>
+                <option value={250}>250 per hal</option>
+                <option value={500}>500 per hal</option>
+                <option value={999999}>Tampilkan Semua (All)</option>
               </select>
             </div>
           </div>
@@ -759,7 +773,20 @@ export const AdminComicsTab: React.FC = () => {
                 <th className="p-3">Status</th>
                 <th className="p-3">Chapter</th>
                 <th className="p-3">Rating</th>
-                <th className="p-3 text-right">Aksi</th>
+                <th className="p-3 text-right">
+                  {selectedComicIds.length > 0 ? (
+                    <button
+                      onClick={handleRequestBatchDelete}
+                      className="px-2.5 py-1 bg-red-600 hover:bg-red-500 text-white rounded-lg text-[11px] font-bold inline-flex items-center gap-1 shadow cursor-pointer transition-all active:scale-95"
+                      title="Hapus komik terpilih"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                      <span>Hapus ({selectedComicIds.length})</span>
+                    </button>
+                  ) : (
+                    <span>Aksi</span>
+                  )}
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#1b1b28]">
@@ -1029,19 +1056,18 @@ export const AdminComicsTab: React.FC = () => {
       </div>
 
       {/* Add / Edit Modal */}
-      {showAddModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-lg bg-[#12121a] border border-[#262638] rounded-2xl p-5 text-slate-200 space-y-4 max-h-[90vh] overflow-y-auto shadow-2xl">
-            <div className="flex items-center justify-between pb-3 border-b border-[#202030]">
-              <h3 className="font-extrabold text-sm text-white">
-                {editingComic ? 'Edit Data Komik' : 'Tambah Komik Baru'}
-              </h3>
-              <button onClick={() => setShowAddModal(false)} className="p-1 text-slate-400 hover:text-white rounded-lg cursor-pointer">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+      <AdminModalPortal isOpen={showAddModal} onClose={() => setShowAddModal(false)} maxWidth="max-w-lg">
+        <div className="w-full bg-[#12121a] border border-[#262638] rounded-2xl p-5 text-slate-200 space-y-4 max-h-[90vh] overflow-y-auto shadow-2xl">
+          <div className="flex items-center justify-between pb-3 border-b border-[#202030]">
+            <h3 className="font-extrabold text-sm text-white">
+              {editingComic ? 'Edit Data Komik' : 'Tambah Komik Baru'}
+            </h3>
+            <button onClick={() => setShowAddModal(false)} className="p-1 text-slate-400 hover:text-white rounded-lg cursor-pointer">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
 
-            <form onSubmit={handleSave} className="space-y-3.5 text-xs">
+          <form onSubmit={handleSave} className="space-y-3.5 text-xs">
               <div>
                 <label className="block text-slate-400 mb-1 font-semibold">Judul Komik</label>
                 <input
@@ -1470,86 +1496,84 @@ export const AdminComicsTab: React.FC = () => {
               </div>
             </form>
           </div>
-        </div>
-      )}
+      </AdminModalPortal>
+
       {/* Custom Delete Confirmation Modal with Audit Reason (ISO/IEC 27001) */}
-      {showDeleteConfirmModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
-          <div className="w-full max-w-md bg-[#12121a] border border-red-500/30 rounded-2xl p-5 text-slate-200 space-y-4 shadow-2xl">
-            <div className="flex items-center justify-between pb-3 border-b border-[#202030]">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-xl bg-red-500/10 border border-red-500/30 flex items-center justify-center text-red-400">
-                  <Trash2 className="w-4 h-4" />
-                </div>
-                <div>
-                  <h3 className="font-extrabold text-sm text-white">Konfirmasi Hapus Komik (Audit Trail)</h3>
-                  <p className="text-[10px] text-slate-400">Pencatatan Alasan &amp; Verifikasi Super Admin</p>
-                </div>
+      <AdminModalPortal isOpen={showDeleteConfirmModal} onClose={() => setShowDeleteConfirmModal(false)} maxWidth="max-w-md">
+        <div className="w-full bg-[#12121a] border border-red-500/30 rounded-2xl p-5 text-slate-200 space-y-4 shadow-2xl">
+          <div className="flex items-center justify-between pb-3 border-b border-[#202030]">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-xl bg-red-500/10 border border-red-500/30 flex items-center justify-center text-red-400">
+                <Trash2 className="w-4 h-4" />
               </div>
-              <button 
-                onClick={() => setShowDeleteConfirmModal(false)} 
-                className="p-1 text-slate-400 hover:text-white rounded-lg cursor-pointer"
+              <div>
+                <h3 className="font-extrabold text-sm text-white">Konfirmasi Hapus Komik (Audit Trail)</h3>
+                <p className="text-[10px] text-slate-400">Pencatatan Alasan &amp; Verifikasi Super Admin</p>
+              </div>
+            </div>
+            <button 
+              onClick={() => setShowDeleteConfirmModal(false)} 
+              className="p-1 text-slate-400 hover:text-white rounded-lg cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          <div className="p-3 bg-red-500/10 rounded-xl border border-red-500/25 text-xs text-red-200 space-y-1.5">
+            <p className="font-bold flex items-center gap-1.5 text-red-400">
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+              {comicsToDelete.length === 1 ? 'Hapus 1 Judul Komik' : `Hapus Massal ${comicsToDelete.length} Judul Komik`}
+            </p>
+            <div className="max-h-24 overflow-y-auto space-y-0.5 text-[11px] text-red-200/90 pl-1 font-mono">
+              {comicsToDelete.map(c => (
+                <p key={c.id} className="truncate">• {c.title}</p>
+              ))}
+            </div>
+            <p className="text-[10px] text-red-300/80 pt-1">
+              ⚠️ Seluruh data bab / chapter yang terhubung dengan komik ini juga akan dihapus permanen dari sistem.
+            </p>
+          </div>
+
+          {deleteError && (
+            <div className="p-2.5 rounded-xl bg-red-500/20 border border-red-500/40 text-xs text-red-200 flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+              <span>{deleteError}</span>
+            </div>
+          )}
+
+          <form onSubmit={handleConfirmDelete} className="space-y-3 text-xs">
+            <div>
+              <label className="block text-slate-400 mb-1 font-semibold">
+                Alasan Penghapusan (Masuk ke Log Aktivitas):
+              </label>
+              <input
+                type="text"
+                value={deleteReason}
+                onChange={(e) => setDeleteReason(e.target.value)}
+                placeholder="Contoh: Pembersihan komik duplikat / permintaan DMCA..."
+                className="w-full p-2 bg-[#181824] border border-[#27273a] rounded-xl text-white text-xs focus:outline-none focus:border-[#ff5b14]"
+              />
+            </div>
+
+            <div className="pt-2 flex items-center justify-end gap-2 border-t border-[#1f1f2e]">
+              <button
+                type="button"
+                onClick={() => setShowDeleteConfirmModal(false)}
+                className="px-3.5 py-2 rounded-xl text-xs text-slate-400 hover:text-white bg-[#181824] cursor-pointer"
               >
-                <X className="w-4 h-4" />
+                Batal
+              </button>
+              <button
+                type="submit"
+                className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-md cursor-pointer transition-all active:scale-95"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Konfirmasi Hapus ({comicsToDelete.length})</span>
               </button>
             </div>
-
-            <div className="p-3 bg-red-500/10 rounded-xl border border-red-500/25 text-xs text-red-200 space-y-1.5">
-              <p className="font-bold flex items-center gap-1.5 text-red-400">
-                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                {comicsToDelete.length === 1 ? 'Hapus 1 Judul Komik' : `Hapus Massal ${comicsToDelete.length} Judul Komik`}
-              </p>
-              <div className="max-h-24 overflow-y-auto space-y-0.5 text-[11px] text-red-200/90 pl-1 font-mono">
-                {comicsToDelete.map(c => (
-                  <p key={c.id} className="truncate">• {c.title}</p>
-                ))}
-              </div>
-              <p className="text-[10px] text-red-300/80 pt-1">
-                ⚠️ Seluruh data bab / chapter yang terhubung dengan komik ini juga akan dihapus permanen dari sistem.
-              </p>
-            </div>
-
-            {deleteError && (
-              <div className="p-2.5 rounded-xl bg-red-500/20 border border-red-500/40 text-xs text-red-200 flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
-                <span>{deleteError}</span>
-              </div>
-            )}
-
-            <form onSubmit={handleConfirmDelete} className="space-y-3 text-xs">
-              <div>
-                <label className="block text-slate-400 mb-1 font-semibold">
-                  Alasan Penghapusan (Masuk ke Log Aktivitas):
-                </label>
-                <input
-                  type="text"
-                  value={deleteReason}
-                  onChange={(e) => setDeleteReason(e.target.value)}
-                  placeholder="Contoh: Pembersihan komik duplikat / permintaan DMCA..."
-                  className="w-full p-2 bg-[#181824] border border-[#27273a] rounded-xl text-white text-xs focus:outline-none focus:border-[#ff5b14]"
-                />
-              </div>
-
-              <div className="pt-2 flex items-center justify-end gap-2 border-t border-[#1f1f2e]">
-                <button
-                  type="button"
-                  onClick={() => setShowDeleteConfirmModal(false)}
-                  className="px-3.5 py-2 rounded-xl text-xs text-slate-400 hover:text-white bg-[#181824] cursor-pointer"
-                >
-                  Batal
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-md cursor-pointer transition-all active:scale-95"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>Konfirmasi Hapus ({comicsToDelete.length})</span>
-                </button>
-              </div>
-            </form>
-          </div>
+          </form>
         </div>
-      )}
+      </AdminModalPortal>
     </div>
   );
 };

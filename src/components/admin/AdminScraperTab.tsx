@@ -63,6 +63,9 @@ export const AdminScraperTab: React.FC = () => {
 
   // MangaDex, Doujindesu & Preset filters
   const [mangadexCategoryFilter, setMangadexCategoryFilter] = useState<'all' | '18plus' | 'manhwa' | 'manga' | 'manhua'>('18plus');
+  const [mangadexLimit, setMangadexLimit] = useState<number>(50);
+  const [mangadexOffset, setMangadexOffset] = useState<number>(0);
+  const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
   const [doujindesuCategoryFilter, setDoujindesuCategoryFilter] = useState<'all' | '18plus' | 'doujin' | 'netorare' | 'milf' | 'harem'>('all');
   const [presetCategoryFilter, setPresetCategoryFilter] = useState<'all' | 'manga' | 'manhwa' | 'manhua' | '18plus'>('18plus');
 
@@ -303,19 +306,43 @@ export const AdminScraperTab: React.FC = () => {
     }
   };
 
-  // 2. Live MangaDex Search
-  const handleSearchMangaDex = async (e?: React.FormEvent, customQ?: string, overrideCategory?: 'all' | '18plus' | 'manhwa' | 'manga' | 'manhua') => {
+  // 2. Live MangaDex Search (Supports high-capacity limit and pagination/load more)
+  const handleSearchMangaDex = async (
+    e?: React.FormEvent, 
+    customQ?: string, 
+    overrideCategory?: 'all' | '18plus' | 'manhwa' | 'manga' | 'manhua',
+    overrideLimit?: number,
+    isAppend: boolean = false,
+    newOffset: number = 0
+  ) => {
     if (e) e.preventDefault();
     const queryToSearch = customQ !== undefined ? customQ : searchQuery;
     const catToUse = overrideCategory !== undefined ? overrideCategory : mangadexCategoryFilter;
+    const limitToUse = overrideLimit !== undefined ? overrideLimit : mangadexLimit;
 
-    setIsSearching(true);
+    if (isAppend) {
+      setIsLoadingMore(true);
+    } else {
+      setIsSearching(true);
+      setMangadexOffset(0);
+    }
     setErrorMsg('');
+
     try {
-      const results = await searchMangaDex(queryToSearch, 20, catToUse);
-      setSearchResults(results);
-      setHasSearched(true);
-      if (results.length === 0) {
+      const results = await searchMangaDex(queryToSearch, limitToUse, catToUse, isAppend ? newOffset : 0);
+      if (isAppend) {
+        setSearchResults(prev => {
+          const seen = new Set(prev.map(p => (p.slug || p.title).toLowerCase()));
+          const newUnique = results.filter(r => !seen.has((r.slug || r.title).toLowerCase()));
+          return [...prev, ...newUnique];
+        });
+        setMangadexOffset(newOffset);
+      } else {
+        setSearchResults(results);
+        setHasSearched(true);
+      }
+
+      if (results.length === 0 && !isAppend) {
         setErrorMsg(`Tidak ditemukan hasil untuk "${queryToSearch || catToUse}".`);
       }
     } catch (err: any) {
@@ -323,6 +350,7 @@ export const AdminScraperTab: React.FC = () => {
       setErrorMsg('Gagal menarik data dari API MangaDex.');
     } finally {
       setIsSearching(false);
+      setIsLoadingMore(false);
     }
   };
 
@@ -1245,81 +1273,105 @@ export const AdminScraperTab: React.FC = () => {
       {/* ============================================================ */}
       {activeSource === 'mangadex' && (
         <div className="space-y-4">
-          <div className="flex flex-wrap items-center gap-2 bg-[#11111a] p-3 rounded-2xl border border-[#202030]">
-            <span className="text-slate-400 text-xs font-bold flex items-center gap-1">
-              <Filter className="w-3.5 h-3.5 text-[#ff5b14]" />
-              Kategori:
-            </span>
+          <div className="flex flex-wrap items-center justify-between gap-3 bg-[#11111a] p-3 rounded-2xl border border-[#202030]">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-slate-400 text-xs font-bold flex items-center gap-1 mr-1">
+                <Filter className="w-3.5 h-3.5 text-[#ff5b14]" />
+                Kategori:
+              </span>
 
-            <button
-              onClick={() => {
-                setMangadexCategoryFilter('18plus');
-                handleSearchMangaDex(undefined, '', '18plus');
-              }}
-              className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-all cursor-pointer flex items-center gap-1 ${
-                mangadexCategoryFilter === '18plus'
-                  ? 'bg-rose-600 text-white shadow-md shadow-rose-600/30'
-                  : 'bg-[#181824] text-slate-300 hover:text-white border border-[#262638]'
-              }`}
-            >
-              <span>🔞 Manhwa 18+ Dewasa</span>
-            </button>
+              <button
+                onClick={() => {
+                  setMangadexCategoryFilter('18plus');
+                  handleSearchMangaDex(undefined, searchQuery, '18plus');
+                }}
+                className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-all cursor-pointer flex items-center gap-1 ${
+                  mangadexCategoryFilter === '18plus'
+                    ? 'bg-rose-600 text-white shadow-md shadow-rose-600/30'
+                    : 'bg-[#181824] text-slate-300 hover:text-white border border-[#262638]'
+                }`}
+              >
+                <span>🔞 Manhwa 18+ Dewasa</span>
+              </button>
 
-            <button
-              onClick={() => {
-                setMangadexCategoryFilter('manhwa');
-                handleSearchMangaDex(undefined, '', 'manhwa');
-              }}
-              className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-all cursor-pointer flex items-center gap-1 ${
-                mangadexCategoryFilter === 'manhwa'
-                  ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30'
-                  : 'bg-[#181824] text-slate-300 hover:text-white border border-[#262638]'
-              }`}
-            >
-              <span>🇰🇷 Manhwa Populer</span>
-            </button>
+              <button
+                onClick={() => {
+                  setMangadexCategoryFilter('manhwa');
+                  handleSearchMangaDex(undefined, searchQuery, 'manhwa');
+                }}
+                className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-all cursor-pointer flex items-center gap-1 ${
+                  mangadexCategoryFilter === 'manhwa'
+                    ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30'
+                    : 'bg-[#181824] text-slate-300 hover:text-white border border-[#262638]'
+                }`}
+              >
+                <span>🇰🇷 Manhwa Populer</span>
+              </button>
 
-            <button
-              onClick={() => {
-                setMangadexCategoryFilter('manga');
-                handleSearchMangaDex(undefined, '', 'manga');
-              }}
-              className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-all cursor-pointer flex items-center gap-1 ${
-                mangadexCategoryFilter === 'manga'
-                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
-                  : 'bg-[#181824] text-slate-300 hover:text-white border border-[#262638]'
-              }`}
-            >
-              <span>🇯🇵 Manga Jepang</span>
-            </button>
+              <button
+                onClick={() => {
+                  setMangadexCategoryFilter('manga');
+                  handleSearchMangaDex(undefined, searchQuery, 'manga');
+                }}
+                className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-all cursor-pointer flex items-center gap-1 ${
+                  mangadexCategoryFilter === 'manga'
+                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
+                    : 'bg-[#181824] text-slate-300 hover:text-white border border-[#262638]'
+                }`}
+              >
+                <span>🇯🇵 Manga Jepang</span>
+              </button>
 
-            <button
-              onClick={() => {
-                setMangadexCategoryFilter('manhua');
-                handleSearchMangaDex(undefined, '', 'manhua');
-              }}
-              className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-all cursor-pointer flex items-center gap-1 ${
-                mangadexCategoryFilter === 'manhua'
-                  ? 'bg-amber-600 text-white shadow-md shadow-amber-600/30'
-                  : 'bg-[#181824] text-slate-300 hover:text-white border border-[#262638]'
-              }`}
-            >
-              <span>🇨🇳 Manhua China</span>
-            </button>
+              <button
+                onClick={() => {
+                  setMangadexCategoryFilter('manhua');
+                  handleSearchMangaDex(undefined, searchQuery, 'manhua');
+                }}
+                className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-all cursor-pointer flex items-center gap-1 ${
+                  mangadexCategoryFilter === 'manhua'
+                    ? 'bg-amber-600 text-white shadow-md shadow-amber-600/30'
+                    : 'bg-[#181824] text-slate-300 hover:text-white border border-[#262638]'
+                }`}
+              >
+                <span>🇨🇳 Manhua China</span>
+              </button>
 
-            <button
-              onClick={() => {
-                setMangadexCategoryFilter('all');
-                handleSearchMangaDex(undefined, '', 'all');
-              }}
-              className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-all cursor-pointer flex items-center gap-1 ${
-                mangadexCategoryFilter === 'all'
-                  ? 'bg-[#ff5b14] text-white shadow-md shadow-[#ff5b14]/30'
-                  : 'bg-[#181824] text-slate-300 hover:text-white border border-[#262638]'
-              }`}
-            >
-              <span>⚡ Semua Populer</span>
-            </button>
+              <button
+                onClick={() => {
+                  setMangadexCategoryFilter('all');
+                  handleSearchMangaDex(undefined, searchQuery, 'all');
+                }}
+                className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-all cursor-pointer flex items-center gap-1 ${
+                  mangadexCategoryFilter === 'all'
+                    ? 'bg-[#ff5b14] text-white shadow-md shadow-[#ff5b14]/30'
+                    : 'bg-[#181824] text-slate-300 hover:text-white border border-[#262638]'
+                }`}
+              >
+                <span>⚡ Semua Populer</span>
+              </button>
+            </div>
+
+            {/* High-Capacity Batch Limit Selector */}
+            <div className="flex items-center gap-1.5 text-xs">
+              <span className="text-slate-400 text-[11px] font-bold">Limit Tarik:</span>
+              {[20, 50, 100, 200, 500].map((lim) => (
+                <button
+                  key={lim}
+                  type="button"
+                  onClick={() => {
+                    setMangadexLimit(lim);
+                    handleSearchMangaDex(undefined, searchQuery, mangadexCategoryFilter, lim);
+                  }}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-black cursor-pointer transition-all ${
+                    mangadexLimit === lim
+                      ? 'bg-[#ff5b14] text-white shadow-sm ring-1 ring-white/20'
+                      : 'bg-[#181824] text-slate-400 hover:text-white border border-[#262638]'
+                  }`}
+                >
+                  {lim === 500 ? '500 (Max)' : lim}
+                </button>
+              ))}
+            </div>
           </div>
 
           <form onSubmit={(e) => handleSearchMangaDex(e)} className="flex gap-2">
@@ -1329,19 +1381,53 @@ export const AdminScraperTab: React.FC = () => {
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Cari judul spesifik di MangaDex (contoh: Secret Class, Solo Leveling, Circles)..."
+                placeholder="Cari kata kunci di MangaDex (contoh: Slime, Isekai, Solo Leveling, Reincarnation, Secret Class)..."
                 className="w-full pl-10 pr-4 py-2.5 bg-[#11111a] border border-[#222234] rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#ff5b14]"
               />
             </div>
             <button
               type="submit"
               disabled={isSearching}
-              className="px-4 py-2.5 bg-[#ff5b14] hover:bg-[#e04e0e] disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow flex items-center gap-1.5 cursor-pointer"
+              className="px-4 py-2.5 bg-[#ff5b14] hover:bg-[#e04e0e] disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow flex items-center gap-1.5 cursor-pointer transition-all"
             >
               {isSearching ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
-              <span>Cari MangaDex</span>
+              <span>Cari MangaDex ({mangadexLimit})</span>
             </button>
           </form>
+
+          {/* Recommendation Tags for MangaDex */}
+          <div className="flex items-center gap-1.5 flex-wrap text-xs">
+            <span className="text-[11px] text-slate-500 font-semibold">Kata Kunci Populer:</span>
+            {['Slime', 'Isekai', 'Solo Leveling', 'Reincarnation', 'System', 'Martial Peak', 'Magic Emperor', 'Secret Class', 'Circles', 'Demon King', 'Overpowered'].map(tag => (
+              <button
+                key={tag}
+                type="button"
+                onClick={() => {
+                  setSearchQuery(tag);
+                  handleSearchMangaDex(undefined, tag);
+                }}
+                className="px-2.5 py-0.5 bg-[#161622] hover:bg-[#202032] border border-[#262638] rounded-full text-[10px] text-slate-300 cursor-pointer transition-colors"
+              >
+                {tag}
+              </button>
+            ))}
+          </div>
+
+          {/* Results Count Header */}
+          {hasSearched && searchResults.length > 0 && (
+            <div className="flex items-center justify-between text-xs px-1 text-slate-400">
+              <span>
+                Ditemukan <strong className="text-white">{searchResults.length}</strong> judul komik untuk kata kunci <strong className="text-[#ff5b14]">"{searchQuery || mangadexCategoryFilter}"</strong> (Kapasitas: {mangadexLimit} per tarikan)
+              </span>
+              <button
+                onClick={handleImportAllVisible}
+                className="text-xs text-[#ff5b14] hover:underline font-bold flex items-center gap-1 cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Suntikkan Semua {searchResults.length} Komik</span>
+              </button>
+            </div>
+          )}
 
           {errorMsg && (
             <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-300 flex items-center gap-2">
@@ -1351,59 +1437,90 @@ export const AdminScraperTab: React.FC = () => {
           )}
 
           {searchResults.length > 0 && (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {searchResults.map((item, idx) => {
-                const isImported = importedSlugs[item.slug || item.title] || comics.some(c => c.title.toLowerCase() === item.title.toLowerCase());
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {searchResults.map((item, idx) => {
+                  const isImported = importedSlugs[item.slug || item.title] || comics.some(c => c.title.toLowerCase() === item.title.toLowerCase());
 
-                return (
-                  <div key={idx} className="p-3.5 bg-[#12121c] border border-[#202030] rounded-2xl flex flex-col justify-between transition-all hover:border-[#383850] shadow-md group">
-                    <div className="flex gap-3.5 items-start">
-                      <div className="relative w-20 h-28 rounded-xl overflow-hidden shrink-0 shadow ring-1 ring-white/10">
-                        <img 
-                          src={item.coverImage} 
-                          alt={item.title} 
-                          referrerPolicy="no-referrer"
-                          loading="lazy"
-                          onError={(e) => {
-                            (e.target as HTMLImageElement).src = getProfessionalComicSkeletonUrl(item.title, item.comicType);
-                          }}
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" 
-                        />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-1.5 mb-1 flex-wrap">
-                          <span className={`px-2 py-0.5 rounded-md text-[9px] font-extrabold border ${
-                            item.contentType === '18plus'
-                              ? 'bg-rose-500/15 text-rose-300 border-rose-500/30'
-                              : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
-                          }`}>
-                            {item.contentType === '18plus' ? '🔞 18+ VIP' : (item.comicType || 'manga').toUpperCase()}
-                          </span>
-                          <span className="text-[10px] text-slate-400 truncate">{item.storyWriter}</span>
+                  return (
+                    <div key={idx} className="p-3.5 bg-[#12121c] border border-[#202030] rounded-2xl flex flex-col justify-between transition-all hover:border-[#383850] shadow-md group">
+                      <div className="flex gap-3.5 items-start">
+                        <div className="relative w-20 h-28 rounded-xl overflow-hidden shrink-0 shadow ring-1 ring-white/10">
+                          <img 
+                            src={item.coverImage} 
+                            alt={item.title} 
+                            referrerPolicy="no-referrer"
+                            loading="lazy"
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).src = getProfessionalComicSkeletonUrl(item.title, item.comicType);
+                            }}
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" 
+                          />
                         </div>
-                        <h4 className="font-bold text-sm text-white line-clamp-1 leading-snug">{item.title}</h4>
-                        <p className="text-[11px] text-slate-400 line-clamp-2 mt-1 leading-relaxed">{item.synopsis}</p>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5 mb-1 flex-wrap">
+                            <span className={`px-2 py-0.5 rounded-md text-[9px] font-extrabold border ${
+                              item.contentType === '18plus'
+                                ? 'bg-rose-500/15 text-rose-300 border-rose-500/30'
+                                : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                            }`}>
+                              {item.contentType === '18plus' ? '🔞 18+ VIP' : (item.comicType || 'manga').toUpperCase()}
+                            </span>
+                            <span className="text-[10px] text-slate-400 truncate">{item.storyWriter}</span>
+                          </div>
+                          <h4 className="font-bold text-sm text-white line-clamp-1 leading-snug">{item.title}</h4>
+                          <p className="text-[11px] text-slate-400 line-clamp-2 mt-1 leading-relaxed">{item.synopsis}</p>
+                          <div className="flex flex-wrap gap-1 mt-1.5">
+                            {item.genres.slice(0, 2).map(g => (
+                              <span key={g} className="px-1.5 py-0.2 rounded bg-[#1c1c2a] text-[9px] text-slate-300">{g}</span>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-3 mt-3 border-t border-[#1b1b2a] text-xs">
+                        <span className="text-[10px] text-slate-500 font-mono">{item.sourceApi}</span>
+                        {isImported ? (
+                          <span className="px-3 py-1 bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 rounded-xl text-xs font-bold flex items-center gap-1">
+                            <CheckCircle2 className="w-3.5 h-3.5" /> Sudah Ada
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => handleImportSingle(item)}
+                            className="px-3 py-1.5 bg-[#ff5b14] hover:bg-[#e04e0e] text-white rounded-xl font-bold text-xs flex items-center gap-1 cursor-pointer shadow-sm active:scale-95 transition-all"
+                          >
+                            <Download className="w-3.5 h-3.5" /> Tarik ke Web
+                          </button>
+                        )}
                       </div>
                     </div>
+                  );
+                })}
+              </div>
 
-                    <div className="flex items-center justify-between pt-3 mt-3 border-t border-[#1b1b2a] text-xs">
-                      <span className="text-[10px] text-slate-500 font-mono">{item.sourceApi}</span>
-                      {isImported ? (
-                        <span className="px-3 py-1 bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 rounded-xl text-xs font-bold flex items-center gap-1">
-                          <CheckCircle2 className="w-3.5 h-3.5" /> Sudah Ada
-                        </span>
-                      ) : (
-                        <button
-                          onClick={() => handleImportSingle(item)}
-                          className="px-3 py-1.5 bg-[#ff5b14] hover:bg-[#e04e0e] text-white rounded-xl font-bold text-xs flex items-center gap-1 cursor-pointer"
-                        >
-                          <Download className="w-3.5 h-3.5" /> Tarik ke Web
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
+              {/* Load More / Next Page Pagination for MangaDex */}
+              <div className="flex justify-center pt-2">
+                <button
+                  onClick={() => {
+                    const nextOffset = mangadexOffset + searchResults.length;
+                    handleSearchMangaDex(undefined, searchQuery, mangadexCategoryFilter, mangadexLimit, true, nextOffset);
+                  }}
+                  disabled={isLoadingMore}
+                  className="px-6 py-2.5 bg-[#171724] hover:bg-[#202032] border border-[#2e2e42] hover:border-[#ff5b14]/50 rounded-xl text-xs font-bold text-slate-200 hover:text-white flex items-center gap-2 transition-all cursor-pointer shadow-sm active:scale-95 disabled:opacity-50"
+                >
+                  {isLoadingMore ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin text-[#ff5b14]" />
+                      <span>Menarik Halaman Berikutnya dari MangaDex...</span>
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw className="w-4 h-4 text-[#ff5b14]" />
+                      <span>Muat Lebih Banyak / Tarik Halaman Berikutnya (+{mangadexLimit} Judul)</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           )}
         </div>

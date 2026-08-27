@@ -38,20 +38,24 @@ export interface ScrapedComicResult {
 // 1. Live Fetch from MangaDex Public API with Category and 18+ Filter Intelligence
 export async function searchMangaDex(
   query: string = '', 
-  limit: number = 20,
-  categoryFilter: 'all' | 'manga' | 'manhwa' | 'manhua' | 'doujin' | '18plus' = 'all'
+  limit: number = 50,
+  categoryFilter: 'all' | 'manga' | 'manhwa' | 'manhua' | 'doujin' | '18plus' = 'all',
+  offset: number = 0
 ): Promise<ScrapedComicResult[]> {
   const qLower = query.trim().toLowerCase();
   const isAdultIntent = categoryFilter === '18plus' || 
     /18\+|dewasa|adult|erotica|hentai|ecchi|porn|vip|sex|milf|harem/i.test(qLower);
   const isGenericKeyword = ['18+', 'dewasa', 'adult', 'manhwa', 'manhua', 'manga', 'doujin', 'doujinshi', 'all', '', 'semua', 'komik'].includes(qLower);
   const qTitle = (!isGenericKeyword && query.trim().length > 0) ? query.trim() : '';
+  const safeLimit = Math.min(500, Math.max(1, limit || 50));
+  const safeOffset = Math.max(0, offset || 0);
 
   // Attempt 1: Call our internal server proxy or Netlify Function
   try {
     const params = new URLSearchParams();
     if (qTitle) params.append('title', qTitle);
-    params.append('limit', String(Math.max(8, limit)));
+    params.append('limit', String(safeLimit));
+    params.append('offset', String(safeOffset));
     params.append('category', categoryFilter);
     if (isAdultIntent) {
       params.append('rating', '18plus');
@@ -68,52 +72,80 @@ export async function searchMangaDex(
     console.warn('Server proxy MangaDex fetch failed, trying direct API:', proxyErr);
   }
 
-  // Attempt 2: Direct MangaDex API
+  // Attempt 2: Direct MangaDex API (supports high-capacity fetching)
   try {
-    const params = new URLSearchParams();
-    params.set('limit', String(Math.max(8, limit)));
-    params.append('includes[]', 'cover_art');
-    params.append('includes[]', 'author');
-    params.append('includes[]', 'artist');
+    const fetchDirectChunk = async (chunkLimit: number, chunkOffset: number) => {
+      const params = new URLSearchParams();
+      params.set('limit', String(Math.min(100, chunkLimit)));
+      params.set('offset', String(chunkOffset));
+      params.append('includes[]', 'cover_art');
+      params.append('includes[]', 'author');
+      params.append('includes[]', 'artist');
 
-    if (qTitle) {
-      params.set('title', qTitle);
-      params.set('order[relevance]', 'desc');
-    } else {
-      params.set('order[followedCount]', 'desc');
-    }
-
-    // Content Rating
-    if (isAdultIntent) {
-      params.append('contentRating[]', 'erotica');
-      params.append('contentRating[]', 'pornographic');
-    } else {
-      params.append('contentRating[]', 'safe');
-      params.append('contentRating[]', 'suggestive');
-      params.append('contentRating[]', 'erotica');
-      params.append('contentRating[]', 'pornographic');
-    }
-
-    // Only restrict language if browsing specific non-18+ categories without a specific title
-    if (!qTitle) {
-      if (categoryFilter === 'manhwa') {
-        params.append('originalLanguage[]', 'ko');
-      } else if (categoryFilter === 'manhua') {
-        params.append('originalLanguage[]', 'zh');
-        params.append('originalLanguage[]', 'zh-hk');
-      } else if (categoryFilter === 'manga' || categoryFilter === 'doujin') {
-        params.append('originalLanguage[]', 'ja');
+      if (qTitle) {
+        params.set('title', qTitle);
+        params.set('order[relevance]', 'desc');
+      } else {
+        params.set('order[followedCount]', 'desc');
       }
-    }
 
-    const url = `https://api.mangadex.org/manga?${params.toString()}`;
-    const response = await fetch(url, { headers: { 'Accept': 'application/json' } });
-    
-    if (response.ok) {
-      const data = await response.json();
-      if (data.data && Array.isArray(data.data) && data.data.length > 0) {
-        return mapMangaDexItems(data.data, isAdultIntent);
+      // Content Rating
+      if (isAdultIntent) {
+        params.append('contentRating[]', 'erotica');
+        params.append('contentRating[]', 'pornographic');
+      } else {
+        params.append('contentRating[]', 'safe');
+        params.append('contentRating[]', 'suggestive');
+        params.append('contentRating[]', 'erotica');
+        params.append('contentRating[]', 'pornographic');
       }
+
+      if (!qTitle) {
+        if (categoryFilter === 'manhwa') {
+          params.append('originalLanguage[]', 'ko');
+        } else if (categoryFilter === 'manhua') {
+          params.append('originalLanguage[]', 'zh');
+          params.append('originalLanguage[]', 'zh-hk');
+        } else if (categoryFilter === 'manga' || categoryFilter === 'doujin') {
+          params.append('originalLanguage[]', 'ja');
+        }
+      }
+
+      const url = `https://api.mangadex.org/manga?${params.toString()}`;
+      const response = await fetch(url, { headers: { 'Accept': 'application/json' } });
+      if (response.ok) {
+        return await response.json();
+      }
+      return null;
+    };
+
+    const firstJson = await fetchDirectChunk(Math.min(100, safeLimit), safeOffset);
+    if (firstJson && firstJson.data && Array.isArray(firstJson.data) && firstJson.data.length > 0) {
+      let allDirectData = [...firstJson.data];
+      const totalDirect = typeof firstJson.total === 'number' ? firstJson.total : allDirectData.length;
+
+      if (safeLimit > 100 && totalDirect > allDirectData.length) {
+        const targetCount = Math.min(safeLimit, totalDirect);
+        let curOffset = safeOffset + allDirectData.length;
+
+        while (allDirectData.length < targetCount && curOffset < totalDirect) {
+          const nextChunkLimit = Math.min(100, targetCount - allDirectData.length);
+          try {
+            const nextJson = await fetchDirectChunk(nextChunkLimit, curOffset);
+            if (nextJson && Array.isArray(nextJson.data) && nextJson.data.length > 0) {
+              allDirectData.push(...nextJson.data);
+              curOffset += nextJson.data.length;
+              if (nextJson.data.length < nextChunkLimit) break;
+            } else {
+              break;
+            }
+          } catch {
+            break;
+          }
+        }
+      }
+
+      return mapMangaDexItems(allDirectData, isAdultIntent);
     }
   } catch (directErr) {
     console.warn('Direct MangaDex fetch failed:', directErr);
@@ -131,7 +163,7 @@ export async function searchMangaDex(
     }
 
     try {
-      const jikanResults = await searchJikanManga(qTitle, 10);
+      const jikanResults = await searchJikanManga(qTitle, Math.min(25, safeLimit));
       if (jikanResults && jikanResults.length > 0) {
         const presetMatches = filterPresetFallback(query, categoryFilter);
         const combined = [...jikanResults, ...presetMatches];

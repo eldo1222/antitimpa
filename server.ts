@@ -135,7 +135,10 @@ function broadcastDatabaseUpdate(partialUpdate?: Partial<CentralDB>) {
 
   const payload = JSON.stringify({
     type: "database_update",
-    data: partialUpdate || dbState,
+    data: {
+      ...(partialUpdate || dbState),
+      version: dbState.version,
+    },
   });
 
   sseClients.forEach((client) => {
@@ -183,8 +186,9 @@ async function startServer() {
   // 3. Realtime Server-Sent Events (SSE) stream for instant multi-browser sync
   app.get("/api/data/stream", (req, res) => {
     res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
     res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
     res.flushHeaders();
 
     // Send initial state immediately
@@ -192,7 +196,17 @@ async function startServer() {
 
     sseClients.add(res);
 
+    const pingInterval = setInterval(() => {
+      try {
+        res.write(`: ping\n\n`);
+      } catch (_) {
+        clearInterval(pingInterval);
+        sseClients.delete(res);
+      }
+    }, 15000);
+
     req.on("close", () => {
+      clearInterval(pingInterval);
       sseClients.delete(res);
     });
   });
@@ -295,7 +309,13 @@ async function startServer() {
       return res.status(400).json({ error: "Invalid user data" });
     }
 
-    const remaining = dbState.users.filter((u) => u.id !== user.id);
+    const cleanUsername = (user.username || "").trim().toLowerCase();
+    const remaining = dbState.users.filter(
+      (u) =>
+        u.id !== user.id &&
+        (u.username || "").trim().toLowerCase() !== cleanUsername &&
+        (user.role === "admin" ? u.role !== "admin" : true)
+    );
     dbState.users = [user, ...remaining];
 
     broadcastDatabaseUpdate({ users: dbState.users });
@@ -729,7 +749,7 @@ async function startServer() {
     try {
       const {
         title = "",
-        limit = "24",
+        limit = "50",
         offset = "0",
         rating = "all",
         category = "",
@@ -737,85 +757,131 @@ async function startServer() {
       } = req.query;
 
       const qTitle = String(title).trim();
-      const params = new URLSearchParams();
+      const requestedLimit = Math.min(500, Math.max(1, Number(limit) || 50));
+      const baseOffset = Math.max(0, Number(offset) || 0);
 
-      if (qTitle) {
-        params.append("title", qTitle);
-        params.append("order[relevance]", "desc");
-      } else {
-        params.append("order[followedCount]", "desc");
-      }
+      const buildParams = (chunkLimit: number, currentOffset: number) => {
+        const params = new URLSearchParams();
+        if (qTitle) {
+          params.append("title", qTitle);
+          params.append("order[relevance]", "desc");
+        } else {
+          params.append("order[followedCount]", "desc");
+        }
 
-      const limitNum = Math.min(50, Math.max(6, Number(limit) || 20));
-      params.append("limit", String(limitNum));
-      params.append("offset", String(offset));
-      params.append("includes[]", "cover_art");
-      params.append("includes[]", "author");
-      params.append("includes[]", "artist");
+        params.append("limit", String(chunkLimit));
+        params.append("offset", String(currentOffset));
+        params.append("includes[]", "cover_art");
+        params.append("includes[]", "author");
+        params.append("includes[]", "artist");
 
-      if (rating === "18plus" || category === "18plus") {
-        params.append("contentRating[]", "erotica");
-        params.append("contentRating[]", "pornographic");
-      } else if (rating === "normal") {
-        params.append("contentRating[]", "safe");
-        params.append("contentRating[]", "suggestive");
-      } else {
-        params.append("contentRating[]", "safe");
-        params.append("contentRating[]", "suggestive");
-        params.append("contentRating[]", "erotica");
-        params.append("contentRating[]", "pornographic");
-      }
+        if (rating === "18plus" || category === "18plus") {
+          params.append("contentRating[]", "erotica");
+          params.append("contentRating[]", "pornographic");
+        } else if (rating === "normal") {
+          params.append("contentRating[]", "safe");
+          params.append("contentRating[]", "suggestive");
+        } else {
+          params.append("contentRating[]", "safe");
+          params.append("contentRating[]", "suggestive");
+          params.append("contentRating[]", "erotica");
+          params.append("contentRating[]", "pornographic");
+        }
 
-      if (origin) {
-        params.append("originalLanguage[]", String(origin));
-      } else if (!qTitle) {
-        if (category === "manhwa") {
-          params.append("originalLanguage[]", "ko");
-        } else if (category === "manhua") {
-          params.append("originalLanguage[]", "zh");
-          params.append("originalLanguage[]", "zh-hk");
-        } else if (category === "manga") {
-          params.append("originalLanguage[]", "ja");
+        if (origin) {
+          params.append("originalLanguage[]", String(origin));
+        } else if (!qTitle) {
+          if (category === "manhwa") {
+            params.append("originalLanguage[]", "ko");
+          } else if (category === "manhua") {
+            params.append("originalLanguage[]", "zh");
+            params.append("originalLanguage[]", "zh-hk");
+          } else if (category === "manga") {
+            params.append("originalLanguage[]", "ja");
+          }
+        }
+        return params;
+      };
+
+      const fetchMangaDexChunk = async (chunkLimit: number, currentOffset: number) => {
+        const params = buildParams(chunkLimit, currentOffset);
+        const mangadexUrl = `https://api.mangadex.org/manga?${params.toString()}`;
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 9000);
+
+        const response = await fetch(mangadexUrl, {
+          signal: controller.signal,
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 AntiTimpa/2.0",
+            "Accept": "application/json",
+          },
+        });
+        clearTimeout(timeout);
+
+        if (!response.ok) {
+          throw new Error(`MangaDex API returned status: ${response.status}`);
+        }
+        return await response.json();
+      };
+
+      // Fetch first batch (up to 100 items)
+      const firstChunkLimit = Math.min(100, requestedLimit);
+      const firstData = await fetchMangaDexChunk(firstChunkLimit, baseOffset);
+
+      let allData = Array.isArray(firstData.data) ? [...firstData.data] : [];
+      const totalAvailable = typeof firstData.total === "number" ? firstData.total : allData.length;
+
+      // If requested limit > 100 and more items exist, fetch subsequent batches
+      if (requestedLimit > 100 && totalAvailable > allData.length && allData.length > 0) {
+        const targetCount = Math.min(requestedLimit, totalAvailable);
+        let currentOffset = baseOffset + allData.length;
+
+        while (allData.length < targetCount && currentOffset < totalAvailable) {
+          const nextChunkLimit = Math.min(100, targetCount - allData.length);
+          try {
+            const nextData = await fetchMangaDexChunk(nextChunkLimit, currentOffset);
+            if (nextData && Array.isArray(nextData.data) && nextData.data.length > 0) {
+              allData.push(...nextData.data);
+              currentOffset += nextData.data.length;
+              if (nextData.data.length < nextChunkLimit) break;
+            } else {
+              break;
+            }
+          } catch (chunkErr) {
+            console.warn("MangaDex subsequent chunk error:", chunkErr);
+            break;
+          }
         }
       }
 
-      const mangadexUrl = `https://api.mangadex.org/manga?${params.toString()}`;
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 8000);
-
-      const response = await fetch(mangadexUrl, {
-        signal: controller.signal,
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 AntiTimpa/2.0",
-          "Accept": "application/json",
-        },
+      res.json({
+        result: "ok",
+        response: "collection",
+        data: allData,
+        limit: requestedLimit,
+        offset: baseOffset,
+        total: totalAvailable,
       });
-      clearTimeout(timeout);
-
-      if (!response.ok) {
-        throw new Error(`MangaDex API returned status: ${response.status}`);
-      }
-
-      const data = await response.json();
-      res.json(data);
     } catch (error: any) {
       console.error("Error fetching from MangaDex proxy:", error.message);
       res.status(500).json({
         error: "Failed to fetch from comic API",
         message: error.message,
+        data: [],
       });
     }
   });
 
-  // API Proxy for fetching chapters of a specific manga from MangaDex
+  // API Proxy for fetching chapters of a specific manga from MangaDex (with high-capacity multi-page support)
   app.get("/api/mangadex/chapters/:mangaId", async (req, res) => {
     try {
       const { mangaId } = req.params;
       const { lang = "" } = req.query;
 
-      const fetchChapters = async (withLangFilter: boolean) => {
+      const fetchChaptersChunk = async (currentOffset: number, withLangFilter: boolean) => {
         const params = new URLSearchParams();
-        params.append("limit", "96");
+        params.append("limit", "100");
+        params.append("offset", String(currentOffset));
         params.append("order[chapter]", "asc");
         params.append("includes[]", "scanlation_group");
 
@@ -826,7 +892,7 @@ async function startServer() {
 
         const url = `https://api.mangadex.org/manga/${mangaId}/feed?${params.toString()}`;
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 7000);
+        const timeout = setTimeout(() => controller.abort(), 8000);
         const response = await fetch(url, {
           signal: controller.signal,
           headers: {
@@ -840,16 +906,39 @@ async function startServer() {
         return await response.json();
       };
 
-      let json = await fetchChapters(Boolean(lang));
-      if (!json || !json.data || json.data.length === 0) {
-        json = await fetchChapters(false);
+      let firstJson = await fetchChaptersChunk(0, Boolean(lang));
+      if (!firstJson || !firstJson.data || firstJson.data.length === 0) {
+        firstJson = await fetchChaptersChunk(0, false);
       }
 
-      if (!json || !json.data) {
+      if (!firstJson || !firstJson.data) {
         return res.json({ chapters: [], total: 0 });
       }
 
-      const rawItems = json.data || [];
+      let rawItems = [...(firstJson.data || [])];
+      const totalChaptersInFeed = typeof firstJson.total === "number" ? firstJson.total : rawItems.length;
+
+      // If more chapters exist, fetch additional pages up to 500 chapters
+      if (totalChaptersInFeed > rawItems.length && rawItems.length > 0) {
+        let currentOffset = rawItems.length;
+        const maxOffset = Math.min(500, totalChaptersInFeed);
+
+        while (currentOffset < maxOffset) {
+          try {
+            const nextJson = await fetchChaptersChunk(currentOffset, Boolean(lang));
+            if (nextJson && Array.isArray(nextJson.data) && nextJson.data.length > 0) {
+              rawItems.push(...nextJson.data);
+              currentOffset += nextJson.data.length;
+              if (nextJson.data.length < 100) break;
+            } else {
+              break;
+            }
+          } catch (e) {
+            break;
+          }
+        }
+      }
+
       const chapterMap = new Map<string, any>();
 
       for (const item of rawItems) {

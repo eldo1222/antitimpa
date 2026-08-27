@@ -5,6 +5,7 @@ import { getComicProjectType, getComicProjectTypeLabel } from '../../utils/comic
 import { formatGoogleDriveEmbedUrl, isGoogleDriveUrl } from '../../utils/driveHelper';
 import { downloadDrivePdf, convertImagesToPdf } from '../../utils/pdfConverter';
 import { getProfessionalComicSkeletonUrl } from '../common/ComicSkeletonBox';
+import { AdminModalPortal } from '../common/AdminModalPortal';
 import { 
   Plus, 
   Trash2, 
@@ -703,7 +704,7 @@ export const AdminChaptersTab: React.FC = () => {
               </div>
 
               {/* Folder Grid Pagination Bar */}
-              {totalFolderPages > 1 && (
+              {filteredComics.length > 0 && (
                 <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-3.5 bg-[#12121a] rounded-2xl border border-[#1f1f2e] shadow-sm text-xs mt-4">
                   <div className="text-slate-400 text-xs">
                     Menampilkan <strong className="text-white">{folderStartIndex + 1}</strong> - <strong className="text-white">{folderEndIndex}</strong> dari <strong className="text-white">{filteredComics.length}</strong> folder komik
@@ -722,66 +723,72 @@ export const AdminChaptersTab: React.FC = () => {
                         <option value={12}>12</option>
                         <option value={24}>24</option>
                         <option value={48}>48</option>
+                        <option value={100}>100</option>
+                        <option value={999999}>Tampilkan Semua (All)</option>
                       </select>
                     </div>
 
                     {/* Pagination Buttons */}
-                    <button
-                      onClick={() => setFolderPage(1)}
-                      disabled={validFolderPage === 1}
-                      className="p-1.5 rounded-lg bg-[#181826] border border-[#252538] text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
-                      title="Halaman Pertama"
-                    >
-                      <ChevronsLeft className="w-3.5 h-3.5" />
-                    </button>
+                    {totalFolderPages > 1 && (
+                      <>
+                        <button
+                          onClick={() => setFolderPage(1)}
+                          disabled={validFolderPage === 1}
+                          className="p-1.5 rounded-lg bg-[#181826] border border-[#252538] text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                          title="Halaman Pertama"
+                        >
+                          <ChevronsLeft className="w-3.5 h-3.5" />
+                        </button>
 
-                    <button
-                      onClick={() => setFolderPage(prev => Math.max(1, prev - 1))}
-                      disabled={validFolderPage === 1}
-                      className="p-1.5 rounded-lg bg-[#181826] border border-[#252538] text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
-                      title="Halaman Sebelumnya"
-                    >
-                      <ChevronLeft className="w-3.5 h-3.5" />
-                    </button>
+                        <button
+                          onClick={() => setFolderPage(prev => Math.max(1, prev - 1))}
+                          disabled={validFolderPage === 1}
+                          className="p-1.5 rounded-lg bg-[#181826] border border-[#252538] text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                          title="Halaman Sebelumnya"
+                        >
+                          <ChevronLeft className="w-3.5 h-3.5" />
+                        </button>
 
-                    {/* Numbered Page Buttons */}
-                    <div className="flex items-center gap-1">
-                      {getPageNumbers(validFolderPage, totalFolderPages).map((p, idx) => (
-                        typeof p === 'number' ? (
-                          <button
-                            key={idx}
-                            onClick={() => setFolderPage(p)}
-                            className={`min-w-[28px] h-7 px-1.5 rounded-lg font-bold text-xs transition-all cursor-pointer ${
-                              validFolderPage === p
-                                ? 'bg-[#ff5b14] text-white shadow-md shadow-[#ff5b14]/20'
-                                : 'bg-[#181826] border border-[#252538] text-slate-400 hover:text-slate-200 hover:bg-[#202032]'
-                            }`}
-                          >
-                            {p}
-                          </button>
-                        ) : (
-                          <span key={idx} className="px-1 text-slate-500 font-bold select-none">...</span>
-                        )
-                      ))}
-                    </div>
+                        {/* Numbered Page Buttons */}
+                        <div className="flex items-center gap-1">
+                          {getPageNumbers(validFolderPage, totalFolderPages).map((p, idx) => (
+                            typeof p === 'number' ? (
+                              <button
+                                key={idx}
+                                onClick={() => setFolderPage(p)}
+                                className={`min-w-[28px] h-7 px-1.5 rounded-lg font-bold text-xs transition-all cursor-pointer ${
+                                  validFolderPage === p
+                                    ? 'bg-[#ff5b14] text-white shadow-md shadow-[#ff5b14]/20'
+                                    : 'bg-[#181826] border border-[#252538] text-slate-400 hover:text-slate-200 hover:bg-[#202032]'
+                                }`}
+                              >
+                                {p}
+                              </button>
+                            ) : (
+                              <span key={idx} className="px-1 text-slate-500 font-bold select-none">...</span>
+                            )
+                          ))}
+                        </div>
 
-                    <button
-                      onClick={() => setFolderPage(prev => Math.min(totalFolderPages, prev + 1))}
-                      disabled={validFolderPage === totalFolderPages}
-                      className="p-1.5 rounded-lg bg-[#181826] border border-[#252538] text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
-                      title="Halaman Berikutnya"
-                    >
-                      <ChevronRight className="w-3.5 h-3.5" />
-                    </button>
+                        <button
+                          onClick={() => setFolderPage(prev => Math.min(totalFolderPages, prev + 1))}
+                          disabled={validFolderPage === totalFolderPages}
+                          className="p-1.5 rounded-lg bg-[#181826] border border-[#252538] text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                          title="Halaman Berikutnya"
+                        >
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
 
-                    <button
-                      onClick={() => setFolderPage(totalFolderPages)}
-                      disabled={validFolderPage === totalFolderPages}
-                      className="p-1.5 rounded-lg bg-[#181826] border border-[#252538] text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
-                      title="Halaman Terakhir"
-                    >
-                      <ChevronsRight className="w-3.5 h-3.5" />
-                    </button>
+                        <button
+                          onClick={() => setFolderPage(totalFolderPages)}
+                          disabled={validFolderPage === totalFolderPages}
+                          className="p-1.5 rounded-lg bg-[#181826] border border-[#252538] text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                          title="Halaman Terakhir"
+                        >
+                          <ChevronsRight className="w-3.5 h-3.5" />
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
               )}
@@ -896,37 +903,39 @@ export const AdminChaptersTab: React.FC = () => {
               Menampilkan: <strong className="text-white">{currentChapters.length}</strong> / {allCurrentChapters.length}
             </div>
           </div>
+        </div>
+      )}
 
-          {/* Batch Action Toolbar for Chapters */}
-          {selectedChapterIds.length > 0 && (
-            <div className="p-3 bg-[#171724] border border-[#ff5b14]/40 rounded-xl flex items-center justify-between gap-3 animate-in fade-in shadow-lg">
-              <div className="flex items-center gap-2 text-xs text-white">
-                <span className="px-2.5 py-1 rounded-lg bg-[#ff5b14] font-extrabold text-white">
-                  {selectedChapterIds.length} Chapter Terpilih
-                </span>
-                <span className="text-slate-400 hidden sm:inline">Pilih tindakan batch:</span>
-              </div>
+      {/* Global Batch Action Toolbar for Chapters (Always Visible in Both Folder & Detail View when Selected) */}
+      {selectedChapterIds.length > 0 && (
+        <div className="p-3 bg-[#171724] border border-[#ff5b14]/50 rounded-xl flex items-center justify-between gap-3 animate-in fade-in shadow-xl sticky top-2 z-30">
+          <div className="flex items-center gap-2 text-xs text-white">
+            <span className="px-2.5 py-1 rounded-lg bg-[#ff5b14] font-extrabold text-white shadow-xs">
+              {selectedChapterIds.length} Chapter Terpilih
+            </span>
+            <span className="text-slate-300 hidden sm:inline font-medium">
+              di komik <strong className="text-white">"{currentComic?.title}"</strong>
+            </span>
+          </div>
 
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={handleRequestBatchDelete}
-                  className="px-3.5 py-1.5 bg-red-600/20 hover:bg-red-600/30 text-red-400 border border-red-500/30 text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer transition-colors"
-                  title="Hapus bab-bab terpilih sekaligus"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>Hapus Banyak ({selectedChapterIds.length})</span>
-                </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleRequestBatchDelete}
+              className="px-3.5 py-1.5 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer transition-all shadow-md active:scale-95"
+              title="Hapus bab-bab terpilih sekaligus"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Hapus Batch ({selectedChapterIds.length})</span>
+            </button>
 
-                <button
-                  onClick={() => setSelectedChapterIds([])}
-                  className="p-1.5 text-slate-400 hover:text-white rounded-lg cursor-pointer"
-                  title="Batalkan Pilihan"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-          )}
+            <button
+              onClick={() => setSelectedChapterIds([])}
+              className="px-2.5 py-1.5 text-slate-400 hover:text-white bg-[#111118] hover:bg-[#1a1a24] rounded-lg text-xs cursor-pointer transition-colors"
+              title="Batalkan Pilihan"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       )}
 
@@ -942,7 +951,7 @@ export const AdminChaptersTab: React.FC = () => {
                     className="text-slate-400 hover:text-white cursor-pointer"
                     title={isAllSelected ? 'Batalkan Pilih Semua' : 'Pilih Semua'}
                   >
-                    {isAllSelected ? <CheckSquare className="w-4 h-4 text-[#ff5b14]" /> : <Square className="w-4 h-4" />}
+                    {isAllSelected ? <CheckSquare className="w-4 h-4 text-[#ff5b14]" /> : <Square className="w-4 h-4 text-slate-400" />}
                   </button>
                 </th>
                 <th className="p-3">Chapter</th>
@@ -950,7 +959,20 @@ export const AdminChaptersTab: React.FC = () => {
                 <th className="p-3">Tipe Sumber</th>
                 <th className="p-3">Halaman / Drive Info</th>
                 <th className="p-3">Tanggal Unggah</th>
-                <th className="p-3 text-right">Aksi</th>
+                <th className="p-3 text-right">
+                  {selectedChapterIds.length > 0 ? (
+                    <button
+                      onClick={handleRequestBatchDelete}
+                      className="px-2.5 py-1 bg-red-600 hover:bg-red-500 text-white rounded-lg text-[11px] font-bold inline-flex items-center gap-1 shadow cursor-pointer transition-all active:scale-95"
+                      title="Hapus bab terpilih"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                      <span>Hapus ({selectedChapterIds.length})</span>
+                    </button>
+                  ) : (
+                    <span>Aksi</span>
+                  )}
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#1b1b28]">
@@ -1058,7 +1080,7 @@ export const AdminChaptersTab: React.FC = () => {
         </div>
 
         {/* Chapter Table Pagination Bar */}
-        {totalChapterPages > 1 && (
+        {currentChapters.length > 0 && (
           <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-3.5 bg-[#161624] border-t border-[#202032] text-xs">
             <div className="text-slate-400 text-xs">
               Menampilkan <strong className="text-white">{chapterStartIndex + 1}</strong> - <strong className="text-white">{chapterEndIndex}</strong> dari <strong className="text-white">{currentChapters.length}</strong> chapter
@@ -1077,66 +1099,74 @@ export const AdminChaptersTab: React.FC = () => {
                   <option value={15}>15</option>
                   <option value={25}>25</option>
                   <option value={50}>50</option>
+                  <option value={100}>100</option>
+                  <option value={250}>250</option>
+                  <option value={500}>500</option>
+                  <option value={999999}>Tampilkan Semua (All)</option>
                 </select>
               </div>
 
               {/* Pagination Buttons */}
-              <button
-                onClick={() => setChapterPage(1)}
-                disabled={validChapterPage === 1}
-                className="p-1.5 rounded-lg bg-[#181826] border border-[#252538] text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
-                title="Halaman Pertama"
-              >
-                <ChevronsLeft className="w-3.5 h-3.5" />
-              </button>
+              {totalChapterPages > 1 && (
+                <>
+                  <button
+                    onClick={() => setChapterPage(1)}
+                    disabled={validChapterPage === 1}
+                    className="p-1.5 rounded-lg bg-[#181826] border border-[#252538] text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                    title="Halaman Pertama"
+                  >
+                    <ChevronsLeft className="w-3.5 h-3.5" />
+                  </button>
 
-              <button
-                onClick={() => setChapterPage(prev => Math.max(1, prev - 1))}
-                disabled={validChapterPage === 1}
-                className="p-1.5 rounded-lg bg-[#181826] border border-[#252538] text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
-                title="Halaman Sebelumnya"
-              >
-                <ChevronLeft className="w-3.5 h-3.5" />
-              </button>
+                  <button
+                    onClick={() => setChapterPage(prev => Math.max(1, prev - 1))}
+                    disabled={validChapterPage === 1}
+                    className="p-1.5 rounded-lg bg-[#181826] border border-[#252538] text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                    title="Halaman Sebelumnya"
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                  </button>
 
-              {/* Numbered Page Buttons */}
-              <div className="flex items-center gap-1">
-                {getPageNumbers(validChapterPage, totalChapterPages).map((p, idx) => (
-                  typeof p === 'number' ? (
-                    <button
-                      key={idx}
-                      onClick={() => setChapterPage(p)}
-                      className={`min-w-[28px] h-7 px-1.5 rounded-lg font-bold text-xs transition-all cursor-pointer ${
-                        validChapterPage === p
-                          ? 'bg-[#ff5b14] text-white shadow-md shadow-[#ff5b14]/20'
-                          : 'bg-[#181826] border border-[#252538] text-slate-400 hover:text-slate-200 hover:bg-[#202032]'
-                      }`}
-                    >
-                      {p}
-                    </button>
-                  ) : (
-                    <span key={idx} className="px-1 text-slate-500 font-bold select-none">...</span>
-                  )
-                ))}
-              </div>
+                  {/* Numbered Page Buttons */}
+                  <div className="flex items-center gap-1">
+                    {getPageNumbers(validChapterPage, totalChapterPages).map((p, idx) => (
+                      typeof p === 'number' ? (
+                        <button
+                          key={idx}
+                          onClick={() => setChapterPage(p)}
+                          className={`min-w-[28px] h-7 px-1.5 rounded-lg font-bold text-xs transition-all cursor-pointer ${
+                            validChapterPage === p
+                              ? 'bg-[#ff5b14] text-white shadow-md shadow-[#ff5b14]/20'
+                              : 'bg-[#181826] border border-[#252538] text-slate-400 hover:text-slate-200 hover:bg-[#202032]'
+                          }`}
+                        >
+                          {p}
+                        </button>
+                      ) : (
+                        <span key={idx} className="px-1 text-slate-500 font-bold select-none">...</span>
+                      )
+                    ))}
+                  </div>
 
-              <button
-                onClick={() => setChapterPage(prev => Math.min(totalChapterPages, prev + 1))}
-                disabled={validChapterPage === totalChapterPages}
-                className="p-1.5 rounded-lg bg-[#181826] border border-[#252538] text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
-                title="Halaman Berikutnya"
-              >
-                <ChevronRight className="w-3.5 h-3.5" />
-              </button>
+                  <button
+                    onClick={() => setChapterPage(prev => Math.min(totalChapterPages, prev + 1))}
+                    disabled={validChapterPage === totalChapterPages}
+                    className="p-1.5 rounded-lg bg-[#181826] border border-[#252538] text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                    title="Halaman Berikutnya"
+                  >
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
 
-              <button
-                onClick={() => setChapterPage(totalChapterPages)}
-                disabled={validChapterPage === totalChapterPages}
-                className="p-1.5 rounded-lg bg-[#181826] border border-[#252538] text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
-                title="Halaman Terakhir"
-              >
-                <ChevronsRight className="w-3.5 h-3.5" />
-              </button>
+                  <button
+                    onClick={() => setChapterPage(totalChapterPages)}
+                    disabled={validChapterPage === totalChapterPages}
+                    className="p-1.5 rounded-lg bg-[#181826] border border-[#252538] text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                    title="Halaman Terakhir"
+                  >
+                    <ChevronsRight className="w-3.5 h-3.5" />
+                  </button>
+                </>
+              )}
             </div>
           </div>
         )}
@@ -1151,27 +1181,26 @@ export const AdminChaptersTab: React.FC = () => {
       )}
 
       {/* Upload / Edit Chapter Modal */}
-      {showAddModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-xl bg-[#12121a] border border-[#262638] rounded-2xl p-5 text-slate-200 space-y-4 max-h-[90vh] overflow-y-auto shadow-2xl">
-            <div className="flex items-center justify-between pb-3 border-b border-[#202030]">
-              <div className="flex items-center gap-2">
-                <div className="w-7 h-7 rounded-lg bg-[#ff5b14]/20 text-[#ff5b14] flex items-center justify-center font-bold">
-                  {editingChapter ? <Edit className="w-4 h-4" /> : <UploadCloud className="w-4 h-4" />}
-                </div>
-                <h3 className="font-extrabold text-sm text-white">
-                  {editingChapter ? `Edit Chapter #${chapterNumber}` : `Upload Chapter Baru — ${currentComic?.title}`}
-                </h3>
+      <AdminModalPortal isOpen={showAddModal} onClose={() => setShowAddModal(false)} maxWidth="max-w-xl">
+        <div className="w-full bg-[#12121a] border border-[#262638] rounded-2xl p-5 text-slate-200 space-y-4 max-h-[90vh] overflow-y-auto shadow-2xl">
+          <div className="flex items-center justify-between pb-3 border-b border-[#202030]">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-lg bg-[#ff5b14]/20 text-[#ff5b14] flex items-center justify-center font-bold">
+                {editingChapter ? <Edit className="w-4 h-4" /> : <UploadCloud className="w-4 h-4" />}
               </div>
-              <button
-                onClick={() => setShowAddModal(false)}
-                className="p-1 text-slate-400 hover:text-white rounded-lg"
-              >
-                <X className="w-4 h-4" />
-              </button>
+              <h3 className="font-extrabold text-sm text-white">
+                {editingChapter ? `Edit Chapter #${chapterNumber}` : `Upload Chapter Baru — ${currentComic?.title}`}
+              </h3>
             </div>
+            <button
+              onClick={() => setShowAddModal(false)}
+              className="p-1 text-slate-400 hover:text-white rounded-lg cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
 
-            <form onSubmit={handleSubmit} className="space-y-4 text-xs">
+          <form onSubmit={handleSubmit} className="space-y-4 text-xs">
               {/* Basic Chapter Metadata */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
@@ -1620,81 +1649,79 @@ export const AdminChaptersTab: React.FC = () => {
               </div>
             </form>
           </div>
-        </div>
-      )}
+      </AdminModalPortal>
+
       {/* Chapter Custom Delete Confirmation Modal with Audit Reason (ISO/IEC 27001) */}
-      {showDeleteConfirmModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
-          <div className="w-full max-w-md bg-[#12121a] border border-red-500/30 rounded-2xl p-5 text-slate-200 space-y-4 shadow-2xl">
-            <div className="flex items-center justify-between pb-3 border-b border-[#202030]">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-xl bg-red-500/10 border border-red-500/30 flex items-center justify-center text-red-400">
-                  <Trash2 className="w-4 h-4" />
-                </div>
-                <div>
-                  <h3 className="font-extrabold text-sm text-white">Konfirmasi Hapus Chapter (Audit Trail)</h3>
-                  <p className="text-[10px] text-slate-400">Pencatatan Alasan &amp; Verifikasi Super Admin</p>
-                </div>
+      <AdminModalPortal isOpen={showDeleteConfirmModal} onClose={() => setShowDeleteConfirmModal(false)} maxWidth="max-w-md">
+        <div className="w-full bg-[#12121a] border border-red-500/30 rounded-2xl p-5 text-slate-200 space-y-4 shadow-2xl">
+          <div className="flex items-center justify-between pb-3 border-b border-[#202030]">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-xl bg-red-500/10 border border-red-500/30 flex items-center justify-center text-red-400">
+                <Trash2 className="w-4 h-4" />
               </div>
-              <button 
-                onClick={() => setShowDeleteConfirmModal(false)} 
-                className="p-1 text-slate-400 hover:text-white rounded-lg cursor-pointer"
+              <div>
+                <h3 className="font-extrabold text-sm text-white">Konfirmasi Hapus Chapter (Audit Trail)</h3>
+                <p className="text-[10px] text-slate-400">Pencatatan Alasan &amp; Verifikasi Super Admin</p>
+              </div>
+            </div>
+            <button 
+              onClick={() => setShowDeleteConfirmModal(false)} 
+              className="p-1 text-slate-400 hover:text-white rounded-lg cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          <div className="p-3 bg-red-500/10 rounded-xl border border-red-500/25 text-xs text-red-200 space-y-1.5">
+            <p className="font-bold flex items-center gap-1.5 text-red-400">
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+              {chaptersToDelete.length === 1 
+                ? `Hapus Chapter #${chaptersToDelete[0]?.chapterNumber}: "${chaptersToDelete[0]?.title}"` 
+                : `Hapus Massal ${chaptersToDelete.length} Chapter Terpilih`}
+            </p>
+            <div className="max-h-24 overflow-y-auto space-y-0.5 text-[11px] text-red-200/90 pl-1 font-mono">
+              {chaptersToDelete.map((ch, idx) => (
+                <p key={`${ch.id || ch.chapterNumber}-${idx}`} className="truncate">• Ch #{ch.chapterNumber} — {ch.title}</p>
+              ))}
+            </div>
+            <p className="text-[10px] text-red-300/80 pt-1">
+              ⚠️ Halaman gambar atau embed drive terkait chapter ini akan dihapus permanen dari basis data.
+            </p>
+          </div>
+
+          <form onSubmit={handleConfirmDeleteChapters} className="space-y-3 text-xs">
+            <div>
+              <label className="block text-slate-400 mb-1 font-semibold">
+                Alasan Penghapusan (Masuk ke Log Aktivitas):
+              </label>
+              <input
+                type="text"
+                value={deleteReason}
+                onChange={(e) => setDeleteReason(e.target.value)}
+                placeholder="Contoh: Perbaikan halaman rusak / update versi chapter..."
+                className="w-full p-2 bg-[#181824] border border-[#27273a] rounded-xl text-white text-xs focus:outline-none focus:border-[#ff5b14]"
+              />
+            </div>
+
+            <div className="pt-2 flex items-center justify-end gap-2 border-t border-[#1f1f2e]">
+              <button
+                type="button"
+                onClick={() => setShowDeleteConfirmModal(false)}
+                className="px-3.5 py-2 rounded-xl text-xs text-slate-400 hover:text-white bg-[#181824] cursor-pointer"
               >
-                <X className="w-4 h-4" />
+                Batal
+              </button>
+              <button
+                type="submit"
+                className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-md cursor-pointer transition-all active:scale-95"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Konfirmasi Hapus ({chaptersToDelete.length})</span>
               </button>
             </div>
-
-            <div className="p-3 bg-red-500/10 rounded-xl border border-red-500/25 text-xs text-red-200 space-y-1.5">
-              <p className="font-bold flex items-center gap-1.5 text-red-400">
-                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                {chaptersToDelete.length === 1 
-                  ? `Hapus Chapter #${chaptersToDelete[0]?.chapterNumber}: "${chaptersToDelete[0]?.title}"` 
-                  : `Hapus Massal ${chaptersToDelete.length} Chapter Terpilih`}
-              </p>
-              <div className="max-h-24 overflow-y-auto space-y-0.5 text-[11px] text-red-200/90 pl-1 font-mono">
-                {chaptersToDelete.map((ch, idx) => (
-                  <p key={`${ch.id || ch.chapterNumber}-${idx}`} className="truncate">• Ch #{ch.chapterNumber} — {ch.title}</p>
-                ))}
-              </div>
-              <p className="text-[10px] text-red-300/80 pt-1">
-                ⚠️ Halaman gambar atau embed drive terkait chapter ini akan dihapus permanen dari basis data.
-              </p>
-            </div>
-
-            <form onSubmit={handleConfirmDeleteChapters} className="space-y-3 text-xs">
-              <div>
-                <label className="block text-slate-400 mb-1 font-semibold">
-                  Alasan Penghapusan (Masuk ke Log Aktivitas):
-                </label>
-                <input
-                  type="text"
-                  value={deleteReason}
-                  onChange={(e) => setDeleteReason(e.target.value)}
-                  placeholder="Contoh: Perbaikan halaman rusak / update versi chapter..."
-                  className="w-full p-2 bg-[#181824] border border-[#27273a] rounded-xl text-white text-xs focus:outline-none focus:border-[#ff5b14]"
-                />
-              </div>
-
-              <div className="pt-2 flex items-center justify-end gap-2 border-t border-[#1f1f2e]">
-                <button
-                  type="button"
-                  onClick={() => setShowDeleteConfirmModal(false)}
-                  className="px-3.5 py-2 rounded-xl text-xs text-slate-400 hover:text-white bg-[#181824] cursor-pointer"
-                >
-                  Batal
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-md cursor-pointer transition-all active:scale-95"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>Konfirmasi Hapus ({chaptersToDelete.length})</span>
-                </button>
-              </div>
-            </form>
-          </div>
+          </form>
         </div>
-      )}
+      </AdminModalPortal>
     </div>
   );
 };
