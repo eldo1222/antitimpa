@@ -35,7 +35,10 @@ import {
   isSupabaseConfigured, 
   saveCustomSupabaseConfig, 
   clearCustomSupabaseConfig,
-  getSupabaseClient
+  getSupabaseClient,
+  testSupabaseConnection,
+  formatSupabaseUrl,
+  formatSupabaseKey
 } from '../../lib/supabase';
 import { SupabaseService } from '../../services/supabaseService';
 
@@ -52,7 +55,8 @@ export const AdminDatabaseTab: React.FC = () => {
     activityLogs, 
     systemSettings,
     cleanOrphanData,
-    showAdminToast
+    showAdminToast,
+    updateSettings
   } = useApp();
 
   const [activeSubTab, setActiveSubTab] = useState<DatabaseTabMode>('supabase');
@@ -80,85 +84,87 @@ export const AdminDatabaseTab: React.FC = () => {
   const [isCleaning, setIsCleaning] = useState(false);
   const [cleanResult, setCleanResult] = useState<{ deletedChapters: number; deletedComments: number; deletedBanners: number } | null>(null);
 
-  // Load Supabase credentials on mount
+  // Load Supabase credentials on mount and keep in sync with cloud settings
   useEffect(() => {
     const creds = getSupabaseCredentials();
-    setSupabaseUrlInput(creds.url);
-    setSupabaseKeyInput(creds.anonKey);
-    setIsConfigured(isSupabaseConfigured());
-  }, []);
+    const activeUrl = creds.url || systemSettings?.supabaseUrl || '';
+    const activeKey = creds.anonKey || systemSettings?.supabaseAnonKey || '';
+    setSupabaseUrlInput(activeUrl);
+    setSupabaseKeyInput(activeKey);
+    setIsConfigured(Boolean(activeUrl && activeKey && activeUrl.startsWith('http')));
+  }, [systemSettings?.supabaseUrl, systemSettings?.supabaseAnonKey]);
 
-  const handleSaveSupabaseConfig = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!supabaseUrlInput.trim() || !supabaseKeyInput.trim()) {
+  const handleSaveSupabaseConfig = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const cleanUrl = formatSupabaseUrl(supabaseUrlInput);
+    const cleanKey = formatSupabaseKey(supabaseKeyInput);
+
+    if (!cleanUrl || !cleanKey) {
       alert('Silakan masukkan Supabase Project URL dan Anon Key dengan benar.');
       return;
     }
-    saveCustomSupabaseConfig(supabaseUrlInput, supabaseKeyInput);
+
+    // 1. Simpan di local storage
+    saveCustomSupabaseConfig(cleanUrl, cleanKey, true);
+    setSupabaseUrlInput(cleanUrl);
+    setSupabaseKeyInput(cleanKey);
     setIsConfigured(true);
-    setPingStatus(null);
-    showAdminToast('Konfigurasi Disimpan', 'Kredensial Supabase berhasil disimpan.', 'success');
+
+    // 2. Simpan ke Firestore SystemSettings agar tersinkronisasi otomatis ke Netlify / semua perangkat
+    updateSettings({
+      supabaseUrl: cleanUrl,
+      supabaseAnonKey: cleanKey
+    });
+
+    showAdminToast('Konfigurasi Disimpan', 'Kredensial Supabase berhasil disimpan dan disinkronkan ke cloud.', 'success');
+
+    // 3. Test ping otomatis
+    setIsTestingPing(true);
+    const result = await testSupabaseConnection(cleanUrl, cleanKey);
+    setIsTestingPing(false);
+    setPingStatus(result);
+
+    // 4. Fetch database jika sukses
+    if (result.success) {
+      SupabaseService.fetchFullDatabase().catch(() => {});
+    }
   };
 
   const handleResetSupabaseConfig = () => {
     if (!window.confirm('Reset konfigurasi Supabase ke default environment?')) return;
     clearCustomSupabaseConfig();
-    const creds = getSupabaseCredentials();
-    setSupabaseUrlInput(creds.url);
-    setSupabaseKeyInput(creds.anonKey);
-    setIsConfigured(isSupabaseConfigured());
+    updateSettings({
+      supabaseUrl: '',
+      supabaseAnonKey: ''
+    });
+    setSupabaseUrlInput('');
+    setSupabaseKeyInput('');
+    setIsConfigured(false);
     setPingStatus(null);
     showAdminToast('Konfigurasi Direset', 'Kredensial Supabase telah dibersihkan.', 'info');
   };
 
   const handleTestPing = async () => {
-    setIsTestingPing(true);
-    setPingStatus(null);
-    const start = performance.now();
-    try {
-      const client = getSupabaseClient();
-      if (!client) {
-        setPingStatus({
-          success: false,
-          message: 'Client Supabase gagal diinisialisasi. Periksa URL dan Anon Key.'
-        });
-        setIsTestingPing(false);
-        return;
-      }
+    const cleanUrl = formatSupabaseUrl(supabaseUrlInput);
+    const cleanKey = formatSupabaseKey(supabaseKeyInput);
 
-      // Query table test
-      const { data, error } = await client.from('comics').select('id').limit(1);
-      const latency = Math.round(performance.now() - start);
-
-      if (error) {
-        // If table doesn't exist yet, explain SQL schema needs to be run
-        if (error.code === '42P01' || error.message.includes('relation') || error.message.includes('does not exist')) {
-          setPingStatus({
-            success: false,
-            message: `Terhubung ke server Supabase (${latency}ms), namun tabel 'comics' belum dibuat. Silakan salin & jalankan kode SQL Schema di SQL Editor Supabase.`,
-            latency
-          });
-        } else {
-          setPingStatus({
-            success: false,
-            message: `Koneksi ditolak: ${error.message} (Code: ${error.code})`,
-            latency
-          });
-        }
-      } else {
-        setPingStatus({
-          success: true,
-          message: `Koneksi Supabase Sukses! Database PostgreSQL siap digunakan tanpa batas kuota harian.`,
-          latency
-        });
-      }
-    } catch (err: any) {
-      const latency = Math.round(performance.now() - start);
+    if (!cleanUrl || !cleanKey) {
       setPingStatus({
         success: false,
-        message: `Gagal menghubungkan ke Supabase: ${err.message || err}`,
-        latency
+        message: 'Supabase URL atau Anon Key belum diisi. Silakan masukkan Project URL & Anon Key di formulir di bawah.'
       });
+      return;
+    }
+
+    setIsTestingPing(true);
+    setPingStatus(null);
+    try {
+      const result = await testSupabaseConnection(cleanUrl, cleanKey);
+      setPingStatus(result);
+      if (result.success) {
+        saveCustomSupabaseConfig(cleanUrl, cleanKey, true);
+        setIsConfigured(true);
+      }
     } finally {
       setIsTestingPing(false);
     }
@@ -720,6 +726,19 @@ CREATE POLICY "Allow anon insert system_settings" ON public.system_settings FOR 
                   </div>
                 </div>
               )}
+
+              {/* Netlify & Production Tip */}
+              <div className="p-3 bg-[#181826] border border-[#2b2b3f] rounded-xl text-[11px] text-slate-400 space-y-1">
+                <div className="flex items-center gap-1.5 font-bold text-slate-300 text-xs">
+                  <span>🚀 Info Sinkronisasi Netlify & Hosting</span>
+                </div>
+                <p className="leading-relaxed">
+                  Setelah Anda mengklik <strong>"Simpan Kredensial"</strong>, konfigurasi Supabase otomatis tersimpan ke Cloud Firestore sehingga web yang sudah di-deploy ke <strong>Netlify</strong> langsung terhubung ke database Supabase tanpa harus build ulang.
+                </p>
+                <p className="text-[10px] text-slate-500 pt-0.5">
+                  Opsional: Anda juga dapat memasukkan <code className="text-emerald-400 font-mono">VITE_SUPABASE_URL</code> dan <code className="text-emerald-400 font-mono">VITE_SUPABASE_ANON_KEY</code> di menu <em>Netlify &gt; Site settings &gt; Environment variables</em>.
+                </p>
+              </div>
             </div>
 
             {/* SQL Schema Step Assistant Box */}

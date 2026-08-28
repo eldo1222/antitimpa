@@ -1,4 +1,4 @@
-import { getSupabaseClient, isSupabaseConfigured } from '../lib/supabase';
+import { getSupabaseClient, isSupabaseConfigured, getSupabaseCredentials } from '../lib/supabase';
 import { 
   Comic, 
   Chapter, 
@@ -204,7 +204,9 @@ export class SupabaseService {
           siteName: settingsData.site_name || 'AntiTimpa',
           siteAnnouncement: settingsData.announcement || '',
           maxLoginAttempts: 5,
-          maintenanceMode: Boolean(settingsData.maintenance_mode)
+          maintenanceMode: Boolean(settingsData.maintenance_mode),
+          supabaseUrl: getSupabaseCredentials().url,
+          supabaseAnonKey: getSupabaseCredentials().anonKey
         };
       }
 

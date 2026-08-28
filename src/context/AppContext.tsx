@@ -63,7 +63,7 @@ import {
   saveSettingsToFirestore
 } from '../services/firestoreService';
 import { SupabaseService } from '../services/supabaseService';
-import { isSupabaseConfigured } from '../lib/supabase';
+import { isSupabaseConfigured, saveCustomSupabaseConfig } from '../lib/supabase';
 import { centralSync } from '../services/centralSyncService';
 import { auth, db, googleProvider } from '../lib/firebase';
 import { signInWithPopup, signOut } from 'firebase/auth';
@@ -613,6 +613,27 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       onSettings: (remoteSettings) => {
         if (remoteSettings) {
           setSystemSettings(remoteSettings);
+          if (remoteSettings.supabaseUrl && remoteSettings.supabaseAnonKey) {
+            saveCustomSupabaseConfig(remoteSettings.supabaseUrl, remoteSettings.supabaseAnonKey, true);
+            SupabaseService.fetchFullDatabase().then(supabaseData => {
+              if (supabaseData) {
+                if (supabaseData.comics && supabaseData.comics.length > 0) {
+                  setComics(deduplicateById(supabaseData.comics));
+                }
+                if (supabaseData.chapters && Object.keys(supabaseData.chapters).length > 0) {
+                  setChapters(sanitizeChaptersMap(supabaseData.chapters));
+                }
+                if (supabaseData.users && supabaseData.users.length > 0) {
+                  setUsers(supabaseData.users);
+                }
+                if (supabaseData.banners && supabaseData.banners.length > 0) {
+                  setBanners(supabaseData.banners);
+                }
+              }
+            }).catch(e => {
+              console.warn('[Supabase] Background sync on settings notice:', e);
+            });
+          }
         }
       },
       onAds: (remoteAds) => {

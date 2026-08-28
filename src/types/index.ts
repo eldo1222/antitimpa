@@ -348,6 +348,8 @@ export interface SystemSettings {
   defaultComicSorting?: 'newest' | 'popular' | 'alpha';
   defaultReaderMode?: 'vertical' | 'single';
   ageGating18Plus?: boolean;
+  supabaseUrl?: string;
+  supabaseAnonKey?: string;
   price5kTitle?: string;
   price15kTitle?: string;
   adminNotifications?: {
