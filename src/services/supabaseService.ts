@@ -17,11 +17,11 @@ import {
  * Translates between TypeScript camelCase models and PostgreSQL snake_case columns.
  */
 
-function mapComicToDb(c: Partial<Comic>): Record<string, any> {
+export function mapComicToDb(c: Partial<Comic>): Record<string, any> {
   const row: Record<string, any> = {};
   if (c.id !== undefined) row.id = c.id;
   if (c.title !== undefined) row.title = c.title;
-  if (c.slug !== undefined) row.slug = c.slug;
+  if (c.slug !== undefined) row.slug = c.slug || c.title?.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
   if (c.coverImage !== undefined) row.cover_image = c.coverImage;
   if (c.bannerImage !== undefined) row.banner_image = c.bannerImage;
   if (c.synopsis !== undefined) row.synopsis = c.synopsis;
@@ -45,7 +45,7 @@ function mapComicToDb(c: Partial<Comic>): Record<string, any> {
   return row;
 }
 
-function mapDbToComic(row: Record<string, any>): Comic {
+export function mapDbToComic(row: Record<string, any>): Comic {
   return {
     id: row.id,
     title: row.title || '',
@@ -73,7 +73,7 @@ function mapDbToComic(row: Record<string, any>): Comic {
   };
 }
 
-function mapChapterToDb(ch: Partial<Chapter> & { parentComicId?: string }): Record<string, any> {
+export function mapChapterToDb(ch: Partial<Chapter> & { parentComicId?: string }): Record<string, any> {
   const row: Record<string, any> = {};
   if (ch.id !== undefined) row.id = ch.id;
   if (ch.comicId !== undefined || ch.parentComicId !== undefined) {
@@ -94,7 +94,7 @@ function mapChapterToDb(ch: Partial<Chapter> & { parentComicId?: string }): Reco
   return row;
 }
 
-function mapDbToChapter(row: Record<string, any>): Chapter {
+export function mapDbToChapter(row: Record<string, any>): Chapter {
   return {
     id: row.id,
     comicId: row.comic_id || '',
@@ -111,6 +111,87 @@ function mapDbToChapter(row: Record<string, any>): Chapter {
     createdAt: row.created_at || new Date().toISOString(),
     updatedAt: row.updated_at || new Date().toISOString()
   };
+}
+
+export function mapUserToDb(u: Partial<User>): Record<string, any> {
+  const row: Record<string, any> = {};
+  if (u.id !== undefined) row.id = u.id;
+  if (u.username !== undefined) row.username = u.username;
+  if (u.email !== undefined) {
+    row.email = u.email || `${(u.username || 'user').toLowerCase()}@antitimpa.id`;
+  } else if (u.username) {
+    row.email = `${u.username.toLowerCase()}@antitimpa.id`;
+  }
+  if (u.passwordHash !== undefined) row.password_hash = u.passwordHash;
+  if (u.role !== undefined) row.role = u.role;
+  if (u.planType !== undefined || u.tier !== undefined) {
+    row.package_type = u.planType === 'plan_15k_all' || u.tier === 'Premium' ? 'vip' : 'free';
+  }
+  if (u.avatar !== undefined || u.photoURL !== undefined) {
+    row.avatar = u.avatar || u.photoURL;
+  }
+  if (u.status !== undefined) {
+    row.is_active = u.status === 'active';
+  }
+  if (u.createdAt !== undefined) row.created_at = u.createdAt;
+  row.updated_at = new Date().toISOString();
+  return row;
+}
+
+export function mapDbToUser(u: Record<string, any>): User {
+  return {
+    id: u.id,
+    username: u.username || 'user',
+    email: u.email || '',
+    passwordHash: u.password_hash || '',
+    role: u.role || 'reader',
+    status: (u.is_active === false ? 'inactive' : 'active'),
+    avatar: u.avatar || '',
+    photoURL: u.avatar || '',
+    tier: u.role === 'admin' ? 'Premium' : (u.package_type === 'vip' ? 'Premium' : 'Free Tier'),
+    planType: (u.package_type === 'vip' ? 'plan_15k_all' : 'plan_5k_single'),
+    accessType: (u.package_type === 'vip' ? 'all' : 'specific'),
+    durationType: 'unlimited',
+    failedAttempts: 0,
+    createdAt: u.created_at || new Date().toISOString()
+  };
+}
+
+export function mapBannerToDb(b: Partial<Banner>): Record<string, any> {
+  const row: Record<string, any> = {};
+  if (b.id !== undefined) row.id = b.id;
+  if (b.title !== undefined) row.title = b.title;
+  if (b.imageUrl !== undefined) row.image_url = b.imageUrl;
+  if (b.targetComicId !== undefined) row.comic_id = b.targetComicId;
+  if (b.isActive !== undefined) row.is_active = b.isActive;
+  if (b.order !== undefined) row.order_index = b.order;
+  row.created_at = new Date().toISOString();
+  return row;
+}
+
+export function mapDbToBanner(b: Record<string, any>): Banner {
+  return {
+    id: b.id,
+    title: b.title || '',
+    subtitle: b.subtitle || 'Komik Populer Terupdate',
+    imageUrl: b.image_url || '',
+    targetComicId: b.comic_id || undefined,
+    isActive: b.is_active !== false,
+    order: b.order_index || 0
+  };
+}
+
+export function mapSettingsToDb(s: Partial<SystemSettings>): Record<string, any> {
+  const row: Record<string, any> = {
+    id: 'global_config',
+    updated_at: new Date().toISOString()
+  };
+  if (s.siteName !== undefined) row.site_name = s.siteName;
+  if (s.siteAnnouncement !== undefined) row.announcement = s.siteAnnouncement;
+  if (s.maintenanceMode !== undefined) row.maintenance_mode = s.maintenanceMode;
+  if (s.siteLogo !== undefined) row.site_logo = s.siteLogo;
+  if (s.siteFavicon !== undefined) row.site_favicon = s.siteFavicon;
+  return row;
 }
 
 export class SupabaseService {
@@ -162,18 +243,7 @@ export class SupabaseService {
         .from('users')
         .select('*');
 
-      const users: User[] = (usersData || []).map(u => ({
-        id: u.id,
-        username: u.username || 'user',
-        email: u.email || '',
-        passwordHash: u.password_hash || '',
-        role: u.role || 'reader',
-        status: (u.is_active === false ? 'inactive' : 'active'),
-        avatar: u.avatar || '',
-        tier: u.role === 'admin' ? 'Premium' : 'Free Tier',
-        planType: (u.package_type === 'vip' ? 'plan_15k_all' : 'plan_5k_single'),
-        createdAt: u.created_at || new Date().toISOString()
-      }));
+      const users: User[] = (usersData || []).map(mapDbToUser);
 
       // 4. Fetch Banners
       const { data: bannersData } = await client
@@ -181,15 +251,7 @@ export class SupabaseService {
         .select('*')
         .order('order_index', { ascending: true });
 
-      const banners: Banner[] = (bannersData || []).map(b => ({
-        id: b.id,
-        title: b.title || '',
-        subtitle: b.subtitle || 'Komik Populer Terupdate',
-        imageUrl: b.image_url || '',
-        targetComicId: b.comic_id || undefined,
-        isActive: b.is_active !== false,
-        order: b.order_index || 0
-      }));
+      const banners: Banner[] = (bannersData || []).map(mapDbToBanner);
 
       // 5. Fetch Settings
       const { data: settingsData } = await client
@@ -205,6 +267,8 @@ export class SupabaseService {
           siteAnnouncement: settingsData.announcement || '',
           maxLoginAttempts: 5,
           maintenanceMode: Boolean(settingsData.maintenance_mode),
+          siteLogo: settingsData.site_logo || undefined,
+          siteFavicon: settingsData.site_favicon || undefined,
           supabaseUrl: getSupabaseCredentials().url,
           supabaseAnonKey: getSupabaseCredentials().anonKey
         };
@@ -262,13 +326,30 @@ export class SupabaseService {
   }
 
   /**
-   * Delete Comic
+   * Delete Single Comic
    */
   public static async deleteComic(comicId: string): Promise<boolean> {
     const client = getSupabaseClient();
     if (!client) return false;
     try {
+      // Chapters will cascade delete if foreign key cascade exists, but we also delete explicitly
+      await client.from('chapters').delete().eq('comic_id', comicId);
       const { error } = await client.from('comics').delete().eq('id', comicId);
+      return !error;
+    } catch (err) {
+      return false;
+    }
+  }
+
+  /**
+   * Batch Delete Comics
+   */
+  public static async batchDeleteComics(comicIds: string[]): Promise<boolean> {
+    const client = getSupabaseClient();
+    if (!client || comicIds.length === 0) return false;
+    try {
+      await client.from('chapters').delete().in('comic_id', comicIds);
+      const { error } = await client.from('comics').delete().in('id', comicIds);
       return !error;
     } catch (err) {
       return false;
@@ -312,7 +393,7 @@ export class SupabaseService {
   }
 
   /**
-   * Delete Chapter
+   * Delete Single Chapter
    */
   public static async deleteChapter(chapterId: string): Promise<boolean> {
     const client = getSupabaseClient();
@@ -322,6 +403,189 @@ export class SupabaseService {
       return !error;
     } catch (err) {
       return false;
+    }
+  }
+
+  /**
+   * Batch Delete Chapters
+   */
+  public static async batchDeleteChapters(chapterIds: string[]): Promise<boolean> {
+    const client = getSupabaseClient();
+    if (!client || chapterIds.length === 0) return false;
+    try {
+      const { error } = await client.from('chapters').delete().in('id', chapterIds);
+      return !error;
+    } catch (err) {
+      return false;
+    }
+  }
+
+  /**
+   * Save / Upsert Single Banner
+   */
+  public static async saveBanner(banner: Banner): Promise<boolean> {
+    const client = getSupabaseClient();
+    if (!client) return false;
+    try {
+      const row = mapBannerToDb(banner);
+      const { error } = await client.from('banners').upsert(row, { onConflict: 'id' });
+      if (error) throw error;
+      return true;
+    } catch (err) {
+      console.warn('[SupabaseService] saveBanner error:', err);
+      return false;
+    }
+  }
+
+  /**
+   * Delete Banner
+   */
+  public static async deleteBanner(bannerId: string): Promise<boolean> {
+    const client = getSupabaseClient();
+    if (!client) return false;
+    try {
+      const { error } = await client.from('banners').delete().eq('id', bannerId);
+      return !error;
+    } catch (err) {
+      return false;
+    }
+  }
+
+  /**
+   * Save / Upsert User
+   */
+  public static async saveUser(user: User): Promise<boolean> {
+    const client = getSupabaseClient();
+    if (!client) return false;
+    try {
+      const row = mapUserToDb(user);
+      const { error } = await client.from('users').upsert(row, { onConflict: 'id' });
+      if (error) throw error;
+      return true;
+    } catch (err) {
+      console.warn('[SupabaseService] saveUser error:', err);
+      return false;
+    }
+  }
+
+  /**
+   * Delete User
+   */
+  public static async deleteUser(userId: string): Promise<boolean> {
+    const client = getSupabaseClient();
+    if (!client) return false;
+    try {
+      const { error } = await client.from('users').delete().eq('id', userId);
+      return !error;
+    } catch (err) {
+      return false;
+    }
+  }
+
+  /**
+   * Save System Settings
+   */
+  public static async saveSettings(settings: SystemSettings): Promise<boolean> {
+    const client = getSupabaseClient();
+    if (!client) return false;
+    try {
+      const row = mapSettingsToDb(settings);
+      const { error } = await client.from('system_settings').upsert(row, { onConflict: 'id' });
+      if (error) throw error;
+      return true;
+    } catch (err) {
+      console.warn('[SupabaseService] saveSettings error:', err);
+      return false;
+    }
+  }
+
+  /**
+   * Realtime Multi-Device Live Broadcast Channel
+   * Subscribes to PostgreSQL database changes on all tables.
+   */
+  public static subscribeToSupabase(callbacks: {
+    onComicChange?: (eventType: 'INSERT' | 'UPDATE' | 'DELETE', comic: Comic | { id: string }) => void;
+    onChapterChange?: (eventType: 'INSERT' | 'UPDATE' | 'DELETE', chapter: Chapter | { id: string; comicId?: string }) => void;
+    onBannerChange?: (eventType: 'INSERT' | 'UPDATE' | 'DELETE', banner: Banner | { id: string }) => void;
+    onUserChange?: (eventType: 'INSERT' | 'UPDATE' | 'DELETE', user: User | { id: string }) => void;
+    onSettingsChange?: (settings: Partial<SystemSettings>) => void;
+  }): () => void {
+    const client = getSupabaseClient();
+    if (!client) return () => {};
+
+    try {
+      const channelId = `antitimpa-realtime-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+      const channel = client.channel(channelId);
+
+      channel
+        // 1. Comics table changes
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'comics' }, (payload: any) => {
+          if (callbacks.onComicChange) {
+            if (payload.eventType === 'DELETE') {
+              callbacks.onComicChange('DELETE', { id: payload.old?.id || '' });
+            } else if (payload.new) {
+              callbacks.onComicChange(payload.eventType, mapDbToComic(payload.new));
+            }
+          }
+        })
+        // 2. Chapters table changes
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'chapters' }, (payload: any) => {
+          if (callbacks.onChapterChange) {
+            if (payload.eventType === 'DELETE') {
+              callbacks.onChapterChange('DELETE', { id: payload.old?.id || '', comicId: payload.old?.comic_id });
+            } else if (payload.new) {
+              callbacks.onChapterChange(payload.eventType, mapDbToChapter(payload.new));
+            }
+          }
+        })
+        // 3. Banners table changes
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'banners' }, (payload: any) => {
+          if (callbacks.onBannerChange) {
+            if (payload.eventType === 'DELETE') {
+              callbacks.onBannerChange('DELETE', { id: payload.old?.id || '' });
+            } else if (payload.new) {
+              callbacks.onBannerChange(payload.eventType, mapDbToBanner(payload.new));
+            }
+          }
+        })
+        // 4. Users table changes
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, (payload: any) => {
+          if (callbacks.onUserChange) {
+            if (payload.eventType === 'DELETE') {
+              callbacks.onUserChange('DELETE', { id: payload.old?.id || '' });
+            } else if (payload.new) {
+              callbacks.onUserChange(payload.eventType, mapDbToUser(payload.new));
+            }
+          }
+        })
+        // 5. System settings table changes
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'system_settings' }, (payload: any) => {
+          if (callbacks.onSettingsChange && payload.new) {
+            callbacks.onSettingsChange({
+              siteName: payload.new.site_name,
+              siteAnnouncement: payload.new.announcement,
+              maintenanceMode: Boolean(payload.new.maintenance_mode),
+              siteLogo: payload.new.site_logo,
+              siteFavicon: payload.new.site_favicon
+            });
+          }
+        })
+        .subscribe((status) => {
+          if (status === 'SUBSCRIBED') {
+            console.log('[Supabase Realtime] Connected and listening for cross-device updates.');
+          }
+        });
+
+      return () => {
+        try {
+          client.removeChannel(channel);
+        } catch (e) {
+          // ignore
+        }
+      };
+    } catch (e) {
+      console.warn('[Supabase Realtime] Subscription initialization warning:', e);
+      return () => {};
     }
   }
 
@@ -352,33 +616,32 @@ export class SupabaseService {
 
       // 2. Upload Chapters
       const allChapters = Object.values(data.chapters).flat();
-      onProgress?.(`Mengunggah ${allChapters.length} chapter ke Supabase...`, 60);
+      onProgress?.(`Mengunggah ${allChapters.length} chapter ke Supabase...`, 55);
       await this.batchSaveChapters(allChapters);
 
-      // 3. Upload Banners & Settings
-      onProgress?.('Menyimpan banner dan pengaturan sistem...', 85);
+      // 3. Upload Users
+      if (data.users.length > 0) {
+        onProgress?.(`Menyimpan ${data.users.length} akun pengguna...`, 75);
+        for (const u of data.users) {
+          await this.saveUser(u);
+        }
+      }
+
+      // 4. Upload Banners
       if (data.banners.length > 0) {
-        const bannerRows = data.banners.map((b, idx) => ({
-          id: b.id,
-          title: b.title,
-          image_url: b.imageUrl,
-          comic_id: b.targetComicId,
-          is_active: b.isActive,
-          order_index: b.order ?? idx
-        }));
-        await client.from('banners').upsert(bannerRows, { onConflict: 'id' });
+        onProgress?.('Menyimpan banner beranda...', 88);
+        for (const b of data.banners) {
+          await this.saveBanner(b);
+        }
       }
 
+      // 5. Upload System Settings
       if (data.systemSettings) {
-        await client.from('system_settings').upsert({
-          id: 'global_config',
-          site_name: data.systemSettings.siteName,
-          announcement: data.systemSettings.siteAnnouncement,
-          maintenance_mode: data.systemSettings.maintenanceMode
-        }, { onConflict: 'id' });
+        onProgress?.('Menyimpan pengaturan sistem...', 95);
+        await this.saveSettings(data.systemSettings);
       }
 
-      onProgress?.('Migrasi selesai! Seluruh komik & chapter kini berada di SQL Supabase.', 100);
+      onProgress?.('Migrasi selesai! Seluruh komik, chapter, user & banner kini berada di Supabase.', 100);
       return {
         success: true,
         message: `Berhasil migrasi ${data.comics.length} komik dan ${allChapters.length} chapter ke Supabase PostgreSQL!`,
@@ -396,3 +659,4 @@ export class SupabaseService {
     }
   }
 }
+

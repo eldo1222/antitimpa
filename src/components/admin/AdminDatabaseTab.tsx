@@ -358,7 +358,32 @@ CREATE POLICY "Allow public read banners" ON public.banners FOR SELECT USING (tr
 CREATE POLICY "Allow anon insert banners" ON public.banners FOR ALL USING (true);
 
 CREATE POLICY "Allow public read system_settings" ON public.system_settings FOR SELECT USING (true);
-CREATE POLICY "Allow anon insert system_settings" ON public.system_settings FOR ALL USING (true);`;
+CREATE POLICY "Allow anon insert system_settings" ON public.system_settings FOR ALL USING (true);
+
+-- 6. AKTIFKAN REALTIME PUBLICATION (SINKRONISASI INSTAN ANTAR PERANGKAT / HP & LAPTOP)
+DO $$
+BEGIN
+  BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.comics;
+  EXCEPTION WHEN others THEN NULL;
+  END;
+  BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.chapters;
+  EXCEPTION WHEN others THEN NULL;
+  END;
+  BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.users;
+  EXCEPTION WHEN others THEN NULL;
+  END;
+  BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.banners;
+  EXCEPTION WHEN others THEN NULL;
+  END;
+  BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.system_settings;
+  EXCEPTION WHEN others THEN NULL;
+  END;
+END $$;`;
 
     navigator.clipboard?.writeText(fullSql);
     setCopiedSql(true);
