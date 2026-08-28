@@ -517,9 +517,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setAdminToasts(prev => prev.filter(t => t.id !== id));
   }, []);
 
-  // Central Server & Firestore Realtime Synchronization (Cross-Browser & Multi-Device)
+  // Central Server & Supabase Realtime Synchronization (Cross-Browser & Multi-Device)
   useEffect(() => {
-    // 1. Subscribe to Central Server Database (Instant Realtime SSE Stream & Fast REST Sync)
+    // 1. Subscribe to Central Server Database (Local / Server-Side state stream)
     const unsubCentral = centralSync.startSync((remoteData) => {
       if (remoteData.comics && Array.isArray(remoteData.comics)) {
         setComics(deduplicateById(remoteData.comics));
@@ -564,212 +564,127 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       }
     });
 
-    // 2. Initialize Firestore as Cloud Backup
-    initializeFirestoreDatabase();
+    // 2. Fetch full Supabase Database on startup if configured
+    SupabaseService.fetchFullDatabase().then(supabaseData => {
+      if (supabaseData) {
+        if (supabaseData.comics && Array.isArray(supabaseData.comics) && supabaseData.comics.length > 0) {
+          setComics(deduplicateById(supabaseData.comics));
+        }
+        if (supabaseData.chapters && typeof supabaseData.chapters === 'object' && Object.keys(supabaseData.chapters).length > 0) {
+          setChapters(sanitizeChaptersMap(supabaseData.chapters));
+        }
+        if (supabaseData.users && Array.isArray(supabaseData.users) && supabaseData.users.length > 0) {
+          setUsers(supabaseData.users);
+        }
+        if (supabaseData.banners && Array.isArray(supabaseData.banners) && supabaseData.banners.length > 0) {
+          setBanners(supabaseData.banners);
+        }
+        if (supabaseData.systemSettings) {
+          setSystemSettings(prev => ({ ...prev, ...supabaseData.systemSettings }));
+        }
+      }
+    }).catch(e => {
+      console.warn('[Supabase] Initial fetch note:', e);
+    });
 
-    // 3. Subscribe to Firestore updates
-    const unsubscribeFirestore = subscribeToFirestore({
-      onComics: (remoteComics) => {
-        if (Array.isArray(remoteComics)) {
-          setComics(deduplicateById(remoteComics));
-        }
-      },
-      onChapters: (remoteChapters) => {
-        if (remoteChapters && typeof remoteChapters === 'object') {
-          setChapters(sanitizeChaptersMap(remoteChapters));
-        }
-      },
-      onUsers: (remoteUsers) => {
-        if (Array.isArray(remoteUsers)) {
-          setUsers(remoteUsers);
-          setCurrentUser(prev => {
-            if (!prev) return null;
-            const match = remoteUsers.find(u => 
-              u.id === prev.id || 
-              (u.role === 'admin' && prev.role === 'admin') || 
-              ((u.username || '').toLowerCase() === (prev.username || '').toLowerCase())
-            );
-            if (!match) return prev;
-            safeSetItem(STORAGE_KEYS.CURRENT_USER, match);
-            return match;
+    // 3. Subscribe to Supabase Postgres Realtime changes across all connected devices
+    const unsubSupabaseRealtime = SupabaseService.subscribeToRealtime({
+      onComicChange: (eventType, comic) => {
+        if (eventType === 'DELETE') {
+          setComics(prev => prev.filter(c => c.id !== comic.id));
+          setChapters(prev => {
+            const next = { ...prev };
+            delete next[comic.id];
+            return next;
+          });
+        } else if (comic && comic.id) {
+          setComics(prev => {
+            const exists = prev.some(c => c.id === comic.id);
+            if (exists) {
+              return prev.map(c => c.id === comic.id ? { ...c, ...comic } : c);
+            }
+            return [comic as Comic, ...prev];
           });
         }
       },
-      onDrives: (remoteDrives) => {
-        if (Array.isArray(remoteDrives)) {
-          setDriveAccounts(remoteDrives);
-        }
-      },
-      onBanners: (remoteBanners) => {
-        if (Array.isArray(remoteBanners)) {
-          setBanners(remoteBanners);
-        }
-      },
-      onLogs: (remoteLogs) => {
-        if (Array.isArray(remoteLogs)) {
-          setActivityLogs(remoteLogs);
-        }
-      },
-      onSettings: (remoteSettings) => {
-        if (remoteSettings) {
-          setSystemSettings(remoteSettings);
-          if (remoteSettings.supabaseUrl && remoteSettings.supabaseAnonKey) {
-            saveCustomSupabaseConfig(remoteSettings.supabaseUrl, remoteSettings.supabaseAnonKey, true);
-            SupabaseService.fetchFullDatabase().then(supabaseData => {
-              if (supabaseData) {
-                if (supabaseData.comics && supabaseData.comics.length > 0) {
-                  setComics(deduplicateById(supabaseData.comics));
-                }
-                if (supabaseData.chapters && Object.keys(supabaseData.chapters).length > 0) {
-                  setChapters(sanitizeChaptersMap(supabaseData.chapters));
-                }
-                if (supabaseData.users && supabaseData.users.length > 0) {
-                  setUsers(supabaseData.users);
-                }
-                if (supabaseData.banners && supabaseData.banners.length > 0) {
-                  setBanners(supabaseData.banners);
-                }
+      onChapterChange: (eventType, chapter) => {
+        if (eventType === 'DELETE') {
+          if (chapter.comicId) {
+            setChapters(prev => {
+              const list = prev[chapter.comicId] || [];
+              return {
+                ...prev,
+                [chapter.comicId]: list.filter(ch => ch.id !== chapter.id)
+              };
+            });
+          } else {
+            // Find in any comic
+            setChapters(prev => {
+              const next = { ...prev };
+              for (const cId of Object.keys(next)) {
+                next[cId] = (next[cId] || []).filter(ch => ch.id !== chapter.id);
               }
-            }).catch(e => {
-              console.warn('[Supabase] Background sync on settings notice:', e);
+              return next;
             });
           }
+        } else if (chapter && chapter.comicId) {
+          setChapters(prev => {
+            const list = prev[chapter.comicId] || [];
+            const exists = list.some(ch => ch.id === chapter.id);
+            const updated = exists 
+              ? list.map(ch => ch.id === chapter.id ? { ...ch, ...chapter } : ch)
+              : [...list, chapter as Chapter];
+            return {
+              ...prev,
+              [chapter.comicId]: updated
+            };
+          });
         }
       },
-      onAds: (remoteAds) => {
-        if (Array.isArray(remoteAds)) {
-          setAds(remoteAds);
+      onBannerChange: (eventType, banner) => {
+        if (eventType === 'DELETE') {
+          setBanners(prev => prev.filter(b => b.id !== banner.id));
+        } else if (banner && banner.id) {
+          setBanners(prev => {
+            const exists = prev.some(b => b.id === banner.id);
+            if (exists) {
+              return prev.map(b => b.id === banner.id ? { ...b, ...banner } : b);
+            }
+            return [banner as Banner, ...prev];
+          });
         }
       },
-      onAdSettings: (remoteSettings) => {
-        if (remoteSettings) {
-          setAdSettings(remoteSettings);
+      onUserChange: (eventType, user) => {
+        if (eventType === 'DELETE') {
+          setUsers(prev => prev.filter(u => u.id !== user.id));
+        } else if (user && user.id) {
+          setUsers(prev => {
+            const exists = prev.some(u => u.id === user.id);
+            if (exists) {
+              return prev.map(u => u.id === user.id ? { ...u, ...user } : u);
+            }
+            return [...prev, user as User];
+          });
+        }
+      },
+      onSettingsChange: (settings) => {
+        if (settings) {
+          setSystemSettings(prev => ({
+            ...prev,
+            siteName: settings.siteName || prev?.siteName || 'AntiTimpa',
+            siteAnnouncement: settings.siteAnnouncement !== undefined ? settings.siteAnnouncement : prev?.siteAnnouncement || '',
+            maintenanceMode: settings.maintenanceMode !== undefined ? settings.maintenanceMode : prev?.maintenanceMode || false,
+            siteLogo: settings.siteLogo !== undefined ? settings.siteLogo : prev?.siteLogo,
+            siteFavicon: settings.siteFavicon !== undefined ? settings.siteFavicon : prev?.siteFavicon
+          }));
         }
       }
     });
 
-    // 4. Load from Supabase PostgreSQL (Unlimited Reads) and Subscribe to Realtime if configured
-    let unsubSupabase: (() => void) | null = null;
-
-    const setupSupabaseRealtimeAndInitialFetch = () => {
-      if (isSupabaseConfigured()) {
-        // Initial Fetch
-        SupabaseService.fetchFullDatabase().then(supabaseData => {
-          if (supabaseData) {
-            if (Array.isArray(supabaseData.comics) && supabaseData.comics.length > 0) {
-              setComics(deduplicateById(supabaseData.comics));
-            }
-            if (supabaseData.chapters && Object.keys(supabaseData.chapters).length > 0) {
-              setChapters(sanitizeChaptersMap(supabaseData.chapters));
-            }
-            if (Array.isArray(supabaseData.users) && supabaseData.users.length > 0) {
-              setUsers(supabaseData.users);
-            }
-            if (Array.isArray(supabaseData.banners) && supabaseData.banners.length > 0) {
-              setBanners(supabaseData.banners);
-            }
-            if (Array.isArray(supabaseData.driveAccounts) && supabaseData.driveAccounts.length > 0) {
-              setDriveAccounts(supabaseData.driveAccounts);
-            }
-            if (Array.isArray(supabaseData.activityLogs) && supabaseData.activityLogs.length > 0) {
-              setActivityLogs(supabaseData.activityLogs);
-            }
-            if (supabaseData.systemSettings) {
-              setSystemSettings(prev => ({ ...prev, ...supabaseData.systemSettings }));
-            }
-          }
-        }).catch(e => {
-          console.warn('[Supabase] Initial fetch notice:', e);
-        });
-
-        // Realtime Subscription across all devices
-        if (unsubSupabase) {
-          try { unsubSupabase(); } catch (_) {}
-        }
-        unsubSupabase = SupabaseService.subscribeToSupabase({
-          onComicChange: (eventType, comic) => {
-            if (eventType === 'DELETE') {
-              setComics(prev => prev.filter(c => c.id !== comic.id));
-            } else if (comic && 'title' in comic) {
-              const fullComic = comic as Comic;
-              setComics(prev => {
-                const exists = prev.some(c => c.id === fullComic.id);
-                if (exists) {
-                  return prev.map(c => c.id === fullComic.id ? fullComic : c);
-                }
-                return [fullComic, ...prev];
-              });
-            }
-          },
-          onChapterChange: (eventType, chapter) => {
-            if (eventType === 'DELETE') {
-              const { id, comicId } = chapter as { id: string; comicId?: string };
-              setChapters(prev => {
-                const next = { ...prev };
-                if (comicId && next[comicId]) {
-                  next[comicId] = next[comicId].filter(c => c.id !== id);
-                } else {
-                  Object.keys(next).forEach(k => {
-                    next[k] = next[k].filter(c => c.id !== id);
-                  });
-                }
-                return next;
-              });
-            } else if (chapter && 'chapterNumber' in chapter) {
-              const ch = chapter as Chapter;
-              setChapters(prev => {
-                const list = prev[ch.comicId] || [];
-                const exists = list.some(c => c.id === ch.id);
-                const updatedList = exists ? list.map(c => c.id === ch.id ? ch : c) : [...list, ch];
-                updatedList.sort((a, b) => (b.chapterNumber || 0) - (a.chapterNumber || 0));
-                return { ...prev, [ch.comicId]: updatedList };
-              });
-            }
-          },
-          onBannerChange: (eventType, banner) => {
-            if (eventType === 'DELETE') {
-              setBanners(prev => prev.filter(b => b.id !== banner.id));
-            } else if (banner && 'title' in banner) {
-              const b = banner as Banner;
-              setBanners(prev => {
-                const exists = prev.some(item => item.id === b.id);
-                const updated = exists ? prev.map(item => item.id === b.id ? b : item) : [...prev, b];
-                return updated.sort((x, y) => (x.order ?? 0) - (y.order ?? 0));
-              });
-            }
-          },
-          onUserChange: (eventType, user) => {
-            if (eventType === 'DELETE') {
-              setUsers(prev => prev.filter(u => u.id !== user.id));
-            } else if (user && 'username' in user) {
-              const u = user as User;
-              setUsers(prev => {
-                const exists = prev.some(item => item.id === u.id);
-                return exists ? prev.map(item => item.id === u.id ? u : item) : [...prev, u];
-              });
-              setCurrentUser(prev => {
-                if (!prev) return null;
-                if (prev.id === u.id || (prev.role === 'admin' && u.role === 'admin') || (prev.username && prev.username.toLowerCase() === (u.username || '').toLowerCase())) {
-                  return u;
-                }
-                return prev;
-              });
-            }
-          },
-          onSettingsChange: (settings) => {
-            setSystemSettings(prev => ({ ...prev, ...settings }));
-          }
-        });
-      }
-    };
-
-    setupSupabaseRealtimeAndInitialFetch();
-
     return () => {
       unsubCentral();
-      unsubscribeFirestore();
-      if (unsubSupabase) {
-        try { unsubSupabase(); } catch (_) {}
+      if (unsubSupabaseRealtime) {
+        try { unsubSupabaseRealtime(); } catch (_) {}
       }
     };
   }, []);

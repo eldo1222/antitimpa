@@ -1,6 +1,67 @@
 import { Comic, Chapter, ComicContentType, ComicCategoryType } from '../types';
 import { getProfessionalComicSkeletonUrl } from '../components/common/ComicSkeletonBox';
 
+// Helper to determine if a comic is strictly 18+ based on genres, content rating, and metadata
+export const ADULT_GENRE_KEYWORDS = [
+  'hentai',
+  'ecchi',
+  'erotica',
+  'erotic',
+  'pornographic',
+  'smut',
+  '18+',
+  'dewasa',
+  'mature romance',
+  'r-18',
+  'adult',
+  'milf',
+  'netorare',
+  'ntr',
+  'uncensored',
+  'sex',
+  'yaoi',
+  'yuri 18+',
+  'eromanga'
+];
+
+export function isStrictlyAdultComic(params: {
+  genres?: string[];
+  contentRating?: string;
+  title?: string;
+  synopsis?: string;
+  categoryFilter?: string;
+  defaultContentType?: string;
+}): boolean {
+  // If explicitly requested as '18plus' category
+  if (params.categoryFilter === '18plus') return true;
+
+  const contentRating = (params.contentRating || '').toLowerCase();
+  if (contentRating === 'erotica' || contentRating === 'pornographic') {
+    return true;
+  }
+
+  const allGenresStr = (params.genres || []).map(g => String(g).toLowerCase()).join(' ');
+  const titleStr = (params.title || '').toLowerCase();
+
+  const isMatchedInGenres = ADULT_GENRE_KEYWORDS.some(kw => 
+    allGenresStr.includes(kw)
+  );
+
+  if (isMatchedInGenres) return true;
+
+  // Check specific explicit title keywords
+  if (/\b(18\+|hentai|ecchi|r-18|milf|netorare|uncensored)\b/i.test(titleStr)) {
+    return true;
+  }
+
+  // If user explicitly forced '18plus' in manual override and didn't select 'auto'
+  if (params.defaultContentType === '18plus') {
+    return true;
+  }
+
+  return false;
+}
+
 export function getFallbackCover(title: string = 'Komik AntiTimpa', type: string = 'manga'): string {
   return getProfessionalComicSkeletonUrl(title, type);
 }
@@ -237,8 +298,14 @@ function mapMangaDexItems(items: any[], isAdultIntent: boolean): ScrapedComicRes
       .map((t: any) => t.attributes?.name?.en)
       .filter(Boolean);
 
-    const contentRating = attributes.contentRating || 'safe';
-    const isAdult = contentRating === 'erotica' || contentRating === 'pornographic' || isAdultIntent;
+    const contentRating = (attributes.contentRating || 'safe').toLowerCase();
+    const isAdult = isStrictlyAdultComic({
+      genres,
+      contentRating,
+      title,
+      synopsis,
+      categoryFilter: isAdultIntent ? '18plus' : 'all'
+    });
     const status = attributes.status === 'completed' ? 'completed' : 'ongoing';
 
     const rawOriginalLang = (attributes.originalLanguage || '').toLowerCase();
@@ -1159,7 +1226,7 @@ export function isDoujinshiOrOneshot(scraped: ScrapedComicResult): boolean {
 export function buildComicFromScrape(
   scraped: ScrapedComicResult,
   customSettings?: {
-    contentType?: ComicContentType;
+    contentType?: ComicContentType | 'auto';
     comicType?: ComicCategoryType;
     isFree?: boolean;
     isVisibleOnHome?: boolean;
@@ -1170,8 +1237,12 @@ export function buildComicFromScrape(
   const comicId = `comic-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
   const now = new Date().toISOString().split('T')[0];
 
-  const contentType = customSettings?.contentType ?? scraped.contentType ?? 'normal';
-  const isFree = customSettings?.isFree ?? (contentType === 'normal');
+  const requestedContentType = customSettings?.contentType ?? scraped.contentType ?? 'normal';
+  const finalContentType: ComicContentType = requestedContentType === 'auto'
+    ? (isStrictlyAdultComic(scraped) ? '18plus' : 'normal')
+    : requestedContentType;
+
+  const isFree = customSettings?.isFree ?? (finalContentType === 'normal');
   const isVisibleOnHome = customSettings?.isVisibleOnHome ?? scraped.isVisibleOnHome ?? true;
   const isPublished = customSettings?.isPublished ?? scraped.isPublished ?? true;
   const comicType = customSettings?.comicType ?? scraped.comicType ?? 'manga';
@@ -1198,7 +1269,7 @@ export function buildComicFromScrape(
     updatedAt: now,
     isTrending: true,
     isFeatured: isVisibleOnHome,
-    contentType,
+    contentType: finalContentType,
     comicType,
     type: comicType,
     isFree,
@@ -1243,7 +1314,7 @@ export function buildComicFromScrape(
 export async function buildComicFromScrapeAsync(
   scraped: ScrapedComicResult,
   customSettings?: {
-    contentType?: ComicContentType;
+    contentType?: ComicContentType | 'auto';
     comicType?: ComicCategoryType;
     isFree?: boolean;
     isVisibleOnHome?: boolean;
@@ -1281,8 +1352,12 @@ export async function buildComicFromScrapeAsync(
       const comicId = `comic-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
       const now = new Date().toISOString().split('T')[0];
 
-      const contentType = customSettings?.contentType ?? scraped.contentType ?? 'normal';
-      const isFree = customSettings?.isFree ?? (contentType === 'normal');
+      const requestedContentType = customSettings?.contentType ?? scraped.contentType ?? 'normal';
+      const finalContentType: ComicContentType = requestedContentType === 'auto'
+        ? (isStrictlyAdultComic(scraped) ? '18plus' : 'normal')
+        : requestedContentType;
+
+      const isFree = customSettings?.isFree ?? (finalContentType === 'normal');
       const isVisibleOnHome = customSettings?.isVisibleOnHome ?? scraped.isVisibleOnHome ?? true;
       const isPublished = customSettings?.isPublished ?? scraped.isPublished ?? true;
       const comicType = customSettings?.comicType ?? scraped.comicType ?? 'manga';
@@ -1311,7 +1386,7 @@ export async function buildComicFromScrapeAsync(
         updatedAt: now,
         isTrending: true,
         isFeatured: isVisibleOnHome,
-        contentType,
+        contentType: finalContentType,
         comicType,
         type: comicType,
         isFree,
@@ -1368,7 +1443,7 @@ export interface ClientScraperOptions {
   categoryFilter?: string;
   existingComicIds?: Set<string>;
   existingTitles?: Set<string>;
-  defaultContentType?: ComicContentType;
+  defaultContentType?: ComicContentType | 'auto';
   defaultDriveAccountId?: string;
   onProgress?: (progress: {
     scrapedThisSession: number;
@@ -1632,8 +1707,15 @@ export async function runClientSideMassScraper(options: ClientScraperOptions): P
                 .map((t: any) => t.attributes?.name?.en)
                 .filter(Boolean);
 
-              const contentRating = attributes.contentRating || 'safe';
-              const isAdult = contentRating === 'erotica' || contentRating === 'pornographic' || (options.defaultContentType === '18plus');
+              const contentRating = (attributes.contentRating || 'safe').toLowerCase();
+              const isAdult = isStrictlyAdultComic({
+                genres,
+                contentRating,
+                title,
+                synopsis,
+                categoryFilter: stream.key.includes('18plus') ? '18plus' : catFilter,
+                defaultContentType: options.defaultContentType === 'auto' ? undefined : options.defaultContentType
+              });
               const rawOriginalLang = (attributes.originalLanguage || '').toLowerCase();
               let comicType: ComicCategoryType = 'manga';
               if (rawOriginalLang === 'ko') comicType = 'manhwa';
@@ -1769,9 +1851,15 @@ export async function runClientSideMassScraper(options: ClientScraperOptions): P
               if (existingIds.has(comicId) || existingTitles.has(normalizedTitle)) continue;
 
               const genres = (item.genres || []).map((g: any) => (typeof g === 'string' ? g : g.name)).filter(Boolean);
-              const isAdult = (item.explicit_genres && item.explicit_genres.length > 0) ||
-                genres.some((g: string) => /hentai|ecchi|erotica|adult/i.test(g)) ||
-                (options.defaultContentType === '18plus');
+              const explicitGenres = (item.explicit_genres || []).map((g: any) => (typeof g === 'string' ? g : g.name)).filter(Boolean);
+              const allGenres = [...genres, ...explicitGenres];
+              const isAdult = isStrictlyAdultComic({
+                genres: allGenres,
+                title,
+                synopsis: item.synopsis,
+                categoryFilter: jStream.type === 'doujin' ? '18plus' : catFilter,
+                defaultContentType: options.defaultContentType === 'auto' ? undefined : options.defaultContentType
+              });
 
               const typeLower = (item.type || '').toLowerCase();
               let comicType: ComicCategoryType = 'manga';

@@ -817,6 +817,149 @@ END $$;`;
               </div>
             </div>
           </div>
+
+          {/* Collection & Table Explorer (Supabase PostgreSQL / Cloud Data) */}
+          <div className="space-y-4 pt-2">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                <Layers className="w-4 h-4 text-emerald-400" />
+                <span>Pilih Koleksi / Tabel Database (Supabase PostgreSQL)</span>
+              </label>
+              <span className="text-[11px] text-slate-400">
+                Pilih tabel untuk melihat data baris JSON aktif
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+              {collectionsMeta.map(col => {
+                const Icon = col.icon;
+                const isSelected = selectedCollection === col.id;
+                return (
+                  <button
+                    key={col.id}
+                    onClick={() => {
+                      setSelectedCollection(col.id);
+                      setSearchQuery('');
+                    }}
+                    className={`p-3 rounded-xl border text-left transition-all flex flex-col justify-between cursor-pointer ${
+                      isSelected 
+                        ? 'bg-[#12241f] border-emerald-500 shadow-md shadow-emerald-500/15 scale-102' 
+                        : 'bg-[#12121a] hover:bg-[#181824] border-[#222232] text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1.5">
+                      <div className={`p-1.5 rounded-lg ${isSelected ? 'bg-emerald-600 text-white' : 'bg-[#1a1a26] text-slate-400'}`}>
+                        <Icon className="w-3.5 h-3.5" />
+                      </div>
+                      <span className={`text-xs font-black font-mono ${isSelected ? 'text-emerald-400' : 'text-slate-300'}`}>
+                        {col.count}
+                      </span>
+                    </div>
+                    <div>
+                      <span className={`text-xs font-bold block truncate ${isSelected ? 'text-white' : 'text-slate-300'}`}>
+                        /{col.label}
+                      </span>
+                      <span className="text-[10px] text-slate-500 truncate block mt-0.5">
+                        {col.desc}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Documents Table & Viewer */}
+            <div className="p-5 bg-[#12121a] rounded-2xl border border-[#222232] space-y-4">
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <FileCode className="w-4 h-4 text-emerald-400" />
+                  <h3 className="font-black text-sm text-white">
+                    Daftar Dokumen /{selectedCollection} ({filteredData.length} Dokumen)
+                  </h3>
+                </div>
+
+                <div className="flex items-center gap-2 w-full sm:w-auto">
+                  <div className="relative flex-1 sm:w-64">
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder={`Cari di /${selectedCollection}...`}
+                      className="w-full bg-[#181824] border border-[#28283a] rounded-xl pl-8 pr-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+
+                  <button
+                    onClick={handleExportCollectionJson}
+                    className="px-3 py-1.5 bg-[#202030] hover:bg-[#2b2b40] text-slate-200 text-xs font-semibold rounded-xl border border-[#2e2e42] flex items-center gap-1.5 shrink-0 cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Download JSON</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto max-h-[500px] overflow-y-auto rounded-xl border border-[#1f1f2e]">
+                <table className="w-full text-left text-xs font-mono">
+                  <thead className="bg-[#181824] text-slate-400 text-[11px] uppercase tracking-wider sticky top-0 z-10 border-b border-[#242438]">
+                    <tr>
+                      <th className="py-2.5 px-3">Document ID</th>
+                      <th className="py-2.5 px-3">Ringkasan Data</th>
+                      <th className="py-2.5 px-3 text-right">Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#1b1b28] text-slate-300">
+                    {filteredData.length > 0 ? (
+                      filteredData.map((doc, idx) => {
+                        const docId = doc.id || `doc-${idx}`;
+                        let previewTitle = doc.title || doc.username || doc.email || doc.name || doc.siteName || docId;
+                        return (
+                          <tr key={docId} className="hover:bg-[#171724] transition-colors">
+                            <td className="py-2.5 px-3 font-bold text-emerald-400 truncate max-w-[200px]">
+                              {docId}
+                            </td>
+                            <td className="py-2.5 px-3 text-slate-400 truncate max-w-[350px]">
+                              <span className="text-white font-semibold mr-2">{previewTitle}</span>
+                              <span className="text-slate-500 text-[11px]">
+                                {JSON.stringify(doc).substring(0, 80)}...
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-3 text-right space-x-1.5 whitespace-nowrap">
+                              <button
+                                onClick={() => setSelectedDocJson({ id: docId, data: doc })}
+                                className="px-2.5 py-1 bg-[#222234] hover:bg-[#2f2f48] text-slate-200 rounded-lg text-[11px] font-sans font-bold inline-flex items-center gap-1 cursor-pointer"
+                              >
+                                <Eye className="w-3 h-3 text-emerald-400" />
+                                <span>Lihat JSON</span>
+                              </button>
+                              <button
+                                onClick={() => handleCopyJson(docId, doc)}
+                                className="p-1 text-slate-400 hover:text-white rounded-lg hover:bg-white/5 cursor-pointer"
+                                title="Salin JSON"
+                              >
+                                {copiedDocId === docId ? (
+                                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                                ) : (
+                                  <Copy className="w-3.5 h-3.5" />
+                                )}
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    ) : (
+                      <tr>
+                        <td colSpan={3} className="py-8 text-center text-slate-500 font-sans">
+                          Tidak ada dokumen yang cocok dengan filter pencarian di /{selectedCollection}.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

@@ -62,18 +62,18 @@ export const AdminScraperTab: React.FC = () => {
   const [komikcastOrder, setKomikcastOrder] = useState<'popular' | 'latest' | 'update'>('popular');
 
   // MangaDex, Doujindesu & Preset filters
-  const [mangadexCategoryFilter, setMangadexCategoryFilter] = useState<'all' | '18plus' | 'manhwa' | 'manga' | 'manhua'>('18plus');
+  const [mangadexCategoryFilter, setMangadexCategoryFilter] = useState<'all' | '18plus' | 'manhwa' | 'manga' | 'manhua'>('all');
   const [mangadexLimit, setMangadexLimit] = useState<number>(50);
   const [mangadexOffset, setMangadexOffset] = useState<number>(0);
   const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
   const [doujindesuCategoryFilter, setDoujindesuCategoryFilter] = useState<'all' | '18plus' | 'doujin' | 'netorare' | 'milf' | 'harem'>('all');
-  const [presetCategoryFilter, setPresetCategoryFilter] = useState<'all' | 'manga' | 'manhwa' | 'manhua' | '18plus'>('18plus');
+  const [presetCategoryFilter, setPresetCategoryFilter] = useState<'all' | 'manga' | 'manhwa' | 'manhua' | '18plus'>('all');
 
   // Custom JSON input
   const [customJson, setCustomJson] = useState('');
 
-  // Default import configuration settings
-  const [defaultContentType, setDefaultContentType] = useState<ComicContentType>('18plus');
+  // Default import configuration settings (auto = smart selective genre detection)
+  const [defaultContentType, setDefaultContentType] = useState<'auto' | 'normal' | '18plus'>('auto');
   const [defaultIsVisibleOnHome, setDefaultIsVisibleOnHome] = useState(true);
   const [defaultIsFree, setDefaultIsFree] = useState(false);
   const [defaultDriveAccountId, setDefaultDriveAccountId] = useState(driveAccounts[0]?.id || '');
@@ -392,7 +392,7 @@ export const AdminScraperTab: React.FC = () => {
       }
     }
 
-    const finalContentType = overrideOptions?.contentType ?? itemToUse.contentType ?? defaultContentType;
+    const finalContentType = overrideOptions?.contentType ?? itemToUse.contentType ?? (defaultContentType === 'auto' ? undefined : defaultContentType);
     const isNormal = finalContentType === 'normal';
     
     setBatchStatus(`⏳ Menarik data & chapter asli "${itemToUse.title}"...`);
@@ -515,7 +515,7 @@ export const AdminScraperTab: React.FC = () => {
       setBatchStatus(`⏳ Memproses impor ${items.length} komik dari custom JSON...`);
       const itemsToInject = await Promise.all(
         items.map(item => {
-          const finalContentType = item.contentType ?? defaultContentType;
+          const finalContentType = item.contentType ?? (defaultContentType === 'auto' ? undefined : defaultContentType);
           const isNormal = finalContentType === 'normal';
           return buildComicFromScrapeAsync(item, {
             contentType: finalContentType,
@@ -862,14 +862,15 @@ export const AdminScraperTab: React.FC = () => {
               <select
                 value={defaultContentType}
                 onChange={(e) => {
-                  const val = e.target.value as ComicContentType;
+                  const val = e.target.value as 'auto' | 'normal' | '18plus';
                   setDefaultContentType(val);
                   if (val === 'normal') setDefaultIsFree(true);
                 }}
                 className="w-full p-2 bg-[#0d0d14] border border-[#2e2e42] rounded-lg text-white font-medium text-xs focus:border-[#ff5b14] outline-none"
               >
-                <option value="18plus">🔞 Komik Dewasa 18+ (VIP / Koin)</option>
-                <option value="normal">🟢 Komik Normal (Bebas Baca / Gratis)</option>
+                <option value="auto">🎯 Otomatis Selektif (18+ jika genre dewasa, Normal jika aman)</option>
+                <option value="normal">🟢 Paksa Semua Normal (Bebas Baca / Gratis)</option>
+                <option value="18plus">🔞 Paksa Semua 18+ (VIP / Koin)</option>
               </select>
             </div>
 

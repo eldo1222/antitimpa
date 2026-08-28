@@ -590,6 +590,19 @@ export class SupabaseService {
   }
 
   /**
+   * Alias for subscribeToSupabase
+   */
+  public static subscribeToRealtime(callbacks: {
+    onComicChange?: (eventType: 'INSERT' | 'UPDATE' | 'DELETE', comic: Comic | { id: string }) => void;
+    onChapterChange?: (eventType: 'INSERT' | 'UPDATE' | 'DELETE', chapter: Chapter | { id: string; comicId?: string }) => void;
+    onBannerChange?: (eventType: 'INSERT' | 'UPDATE' | 'DELETE', banner: Banner | { id: string }) => void;
+    onUserChange?: (eventType: 'INSERT' | 'UPDATE' | 'DELETE', user: User | { id: string }) => void;
+    onSettingsChange?: (settings: Partial<SystemSettings>) => void;
+  }): () => void {
+    return SupabaseService.subscribeToSupabase(callbacks);
+  }
+
+  /**
    * One-Click Migrate Entire Dataset to Supabase
    */
   public static async migrateAllToSupabase(
