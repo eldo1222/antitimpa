@@ -62,6 +62,8 @@ import {
   saveActivityLogToFirestore,
   saveSettingsToFirestore
 } from '../services/firestoreService';
+import { SupabaseService } from '../services/supabaseService';
+import { isSupabaseConfigured } from '../lib/supabase';
 import { centralSync } from '../services/centralSyncService';
 import { auth, db, googleProvider } from '../lib/firebase';
 import { signInWithPopup, signOut } from 'firebase/auth';
@@ -624,6 +626,37 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         }
       }
     });
+
+    // 4. Load from Supabase PostgreSQL (Unlimited Reads) if configured
+    if (isSupabaseConfigured()) {
+      SupabaseService.fetchFullDatabase().then(supabaseData => {
+        if (supabaseData) {
+          if (supabaseData.comics && supabaseData.comics.length > 0) {
+            setComics(deduplicateById(supabaseData.comics));
+          }
+          if (supabaseData.chapters && Object.keys(supabaseData.chapters).length > 0) {
+            setChapters(sanitizeChaptersMap(supabaseData.chapters));
+          }
+          if (supabaseData.users && supabaseData.users.length > 0) {
+            setUsers(supabaseData.users);
+          }
+          if (supabaseData.banners && supabaseData.banners.length > 0) {
+            setBanners(supabaseData.banners);
+          }
+          if (supabaseData.driveAccounts && supabaseData.driveAccounts.length > 0) {
+            setDriveAccounts(supabaseData.driveAccounts);
+          }
+          if (supabaseData.activityLogs && supabaseData.activityLogs.length > 0) {
+            setActivityLogs(supabaseData.activityLogs);
+          }
+          if (supabaseData.systemSettings) {
+            setSystemSettings(supabaseData.systemSettings);
+          }
+        }
+      }).catch(e => {
+        console.warn('[Supabase] Initial fetch notice:', e);
+      });
+    }
 
     return () => {
       unsubCentral();
@@ -1645,6 +1678,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     saveComicToFirestore(newComic);
     centralSync.saveComic(newComic);
+    SupabaseService.saveComic(newComic).catch(() => {});
 
     showAdminToast('Komik Berhasil Ditambahkan', `Komik "${newComic.title}" telah disimpan ke katalog.`, 'success');
 
@@ -1678,10 +1712,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     // Persist to Central Server and Firestore
     saveComicToFirestore(finalComic);
     centralSync.saveComic(finalComic);
+    SupabaseService.saveComic(finalComic).catch(() => {});
 
     chaptersList.forEach(ch => {
       saveChapterToFirestore(ch);
       centralSync.saveChapter(ch);
+      SupabaseService.saveChapter(finalComic.id, ch).catch(() => {});
     });
 
     showAdminToast('Komik Berhasil Disuntikkan', `"${finalComic.title}" beserta ${chaptersList.length} chapter siap dibaca.`, 'success');
@@ -1727,6 +1763,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     batchSaveComicsToFirestore(comicsToSave).catch(e => console.warn('Batch comics Firestore save error:', e));
     batchSaveChaptersToFirestore(chaptersToSave).catch(e => console.warn('Batch chapters Firestore save error:', e));
+    SupabaseService.batchSaveComics(comicsToSave).catch(() => {});
+    SupabaseService.batchSaveChapters(chaptersToSave).catch(() => {});
 
     // Non-blocking background sync for full-stack mode
     comicsToSave.forEach(c => centralSync.saveComic(c).catch(() => {}));
@@ -1758,6 +1796,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     if (updatedComic) {
       saveComicToFirestore(updatedComic);
       centralSync.saveComic(updatedComic);
+      SupabaseService.saveComic(updatedComic).catch(() => {});
     }
 
     showAdminToast('Komik Berhasil Diperbarui', `Perubahan data komik telah disimpan.`, 'success');
@@ -1776,6 +1815,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setComics(prev => prev.filter(c => c.id !== id));
     deleteComicFromFirestore(id);
     centralSync.deleteComic(id);
+    SupabaseService.deleteComic(id).catch(() => {});
 
     // Also delete chapters for this comic
     setChapters(prev => {
@@ -1811,6 +1851,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setComics(prev => prev.filter(c => !idSet.has(c.id)));
     batchDeleteComicsFromFirestore(ids);
     centralSync.batchDeleteComics(ids);
+    ids.forEach(id => SupabaseService.deleteComic(id).catch(() => {}));
 
     setChapters(prev => {
       const next = { ...prev };
@@ -1927,6 +1968,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     saveChapterToFirestore(newChapter);
     centralSync.saveChapter(newChapter);
+    SupabaseService.saveChapter(comicId, newChapter).catch(() => {});
 
     // Update totalChapters count on comic
     setComics(prev => prev.map(c => {
@@ -1934,6 +1976,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         const updated = { ...c, totalChapters: updatedList.length, updatedAt: new Date().toISOString().split('T')[0] };
         saveComicToFirestore(updated);
         centralSync.saveComic(updated);
+        SupabaseService.saveComic(updated).catch(() => {});
         return updated;
       }
       return c;
@@ -1965,6 +2008,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           const updated = { ...ch, ...enrichedUpdates };
           saveChapterToFirestore(updated);
           centralSync.saveChapter(updated);
+          SupabaseService.saveChapter(comicId, updated).catch(() => {});
           return updated;
         }
         return ch;
@@ -1989,6 +2033,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const deleteChapter = (comicId: string, chapterId: string, reason?: string) => {
     deleteChapterFromFirestore(chapterId);
     centralSync.deleteChapter(comicId, chapterId);
+    SupabaseService.deleteChapter(chapterId).catch(() => {});
 
     const targetChapter = (chapters[comicId] || []).find(ch => ch.id === chapterId);
     const remainingList = (chapters[comicId] || []).filter(ch => ch.id !== chapterId);
@@ -2028,7 +2073,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     const idSet = new Set(chapterIds);
     batchDeleteChaptersFromFirestore(chapterIds);
-    chapterIds.forEach(chId => centralSync.deleteChapter(comicId, chId));
+    chapterIds.forEach(chId => {
+      centralSync.deleteChapter(comicId, chId);
+      SupabaseService.deleteChapter(chId).catch(() => {});
+    });
 
     const remainingList = (chapters[comicId] || []).filter(ch => !idSet.has(ch.id));
 
