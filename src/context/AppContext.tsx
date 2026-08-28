@@ -517,8 +517,79 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setAdminToasts(prev => prev.filter(t => t.id !== id));
   }, []);
 
-  // Central Server & Supabase Realtime Synchronization (Cross-Browser & Multi-Device)
+  // Central Server, Firestore & Supabase Realtime Synchronization (Cross-Browser & Multi-Device)
   useEffect(() => {
+    // 0. Initialize Firestore metadata & Subscribe to Firestore (Primary Cross-Device Cloud DB)
+    initializeFirestoreDatabase().catch(() => {});
+
+    const unsubFirestore = subscribeToFirestore({
+      onComics: (firestoreComics) => {
+        if (Array.isArray(firestoreComics)) {
+          setComics(deduplicateById(firestoreComics));
+        }
+      },
+      onChapters: (firestoreChapters) => {
+        if (firestoreChapters && typeof firestoreChapters === 'object') {
+          setChapters(sanitizeChaptersMap(firestoreChapters));
+        }
+      },
+      onUsers: (firestoreUsers) => {
+        if (Array.isArray(firestoreUsers)) {
+          setUsers(firestoreUsers);
+          setCurrentUser(prev => {
+            if (!prev) return null;
+            const match = firestoreUsers.find(u => 
+              u.id === prev.id || 
+              (u.role === 'admin' && prev.role === 'admin') || 
+              ((u.username || '').toLowerCase() === (prev.username || '').toLowerCase())
+            );
+            if (!match) return prev;
+            safeSetItem(STORAGE_KEYS.CURRENT_USER, match);
+            return match;
+          });
+        }
+      },
+      onDrives: (firestoreDrives) => {
+        if (Array.isArray(firestoreDrives)) {
+          setDriveAccounts(firestoreDrives);
+        }
+      },
+      onBanners: (firestoreBanners) => {
+        if (Array.isArray(firestoreBanners)) {
+          setBanners(firestoreBanners);
+        }
+      },
+      onLogs: (firestoreLogs) => {
+        if (Array.isArray(firestoreLogs)) {
+          setActivityLogs(firestoreLogs);
+        }
+      },
+      onSettings: (firestoreSettings) => {
+        if (firestoreSettings) {
+          setSystemSettings(firestoreSettings);
+          // If Supabase credentials exist in Firestore settings, auto-sync to local runtime across all devices
+          if (firestoreSettings.supabaseUrl && firestoreSettings.supabaseAnonKey) {
+            saveCustomSupabaseConfig(firestoreSettings.supabaseUrl, firestoreSettings.supabaseAnonKey, true);
+          }
+        }
+      },
+      onComments: (firestoreComments) => {
+        if (Array.isArray(firestoreComments)) {
+          setComments(firestoreComments);
+        }
+      },
+      onAds: (firestoreAds) => {
+        if (Array.isArray(firestoreAds)) {
+          setAds(firestoreAds);
+        }
+      },
+      onAdSettings: (firestoreAdSettings) => {
+        if (firestoreAdSettings) {
+          setAdSettings(firestoreAdSettings);
+        }
+      }
+    });
+
     // 1. Subscribe to Central Server Database (Local / Server-Side state stream)
     const unsubCentral = centralSync.startSync((remoteData) => {
       if (remoteData.comics && Array.isArray(remoteData.comics)) {
@@ -552,6 +623,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       }
       if (remoteData.systemSettings) {
         setSystemSettings(remoteData.systemSettings);
+        if (remoteData.systemSettings.supabaseUrl && remoteData.systemSettings.supabaseAnonKey) {
+          saveCustomSupabaseConfig(remoteData.systemSettings.supabaseUrl, remoteData.systemSettings.supabaseAnonKey, true);
+        }
       }
       if (remoteData.comments && Array.isArray(remoteData.comments)) {
         setComments(remoteData.comments);
@@ -682,6 +756,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     });
 
     return () => {
+      if (unsubFirestore) {
+        try { unsubFirestore(); } catch (_) {}
+      }
       unsubCentral();
       if (unsubSupabaseRealtime) {
         try { unsubSupabaseRealtime(); } catch (_) {}
@@ -1811,27 +1888,22 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const updateComic = (id: string, updates: Partial<Comic>) => {
     const updatedDate = new Date().toISOString().split('T')[0];
-    let updatedComic: Comic | null = null;
+    const existing = comics.find(c => c.id === id);
+    const updatedComic: Comic = existing 
+      ? { ...existing, ...updates, updatedAt: updatedDate }
+      : ({ id, ...updates, updatedAt: updatedDate } as Comic);
 
-    setComics(prev => prev.map(c => {
-      if (c.id === id) {
-        updatedComic = { ...c, ...updates, updatedAt: updatedDate };
-        return updatedComic;
-      }
-      return c;
-    }));
+    setComics(prev => prev.map(c => c.id === id ? { ...c, ...updates, updatedAt: updatedDate } : c));
 
-    if (updatedComic) {
-      saveComicToFirestore(updatedComic);
-      centralSync.saveComic(updatedComic);
-      SupabaseService.saveComic(updatedComic).catch(() => {});
-    }
+    saveComicToFirestore(updatedComic);
+    centralSync.saveComic(updatedComic);
+    SupabaseService.saveComic(updatedComic).catch(() => {});
 
     showAdminToast('Komik Berhasil Diperbarui', `Perubahan data komik telah disimpan.`, 'success');
 
     addLog(
       currentUser?.username || 'admin',
-      `Update Data Komik: "${updates.title || id}"`,
+      `Update Data Komik: "${updates.title || existing?.title || id}"`,
       'comic_update',
       'info',
       `Perubahan atribut komik berhasil disimpan`
@@ -2029,15 +2101,20 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       enrichedUpdates.driveEmbedUrl = formatGoogleDriveEmbedUrl(updates.driveUrl);
     }
 
+    const currentList = chapters[comicId] || [];
+    const existingChapter = currentList.find(ch => ch.id === chapterId);
+    if (existingChapter) {
+      const updated = { ...existingChapter, ...enrichedUpdates };
+      saveChapterToFirestore(updated);
+      centralSync.saveChapter(updated);
+      SupabaseService.saveChapter(comicId, updated).catch(() => {});
+    }
+
     setChapters(prev => {
       const list = prev[comicId] || [];
       const updatedList = list.map(ch => {
         if (ch.id === chapterId) {
-          const updated = { ...ch, ...enrichedUpdates };
-          saveChapterToFirestore(updated);
-          centralSync.saveChapter(updated);
-          SupabaseService.saveChapter(comicId, updated).catch(() => {});
-          return updated;
+          return { ...ch, ...enrichedUpdates };
         }
         return ch;
       });
