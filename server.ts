@@ -165,6 +165,42 @@ async function startServer() {
     res.json({ status: "ok", timestamp: new Date().toISOString(), version: dbState.version });
   });
 
+  // Supabase Universal Config persistence for all devices
+  const SUPABASE_CONFIG_FILE = path.join(DATA_DIR, "supabase-config.json");
+
+  app.get("/api/supabase-config", (_req, res) => {
+    let config = { 
+      url: process.env.VITE_SUPABASE_URL || "", 
+      anonKey: process.env.VITE_SUPABASE_ANON_KEY || "" 
+    };
+    if (fs.existsSync(SUPABASE_CONFIG_FILE)) {
+      try {
+        const saved = JSON.parse(fs.readFileSync(SUPABASE_CONFIG_FILE, "utf-8"));
+        if (saved && (saved.url || saved.anonKey)) {
+          config = {
+            url: saved.url || config.url,
+            anonKey: saved.anonKey || config.anonKey
+          };
+        }
+      } catch (_) {}
+    }
+    res.json(config);
+  });
+
+  app.post("/api/supabase-config", (req, res) => {
+    const { url, anonKey } = req.body || {};
+    try {
+      fs.writeFileSync(
+        SUPABASE_CONFIG_FILE, 
+        JSON.stringify({ url: url || "", anonKey: anonKey || "" }, null, 2), 
+        "utf-8"
+      );
+      res.json({ success: true, url, anonKey });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // ----------------------------------------------------
   // CENTRAL DATABASE REST & REALTIME SSE ENDPOINTS
   // ----------------------------------------------------

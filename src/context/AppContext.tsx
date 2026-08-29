@@ -38,7 +38,7 @@ import {
 import { formatGoogleDriveEmbedUrl } from '../utils/driveHelper';
 import { updateFavicon } from '../utils/favicon';
 import { SupabaseService } from '../services/supabaseService';
-import { isSupabaseConfigured, saveCustomSupabaseConfig } from '../lib/supabase';
+import { isSupabaseConfigured, saveCustomSupabaseConfig, fetchUniversalSupabaseConfig } from '../lib/supabase';
 import { centralSync } from '../services/centralSyncService';
 import { auth, googleProvider } from '../lib/firebase';
 import { signInWithPopup, signOut } from 'firebase/auth';
@@ -496,53 +496,160 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // Supabase Realtime & Central Server Synchronization (Cross-Browser & Multi-Device)
   useEffect(() => {
-    // 1. Fetch full Supabase Database on startup if configured (Primary Single Source of Truth)
-    SupabaseService.fetchFullDatabase().then(supabaseData => {
-      if (supabaseData) {
-        if (supabaseData.comics && Array.isArray(supabaseData.comics) && supabaseData.comics.length > 0) {
-          setComics(deduplicateById(supabaseData.comics));
+    let isMounted = true;
+    let unsubSupabaseRealtime: (() => void) | null = null;
+
+    // Helper to refresh state from Supabase
+    const refreshFromSupabase = async () => {
+      try {
+        if (!isSupabaseConfigured()) {
+          await fetchUniversalSupabaseConfig();
         }
-        if (supabaseData.chapters && typeof supabaseData.chapters === 'object' && Object.keys(supabaseData.chapters).length > 0) {
-          setChapters(sanitizeChaptersMap(supabaseData.chapters));
+        const supabaseData = await SupabaseService.fetchFullDatabase();
+        if (supabaseData && isMounted) {
+          if (supabaseData.comics && Array.isArray(supabaseData.comics) && supabaseData.comics.length > 0) {
+            setComics(deduplicateById(supabaseData.comics));
+          }
+          if (supabaseData.chapters && typeof supabaseData.chapters === 'object' && Object.keys(supabaseData.chapters).length > 0) {
+            setChapters(sanitizeChaptersMap(supabaseData.chapters));
+          }
+          if (supabaseData.users && Array.isArray(supabaseData.users) && supabaseData.users.length > 0) {
+            setUsers(supabaseData.users);
+            setCurrentUser(prev => {
+              if (!prev) return null;
+              const match = supabaseData.users?.find(u => 
+                u.id === prev.id || 
+                (u.role === 'admin' && prev.role === 'admin') || 
+                ((u.username || '').toLowerCase() === (prev.username || '').toLowerCase())
+              );
+              if (!match) return prev;
+              safeSetItem(STORAGE_KEYS.CURRENT_USER, match);
+              return match;
+            });
+          }
+          if (supabaseData.banners && Array.isArray(supabaseData.banners) && supabaseData.banners.length > 0) {
+            setBanners(supabaseData.banners);
+          }
+          if (supabaseData.driveAccounts && Array.isArray(supabaseData.driveAccounts) && supabaseData.driveAccounts.length > 0) {
+            setDriveAccounts(supabaseData.driveAccounts);
+          }
+          if (supabaseData.activityLogs && Array.isArray(supabaseData.activityLogs) && supabaseData.activityLogs.length > 0) {
+            setActivityLogs(supabaseData.activityLogs);
+          }
+          if (supabaseData.comments && Array.isArray(supabaseData.comments) && supabaseData.comments.length > 0) {
+            setComments(supabaseData.comments);
+          }
+          if (supabaseData.ads && Array.isArray(supabaseData.ads) && supabaseData.ads.length > 0) {
+            setAds(supabaseData.ads);
+          }
+          if (supabaseData.adSettings) {
+            setAdSettings(supabaseData.adSettings);
+          }
+          if (supabaseData.systemSettings) {
+            setSystemSettings(prev => ({ ...prev, ...supabaseData.systemSettings }));
+          }
         }
-        if (supabaseData.users && Array.isArray(supabaseData.users) && supabaseData.users.length > 0) {
-          setUsers(supabaseData.users);
-          setCurrentUser(prev => {
-            if (!prev) return null;
-            const match = supabaseData.users?.find(u => 
-              u.id === prev.id || 
-              (u.role === 'admin' && prev.role === 'admin') || 
-              ((u.username || '').toLowerCase() === (prev.username || '').toLowerCase())
-            );
-            if (!match) return prev;
-            safeSetItem(STORAGE_KEYS.CURRENT_USER, match);
-            return match;
-          });
-        }
-        if (supabaseData.banners && Array.isArray(supabaseData.banners) && supabaseData.banners.length > 0) {
-          setBanners(supabaseData.banners);
-        }
-        if (supabaseData.driveAccounts && Array.isArray(supabaseData.driveAccounts) && supabaseData.driveAccounts.length > 0) {
-          setDriveAccounts(supabaseData.driveAccounts);
-        }
-        if (supabaseData.activityLogs && Array.isArray(supabaseData.activityLogs) && supabaseData.activityLogs.length > 0) {
-          setActivityLogs(supabaseData.activityLogs);
-        }
-        if (supabaseData.comments && Array.isArray(supabaseData.comments) && supabaseData.comments.length > 0) {
-          setComments(supabaseData.comments);
-        }
-        if (supabaseData.ads && Array.isArray(supabaseData.ads) && supabaseData.ads.length > 0) {
-          setAds(supabaseData.ads);
-        }
-        if (supabaseData.adSettings) {
-          setAdSettings(supabaseData.adSettings);
-        }
-        if (supabaseData.systemSettings) {
-          setSystemSettings(prev => ({ ...prev, ...supabaseData.systemSettings }));
-        }
+      } catch (e) {
+        console.warn('[Supabase Sync] Fetch error:', e);
       }
-    }).catch(e => {
-      console.warn('[Supabase] Initial fetch note:', e);
+    };
+
+    // 1. Initial configuration bootstrap and database fetch
+    fetchUniversalSupabaseConfig().then(() => {
+      refreshFromSupabase();
+
+      // Start Supabase Postgres Realtime changes across all connected devices
+      unsubSupabaseRealtime = SupabaseService.subscribeToRealtime({
+        onComicChange: (eventType, comic) => {
+          if (eventType === 'DELETE') {
+            setComics(prev => prev.filter(c => c.id !== comic.id));
+            setChapters(prev => {
+              const next = { ...prev };
+              delete next[comic.id];
+              return next;
+            });
+          } else if (comic && comic.id) {
+            setComics(prev => {
+              const exists = prev.some(c => c.id === comic.id);
+              if (exists) {
+                return prev.map(c => c.id === comic.id ? { ...c, ...comic } : c);
+              }
+              return [comic as Comic, ...prev];
+            });
+          }
+        },
+        onChapterChange: (eventType, chapter) => {
+          if (eventType === 'DELETE') {
+            if (chapter.comicId) {
+              setChapters(prev => {
+                const list = prev[chapter.comicId] || [];
+                return {
+                  ...prev,
+                  [chapter.comicId]: list.filter(ch => ch.id !== chapter.id)
+                };
+              });
+            } else {
+              setChapters(prev => {
+                const next = { ...prev };
+                for (const cId of Object.keys(next)) {
+                  next[cId] = (next[cId] || []).filter(ch => ch.id !== chapter.id);
+                }
+                return next;
+              });
+            }
+          } else if (chapter && chapter.comicId) {
+            setChapters(prev => {
+              const list = prev[chapter.comicId] || [];
+              const exists = list.some(ch => ch.id === chapter.id);
+              const updated = exists 
+                ? list.map(ch => ch.id === chapter.id ? { ...ch, ...chapter } : ch)
+                : [...list, chapter as Chapter];
+              return {
+                ...prev,
+                [chapter.comicId]: updated
+              };
+            });
+          }
+        },
+        onBannerChange: (eventType, banner) => {
+          if (eventType === 'DELETE') {
+            setBanners(prev => prev.filter(b => b.id !== banner.id));
+          } else if (banner && banner.id) {
+            setBanners(prev => {
+              const exists = prev.some(b => b.id === banner.id);
+              if (exists) {
+                return prev.map(b => b.id === banner.id ? { ...b, ...banner } : b);
+              }
+              return [banner as Banner, ...prev];
+            });
+          }
+        },
+        onUserChange: (eventType, user) => {
+          if (eventType === 'DELETE') {
+            setUsers(prev => prev.filter(u => u.id !== user.id));
+          } else if (user && user.id) {
+            setUsers(prev => {
+              const exists = prev.some(u => u.id === user.id);
+              if (exists) {
+                return prev.map(u => u.id === user.id ? { ...u, ...user } : u);
+              }
+              return [...prev, user as User];
+            });
+          }
+        },
+        onSettingsChange: (settings) => {
+          if (settings) {
+            setSystemSettings(prev => ({
+              ...prev,
+              siteName: settings.siteName || prev?.siteName || 'AntiTimpa',
+              siteAnnouncement: settings.siteAnnouncement !== undefined ? settings.siteAnnouncement : prev?.siteAnnouncement || '',
+              maintenanceMode: settings.maintenanceMode !== undefined ? settings.maintenanceMode : prev?.maintenanceMode || false,
+              siteLogo: settings.siteLogo !== undefined ? settings.siteLogo : prev?.siteLogo,
+              siteFavicon: settings.siteFavicon !== undefined ? settings.siteFavicon : prev?.siteFavicon
+            }));
+          }
+        }
+      });
     });
 
     // 2. Subscribe to Central Server Database (Local / Server-Side state stream)
@@ -593,105 +700,25 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       }
     });
 
-    // 3. Subscribe to Supabase Postgres Realtime changes across all connected devices
-    const unsubSupabaseRealtime = SupabaseService.subscribeToRealtime({
-      onComicChange: (eventType, comic) => {
-        if (eventType === 'DELETE') {
-          setComics(prev => prev.filter(c => c.id !== comic.id));
-          setChapters(prev => {
-            const next = { ...prev };
-            delete next[comic.id];
-            return next;
-          });
-        } else if (comic && comic.id) {
-          setComics(prev => {
-            const exists = prev.some(c => c.id === comic.id);
-            if (exists) {
-              return prev.map(c => c.id === comic.id ? { ...c, ...comic } : c);
-            }
-            return [comic as Comic, ...prev];
-          });
-        }
-      },
-      onChapterChange: (eventType, chapter) => {
-        if (eventType === 'DELETE') {
-          if (chapter.comicId) {
-            setChapters(prev => {
-              const list = prev[chapter.comicId] || [];
-              return {
-                ...prev,
-                [chapter.comicId]: list.filter(ch => ch.id !== chapter.id)
-              };
-            });
-          } else {
-            // Find in any comic
-            setChapters(prev => {
-              const next = { ...prev };
-              for (const cId of Object.keys(next)) {
-                next[cId] = (next[cId] || []).filter(ch => ch.id !== chapter.id);
-              }
-              return next;
-            });
-          }
-        } else if (chapter && chapter.comicId) {
-          setChapters(prev => {
-            const list = prev[chapter.comicId] || [];
-            const exists = list.some(ch => ch.id === chapter.id);
-            const updated = exists 
-              ? list.map(ch => ch.id === chapter.id ? { ...ch, ...chapter } : ch)
-              : [...list, chapter as Chapter];
-            return {
-              ...prev,
-              [chapter.comicId]: updated
-            };
-          });
-        }
-      },
-      onBannerChange: (eventType, banner) => {
-        if (eventType === 'DELETE') {
-          setBanners(prev => prev.filter(b => b.id !== banner.id));
-        } else if (banner && banner.id) {
-          setBanners(prev => {
-            const exists = prev.some(b => b.id === banner.id);
-            if (exists) {
-              return prev.map(b => b.id === banner.id ? { ...b, ...banner } : b);
-            }
-            return [banner as Banner, ...prev];
-          });
-        }
-      },
-      onUserChange: (eventType, user) => {
-        if (eventType === 'DELETE') {
-          setUsers(prev => prev.filter(u => u.id !== user.id));
-        } else if (user && user.id) {
-          setUsers(prev => {
-            const exists = prev.some(u => u.id === user.id);
-            if (exists) {
-              return prev.map(u => u.id === user.id ? { ...u, ...user } : u);
-            }
-            return [...prev, user as User];
-          });
-        }
-      },
-      onSettingsChange: (settings) => {
-        if (settings) {
-          setSystemSettings(prev => ({
-            ...prev,
-            siteName: settings.siteName || prev?.siteName || 'AntiTimpa',
-            siteAnnouncement: settings.siteAnnouncement !== undefined ? settings.siteAnnouncement : prev?.siteAnnouncement || '',
-            maintenanceMode: settings.maintenanceMode !== undefined ? settings.maintenanceMode : prev?.maintenanceMode || false,
-            siteLogo: settings.siteLogo !== undefined ? settings.siteLogo : prev?.siteLogo,
-            siteFavicon: settings.siteFavicon !== undefined ? settings.siteFavicon : prev?.siteFavicon
-          }));
-        }
-      }
-    });
+    // 3. Periodic & Focus revalidation from Supabase (Zero quota limit, pure reliability)
+    const handleFocus = () => {
+      refreshFromSupabase();
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('focus', handleFocus);
+    }
+    const syncInterval = setInterval(refreshFromSupabase, 25000);
 
     return () => {
+      isMounted = false;
       unsubCentral();
       if (unsubSupabaseRealtime) {
         try { unsubSupabaseRealtime(); } catch (_) {}
       }
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('focus', handleFocus);
+      }
+      clearInterval(syncInterval);
     };
   }, []);
 

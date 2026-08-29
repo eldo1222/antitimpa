@@ -30,9 +30,50 @@ export function formatSupabaseKey(rawKey: string): string {
   return cleaned;
 }
 
+// Async initialization promise to fetch universal configuration from server
+let configFetchPromise: Promise<{ url: string; anonKey: string }> | null = null;
+
+export async function fetchUniversalSupabaseConfig(): Promise<{ url: string; anonKey: string }> {
+  if (runtimeSupabaseUrl && runtimeSupabaseKey) {
+    return { url: runtimeSupabaseUrl, anonKey: runtimeSupabaseKey };
+  }
+
+  if (configFetchPromise) return configFetchPromise;
+
+  configFetchPromise = (async () => {
+    try {
+      const res = await fetch('/api/supabase-config');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.url && data.anonKey) {
+          runtimeSupabaseUrl = formatSupabaseUrl(data.url);
+          runtimeSupabaseKey = formatSupabaseKey(data.anonKey);
+          if (typeof window !== 'undefined') {
+            try {
+              localStorage.setItem('antitimpa_custom_supabase_config', JSON.stringify({
+                url: runtimeSupabaseUrl,
+                anonKey: runtimeSupabaseKey
+              }));
+            } catch (_) {}
+          }
+          return { url: runtimeSupabaseUrl, anonKey: runtimeSupabaseKey };
+        }
+      }
+    } catch (_) {}
+    return getSupabaseCredentials();
+  })();
+
+  return configFetchPromise;
+}
+
+// Automatically trigger background fetch of universal Supabase config
+if (typeof window !== 'undefined') {
+  fetchUniversalSupabaseConfig().catch(() => {});
+}
+
 // Retrieve Supabase URL & Anon Key from Environment, LocalStorage, or Runtime cache
 export function getSupabaseCredentials(): { url: string; anonKey: string } {
-  // 1. Check runtime memory (e.g. injected from Firestore settings)
+  // 1. Check runtime memory
   let url = runtimeSupabaseUrl;
   let anonKey = runtimeSupabaseKey;
 
@@ -132,6 +173,14 @@ export function saveCustomSupabaseConfig(rawUrl: string, rawKey: string, persist
     try {
       localStorage.setItem('antitimpa_custom_supabase_config', JSON.stringify({ url, anonKey }));
     } catch (_) {}
+    // Broadcast / persist to server so other devices get it
+    try {
+      fetch('/api/supabase-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url, anonKey })
+      }).catch(() => {});
+    } catch (_) {}
   }
   supabaseInstance = null; // force re-creation
 }
@@ -142,6 +191,13 @@ export function clearCustomSupabaseConfig() {
   if (typeof window !== 'undefined') {
     try {
       localStorage.removeItem('antitimpa_custom_supabase_config');
+    } catch (_) {}
+    try {
+      fetch('/api/supabase-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: '', anonKey: '' })
+      }).catch(() => {});
     } catch (_) {}
   }
   supabaseInstance = null;
