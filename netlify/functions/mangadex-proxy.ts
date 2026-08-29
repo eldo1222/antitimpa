@@ -122,47 +122,68 @@ export async function handler(event: any) {
     }
 
     // 3. Search & Multi-Batch Listing with Comprehensive Content Rating & Relevance
-    const safeLimit = Math.min(500, Math.max(1, limitReq || 50));
+    const safeLimit = Math.min(100, Math.max(1, limitReq || 50));
     const safeOffset = Math.max(0, offsetReq || 0);
 
     const buildParams = (chunkLimit: number, currentOffset: number) => {
       const params = new URLSearchParams();
-      if (qTitle) {
+      
+      // Copy over known MangaDex parameters if provided in event.rawQuery
+      const rawQuery = event.rawQuery || '';
+      if (rawQuery) {
+        const rawParams = new URLSearchParams(rawQuery);
+        rawParams.forEach((val, key) => {
+          if (!['limit', 'offset', 'action', 'q', 'category', 'rating', 'origin'].includes(key)) {
+            params.append(key, val);
+          }
+        });
+      }
+
+      if (!params.has('order[followedCount]') && !params.has('order[rating]') && !params.has('order[latestUploadedChapter]') && !params.has('order[relevance]')) {
+        if (qTitle) {
+          params.append('title', qTitle);
+          params.append('order[relevance]', 'desc');
+        } else {
+          params.append('order[followedCount]', 'desc');
+        }
+      } else if (qTitle && !params.has('title')) {
         params.append('title', qTitle);
-        params.append('order[relevance]', 'desc');
-      } else {
-        params.append('order[followedCount]', 'desc');
       }
 
-      params.append('limit', String(chunkLimit));
-      params.append('offset', String(currentOffset));
-      params.append('includes[]', 'cover_art');
-      params.append('includes[]', 'author');
-      params.append('includes[]', 'artist');
+      params.set('limit', String(chunkLimit));
+      params.set('offset', String(currentOffset));
+      
+      if (!params.getAll('includes[]').includes('cover_art')) params.append('includes[]', 'cover_art');
+      if (!params.getAll('includes[]').includes('author')) params.append('includes[]', 'author');
+      if (!params.getAll('includes[]').includes('artist')) params.append('includes[]', 'artist');
 
-      if (rating === '18plus' || category === '18plus') {
-        params.append('contentRating[]', 'erotica');
-        params.append('contentRating[]', 'pornographic');
-      } else if (rating === 'normal') {
-        params.append('contentRating[]', 'safe');
-        params.append('contentRating[]', 'suggestive');
-      } else {
-        params.append('contentRating[]', 'safe');
-        params.append('contentRating[]', 'suggestive');
-        params.append('contentRating[]', 'erotica');
-        params.append('contentRating[]', 'pornographic');
+      if (!params.has('contentRating[]')) {
+        if (rating === '18plus' || category === '18plus') {
+          params.append('contentRating[]', 'erotica');
+          params.append('contentRating[]', 'pornographic');
+        } else if (rating === 'normal') {
+          params.append('contentRating[]', 'safe');
+          params.append('contentRating[]', 'suggestive');
+        } else {
+          params.append('contentRating[]', 'safe');
+          params.append('contentRating[]', 'suggestive');
+          params.append('contentRating[]', 'erotica');
+          params.append('contentRating[]', 'pornographic');
+        }
       }
 
-      if (origin) {
-        params.append('originalLanguage[]', String(origin));
-      } else if (!qTitle) {
-        if (category === 'manhwa') {
-          params.append('originalLanguage[]', 'ko');
-        } else if (category === 'manhua') {
-          params.append('originalLanguage[]', 'zh');
-          params.append('originalLanguage[]', 'zh-hk');
-        } else if (category === 'manga') {
-          params.append('originalLanguage[]', 'ja');
+      if (!params.has('originalLanguage[]')) {
+        if (origin) {
+          params.append('originalLanguage[]', String(origin));
+        } else if (!qTitle) {
+          if (category === 'manhwa') {
+            params.append('originalLanguage[]', 'ko');
+          } else if (category === 'manhua') {
+            params.append('originalLanguage[]', 'zh');
+            params.append('originalLanguage[]', 'zh-hk');
+          } else if (category === 'manga') {
+            params.append('originalLanguage[]', 'ja');
+          }
         }
       }
       return params;

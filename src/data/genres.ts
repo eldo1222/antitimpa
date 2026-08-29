@@ -8,60 +8,151 @@ export interface GenreItem {
   color?: string;
 }
 
-// User-specified exact genre list & popular categories
+// User-specified exact genre list & popular categories (clean, parsed, no duplicates)
 export const PRESET_GENRES: string[] = [
-  'Romance 18+',
-  'Drama Dewasa',
-  'Milf / Noona',
+  '3D',
   'Action',
-  'Fantasy',
-  'Manhwa',
-  'Manga',
-  'Manhua',
-  'Webtoon',
-  'Martial Arts',
-  'Cultivation',
-  'Leveling',
-  'Dungeon',
-  'Superpower',
-  'Comedy',
-  'Shounen',
-  'Big Tits',
-  'Small Tits',
-  'Bondage',
-  'Netorare',
-  'Vanilla',
-  'Romance',
-  'Ahegao',
+  'Adventure',
   'Anal',
-  'Creampy',
-  'Loli',
-  'Rape',
-  'Furry',
-  'Parody',
+  'Anime',
+  'Aunt',
+  'Beautymark',
+  'Big Ass',
   'Big Penis',
-  'Solo Male',
-  'Solo Female',
-  'Threesome',
-  'Group',
-  'MMF Threesome',
-  'FFM Threesome',
-  'Milf',
-  'Sister',
-  'Mother',
-  'Bikini',
-  'School Uniform',
-  'Dark Skin',
-  'Netorase',
+  'Bigbreast',
+  'Blowjob',
   'Cheating',
-  'Big Breast',
-  'Elf',
+  'Condom',
+  'Dilf',
+  'Dragon ball',
+  'Fantasi',
+  'Fetish',
+  'Fingering',
+  'Friends',
+  'Full color',
+  'Futanari',
+  'Ghost',
+  'Girlfriend',
+  'Glasses',
+  'Gyaru',
+  'Handjob',
+  'Hijab',
+  'Hot Mom',
+  'Incest',
+  'Kissing',
+  'Lesbian',
+  'Masturbation',
+  'Milf',
+  'Milk',
+  'Mom & Son',
+  'Naruto',
+  'Ntr (Netorare)',
+  'Nurse',
+  'Oldman',
+  'One Piece',
   'Pregnant',
-  'Harem',
-  'Supernatural',
-  'Reincarnation',
-  'Isekai'
+  'Prostitution',
+  'Rape',
+  'Romance',
+  'School',
+  'Shin-chan',
+  'Shota',
+  'Sister',
+  'Step mother',
+  'Step Sister',
+  'Stocking',
+  'Sub English',
+  'Sub indo',
+  'Teacher',
+  'Threesome',
+  'Uncensored',
+  'Virgin',
+  'Wife'
 ];
+
+/**
+ * Intelligent genre string parser that can take comma-separated, semicolon-separated,
+ * or even camelCase / concatenated genre strings (e.g. "UncensoredVirginWife")
+ * and cleanly split them into individual unique title-cased genre tags.
+ */
+export const parseAndCleanGenres = (input: string | string[]): string[] => {
+  if (!input) return [];
+
+  let rawList: string[] = [];
+
+  if (Array.isArray(input)) {
+    rawList = input;
+  } else if (typeof input === 'string') {
+    // If it contains delimiters like commas, semicolons, pipes, or newlines
+    if (/[,;|/\n]/.test(input)) {
+      rawList = input.split(/[,;|/\n]+/);
+    } else {
+      // Known multi-word tokens to extract first before camel-case splitting
+      const multiWordPatterns = [
+        'Dragon ball', 'dragon ball',
+        'One Piece', 'one piece',
+        'Shin-chan', 'shin-chan',
+        'Full color', 'full color',
+        'Big Ass', 'big ass',
+        'Big Penis', 'big penis',
+        'Hot Mom', 'hot mom',
+        'Mom & Son', 'mom & son',
+        'Mom and Son', 'mom and son',
+        'Step mother', 'step mother',
+        'Step Sister', 'step sister',
+        'Sub English', 'sub english',
+        'Sub indo', 'sub indo',
+        'Ntr (Netorare)', 'ntr (netorare)'
+      ];
+
+      let workingStr = input;
+      const extracted: string[] = [];
+
+      multiWordPatterns.forEach(pattern => {
+        const regex = new RegExp(pattern.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&'), 'gi');
+        if (regex.test(workingStr)) {
+          extracted.push(pattern);
+          workingStr = workingStr.replace(regex, ' ');
+        }
+      });
+
+      // Split camel-cased tokens: e.g. "UncensoredVirginWife" -> ["Uncensored", "Virgin", "Wife"]
+      const camelTokens = workingStr
+        .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+        .split(/\s+/)
+        .filter(Boolean);
+
+      rawList = [...extracted, ...camelTokens];
+    }
+  }
+
+  // Deduplicate and normalize capitalization
+  const seen = new Set<string>();
+  const cleaned: string[] = [];
+
+  rawList.forEach(item => {
+    const trimmed = item.trim();
+    if (!trimmed) return;
+    const lower = trimmed.toLowerCase();
+    if (!seen.has(lower)) {
+      seen.add(lower);
+      // Look up preset match for pristine casing
+      const matchedPreset = PRESET_GENRES.find(p => p.toLowerCase() === lower);
+      if (matchedPreset) {
+        cleaned.push(matchedPreset);
+      } else {
+        // Default capitalize first letter of each word
+        const formatted = trimmed
+          .split(' ')
+          .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+          .join(' ');
+        cleaned.push(formatted);
+      }
+    }
+  });
+
+  return cleaned;
+};
 
 // Helper to normalize genre string comparison (e.g. "big tits" === "Big Tits")
 export const normalizeGenre = (genre: string): string => {

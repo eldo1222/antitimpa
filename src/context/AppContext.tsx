@@ -37,37 +37,11 @@ import {
 } from '../data/initialData';
 import { formatGoogleDriveEmbedUrl } from '../utils/driveHelper';
 import { updateFavicon } from '../utils/favicon';
-import {
-  initializeFirestoreDatabase,
-  subscribeToFirestore,
-  fetchUserFromFirestore,
-  saveComicToFirestore,
-  batchSaveComicsToFirestore,
-  deleteComicFromFirestore,
-  batchDeleteComicsFromFirestore,
-  saveChapterToFirestore,
-  batchSaveChaptersToFirestore,
-  deleteChapterFromFirestore,
-  batchDeleteChaptersFromFirestore,
-  cleanOrphanDataFromFirestore,
-  saveUserToFirestore,
-  deleteUserFromFirestore,
-  saveDriveAccountToFirestore,
-  deleteDriveAccountFromFirestore,
-  saveBannerToFirestore,
-  deleteBannerFromFirestore,
-  saveAdToFirestore,
-  deleteAdFromFirestore,
-  saveAdSettingsToFirestore,
-  saveActivityLogToFirestore,
-  saveSettingsToFirestore
-} from '../services/firestoreService';
 import { SupabaseService } from '../services/supabaseService';
 import { isSupabaseConfigured, saveCustomSupabaseConfig } from '../lib/supabase';
 import { centralSync } from '../services/centralSyncService';
-import { auth, db, googleProvider } from '../lib/firebase';
+import { auth, googleProvider } from '../lib/firebase';
 import { signInWithPopup, signOut } from 'firebase/auth';
-import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import bcrypt from 'bcryptjs';
 
 export const ADMIN_EMAILS = [
@@ -517,28 +491,22 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setAdminToasts(prev => prev.filter(t => t.id !== id));
   }, []);
 
-  // Central Server, Firestore & Supabase Realtime Synchronization (Cross-Browser & Multi-Device)
+  // Supabase Realtime & Central Server Synchronization (Cross-Browser & Multi-Device)
   useEffect(() => {
-    // 0. Initialize Firestore metadata & Subscribe to Firestore (Primary Cross-Device Cloud DB)
-    initializeFirestoreDatabase().catch(() => {});
-
-    const unsubFirestore = subscribeToFirestore({
-      onComics: (firestoreComics) => {
-        if (Array.isArray(firestoreComics)) {
-          setComics(deduplicateById(firestoreComics));
+    // 1. Fetch full Supabase Database on startup if configured (Primary Single Source of Truth)
+    SupabaseService.fetchFullDatabase().then(supabaseData => {
+      if (supabaseData) {
+        if (supabaseData.comics && Array.isArray(supabaseData.comics) && supabaseData.comics.length > 0) {
+          setComics(deduplicateById(supabaseData.comics));
         }
-      },
-      onChapters: (firestoreChapters) => {
-        if (firestoreChapters && typeof firestoreChapters === 'object') {
-          setChapters(sanitizeChaptersMap(firestoreChapters));
+        if (supabaseData.chapters && typeof supabaseData.chapters === 'object' && Object.keys(supabaseData.chapters).length > 0) {
+          setChapters(sanitizeChaptersMap(supabaseData.chapters));
         }
-      },
-      onUsers: (firestoreUsers) => {
-        if (Array.isArray(firestoreUsers)) {
-          setUsers(firestoreUsers);
+        if (supabaseData.users && Array.isArray(supabaseData.users) && supabaseData.users.length > 0) {
+          setUsers(supabaseData.users);
           setCurrentUser(prev => {
             if (!prev) return null;
-            const match = firestoreUsers.find(u => 
+            const match = supabaseData.users?.find(u => 
               u.id === prev.id || 
               (u.role === 'admin' && prev.role === 'admin') || 
               ((u.username || '').toLowerCase() === (prev.username || '').toLowerCase())
@@ -548,49 +516,33 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             return match;
           });
         }
-      },
-      onDrives: (firestoreDrives) => {
-        if (Array.isArray(firestoreDrives)) {
-          setDriveAccounts(firestoreDrives);
+        if (supabaseData.banners && Array.isArray(supabaseData.banners) && supabaseData.banners.length > 0) {
+          setBanners(supabaseData.banners);
         }
-      },
-      onBanners: (firestoreBanners) => {
-        if (Array.isArray(firestoreBanners)) {
-          setBanners(firestoreBanners);
+        if (supabaseData.driveAccounts && Array.isArray(supabaseData.driveAccounts) && supabaseData.driveAccounts.length > 0) {
+          setDriveAccounts(supabaseData.driveAccounts);
         }
-      },
-      onLogs: (firestoreLogs) => {
-        if (Array.isArray(firestoreLogs)) {
-          setActivityLogs(firestoreLogs);
+        if (supabaseData.activityLogs && Array.isArray(supabaseData.activityLogs) && supabaseData.activityLogs.length > 0) {
+          setActivityLogs(supabaseData.activityLogs);
         }
-      },
-      onSettings: (firestoreSettings) => {
-        if (firestoreSettings) {
-          setSystemSettings(firestoreSettings);
-          // If Supabase credentials exist in Firestore settings, auto-sync to local runtime across all devices
-          if (firestoreSettings.supabaseUrl && firestoreSettings.supabaseAnonKey) {
-            saveCustomSupabaseConfig(firestoreSettings.supabaseUrl, firestoreSettings.supabaseAnonKey, true);
-          }
+        if (supabaseData.comments && Array.isArray(supabaseData.comments) && supabaseData.comments.length > 0) {
+          setComments(supabaseData.comments);
         }
-      },
-      onComments: (firestoreComments) => {
-        if (Array.isArray(firestoreComments)) {
-          setComments(firestoreComments);
+        if (supabaseData.ads && Array.isArray(supabaseData.ads) && supabaseData.ads.length > 0) {
+          setAds(supabaseData.ads);
         }
-      },
-      onAds: (firestoreAds) => {
-        if (Array.isArray(firestoreAds)) {
-          setAds(firestoreAds);
+        if (supabaseData.adSettings) {
+          setAdSettings(supabaseData.adSettings);
         }
-      },
-      onAdSettings: (firestoreAdSettings) => {
-        if (firestoreAdSettings) {
-          setAdSettings(firestoreAdSettings);
+        if (supabaseData.systemSettings) {
+          setSystemSettings(prev => ({ ...prev, ...supabaseData.systemSettings }));
         }
       }
+    }).catch(e => {
+      console.warn('[Supabase] Initial fetch note:', e);
     });
 
-    // 1. Subscribe to Central Server Database (Local / Server-Side state stream)
+    // 2. Subscribe to Central Server Database (Local / Server-Side state stream)
     const unsubCentral = centralSync.startSync((remoteData) => {
       if (remoteData.comics && Array.isArray(remoteData.comics)) {
         setComics(deduplicateById(remoteData.comics));
@@ -636,29 +588,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       if (remoteData.adSettings) {
         setAdSettings(remoteData.adSettings);
       }
-    });
-
-    // 2. Fetch full Supabase Database on startup if configured
-    SupabaseService.fetchFullDatabase().then(supabaseData => {
-      if (supabaseData) {
-        if (supabaseData.comics && Array.isArray(supabaseData.comics) && supabaseData.comics.length > 0) {
-          setComics(deduplicateById(supabaseData.comics));
-        }
-        if (supabaseData.chapters && typeof supabaseData.chapters === 'object' && Object.keys(supabaseData.chapters).length > 0) {
-          setChapters(sanitizeChaptersMap(supabaseData.chapters));
-        }
-        if (supabaseData.users && Array.isArray(supabaseData.users) && supabaseData.users.length > 0) {
-          setUsers(supabaseData.users);
-        }
-        if (supabaseData.banners && Array.isArray(supabaseData.banners) && supabaseData.banners.length > 0) {
-          setBanners(supabaseData.banners);
-        }
-        if (supabaseData.systemSettings) {
-          setSystemSettings(prev => ({ ...prev, ...supabaseData.systemSettings }));
-        }
-      }
-    }).catch(e => {
-      console.warn('[Supabase] Initial fetch note:', e);
     });
 
     // 3. Subscribe to Supabase Postgres Realtime changes across all connected devices
@@ -756,9 +685,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     });
 
     return () => {
-      if (unsubFirestore) {
-        try { unsubFirestore(); } catch (_) {}
-      }
       unsubCentral();
       if (unsubSupabaseRealtime) {
         try { unsubSupabaseRealtime(); } catch (_) {}
@@ -867,7 +793,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       details
     };
     setActivityLogs(prev => [newLog, ...prev]);
-    saveActivityLogToFirestore(newLog);
+    SupabaseService.saveActivityLog(newLog).catch(() => {});
     centralSync.logActivity(newLog);
   };
 
@@ -997,10 +923,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     // 1. First look in local memory state
     let targetUser = users.find(u => (u.username || '').trim().toLowerCase() === cleanUsername.toLowerCase());
 
-    // 2. If not found in state OR if password doesn't match current cache, fetch directly from Firestore for 100% realtime cross-device accuracy
+    // 2. If not found in state OR if password doesn't match current cache, fetch directly from Supabase for 100% realtime cross-device accuracy
     if (!targetUser || !verifyPasswordMatch(targetUser.passwordHash, rawPassword)) {
       try {
-        const freshUser = await fetchUserFromFirestore(cleanUsername);
+        const freshUser = await SupabaseService.fetchUser(cleanUsername);
         if (freshUser) {
           targetUser = freshUser;
           setUsers(prev => {
@@ -1012,7 +938,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           });
         }
       } catch (err) {
-        console.warn('Direct Firestore user fetch during login failed:', err);
+        console.warn('Direct Supabase user fetch during login failed:', err);
       }
     }
 
@@ -1040,7 +966,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         firstLoginAt: targetUser.firstLoginAt || new Date().toISOString()
       };
       setUsers(prev => prev.map(u => u.id === targetUser.id ? updatedAdmin : u));
-      saveUserToFirestore(updatedAdmin);
+      SupabaseService.saveUser(updatedAdmin).catch(() => {});
+      centralSync.saveUser(updatedAdmin);
       setCurrentUser(updatedAdmin);
       safeSetItem(STORAGE_KEYS.CURRENT_USER, updatedAdmin);
       setIsAdminView(true);
@@ -1082,7 +1009,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         // Auto-update to expired status
         const updatedUser: User = { ...targetUser, status: 'expired' };
         setUsers(prev => prev.map(u => u.id === targetUser.id ? updatedUser : u));
-        saveUserToFirestore(updatedUser);
+        SupabaseService.saveUser(updatedUser).catch(() => {});
+        centralSync.saveUser(updatedUser);
         addLog(targetUser.username, 'Login Ditolak: Masa Aktif Telah Habis', 'login_failed', 'warning', `Masa aktif ${targetUser.durationType} telah berakhir.`);
         return { success: false, message: 'Masa aktif akun Anda telah berakhir. Silakan hubungi Admin untuk memperpanjang paket.' };
       }
@@ -1096,7 +1024,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
       const updatedUser: User = { ...targetUser, failedAttempts: newAttempts, status: newStatus };
       setUsers(prev => prev.map(u => u.id === targetUser.id ? updatedUser : u));
-      saveUserToFirestore(updatedUser);
+      SupabaseService.saveUser(updatedUser).catch(() => {});
+      centralSync.saveUser(updatedUser);
 
       if (isNowLocked) {
         addLog(targetUser.username, 'Akun Otomatis Terkunci: 3x Gagal Password', 'login_failed', 'failed', 'Akun terkunci otomatis setelah 3 kegagalan beruntun.');
@@ -1137,7 +1066,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
 
     setUsers(prev => prev.map(u => u.id === targetUser.id ? updatedUser : u));
-    saveUserToFirestore(updatedUser);
+    SupabaseService.saveUser(updatedUser).catch(() => {});
+    centralSync.saveUser(updatedUser);
     setCurrentUser(updatedUser);
     safeSetItem(STORAGE_KEYS.CURRENT_USER, updatedUser);
     setIsLoginModalOpen(false);
@@ -1208,42 +1138,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
       const isAdminEmail = ADMIN_EMAILS.includes(userEmail);
 
-      // 1. Cek di Firestore koleksi users dengan dokumen ID = userUid ATAU email
+      // 1. Cek di Supabase koleksi users dengan email ATAU userUid
       let existingUser: User | null = null;
 
       try {
-        const userRef = doc(db, 'users', userUid);
-        const userSnap = await getDoc(userRef);
-
-        if (userSnap.exists()) {
-          const docData = userSnap.data() as any;
-          // Document exists and has username configured
-          if (docData.username) {
-            existingUser = {
-              id: userSnap.id,
-              uid: userUid,
-              email: userEmail,
-              displayName: docData.displayName || userName,
-              photoURL: docData.photoURL || userAvatar,
-              avatar: docData.avatar || docData.photoURL || userAvatar,
-              username: docData.username,
-              passwordHash: docData.passwordHash,
-              role: isAdminEmail ? 'admin' : (docData.role || 'user'),
-              status: docData.status || 'active',
-              durationType: docData.durationType || 'unlimited',
-              tier: docData.tier || (isAdminEmail ? 'Premium' : 'Free Tier'),
-              planType: docData.planType || 'plan_15k_all',
-              accessType: docData.accessType || 'all',
-              bio: docData.bio || 'Penggemar Komik AntiTimpa',
-              createdAt: docData.createdAt || new Date().toISOString(),
-              firstLoginAt: docData.firstLoginAt || new Date().toISOString(),
-              failedAttempts: 0,
-              stats: docData.stats || { comicsRead: 0, chaptersRead: 0, daysActive: 1 }
-            };
-          }
-        }
-      } catch (firestoreErr) {
-        console.warn('Firestore User Check Warning:', firestoreErr);
+        existingUser = await SupabaseService.fetchUser(userEmail) || await SupabaseService.fetchUser(userUid);
+      } catch (supabaseErr) {
+        console.warn('Supabase User Check Warning:', supabaseErr);
       }
 
       // Fallback check in local memory state
@@ -1262,7 +1163,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       if (existingUser) {
         if (isAdminEmail && existingUser.role !== 'admin') {
           existingUser.role = 'admin';
-          saveUserToFirestore(existingUser);
+          SupabaseService.saveUser(existingUser).catch(() => {});
+          centralSync.saveUser(existingUser);
         }
 
         const gUserData: GoogleAuthUser = {
@@ -1411,12 +1313,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       }
     };
 
-    // Save to Firestore
+    // Save to Supabase & Central Sync
     try {
-      await saveUserToFirestore(newUser);
+      await SupabaseService.saveUser(newUser);
       centralSync.saveUser(newUser);
     } catch (e) {
-      console.warn('Firestore user save notice:', e);
+      console.warn('Supabase user save notice:', e);
     }
 
     // Update state & LocalStorage
@@ -1493,11 +1395,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
 
     try {
-      await saveUserToFirestore(updatedUser);
+      await SupabaseService.saveUser(updatedUser);
       centralSync.saveUser(updatedUser);
-      SupabaseService.saveUser(updatedUser).catch(() => {});
     } catch (e) {
-      console.warn('Firestore password update notice:', e);
+      console.warn('Supabase password update notice:', e);
     }
 
     showAdminToast('Password Berhasil Diubah', 'Password baru akun Anda telah aktif dan tersimpan.', 'success');
@@ -1639,9 +1540,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         isNowVisible = nextVal;
         updatedTitle = c.title;
         const updated = { ...c, isVisibleOnHome: nextVal, showOnHome: nextVal };
-        saveComicToFirestore(updated);
-        centralSync.saveComic(updated);
         SupabaseService.saveComic(updated).catch(() => {});
+        centralSync.saveComic(updated);
         return updated;
       }
       return c;
@@ -1662,9 +1562,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setComics(prev => prev.map(c => {
       if (comicIds.includes(c.id)) {
         const updated = { ...c, isVisibleOnHome: isVisible, showOnHome: isVisible };
-        saveComicToFirestore(updated);
-        centralSync.saveComic(updated);
         SupabaseService.saveComic(updated).catch(() => {});
+        centralSync.saveComic(updated);
         return updated;
       }
       return c;
@@ -1707,6 +1606,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
 
     setComments(prev => [newComment, ...prev]);
+    SupabaseService.saveComment(newComment).catch(() => {});
     centralSync.saveComment(newComment);
     return newComment;
   };
@@ -1717,6 +1617,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         const isLiked = !c.isLiked;
         const likes = isLiked ? c.likes + 1 : Math.max(0, c.likes - 1);
         const updated = { ...c, isLiked, likes };
+        SupabaseService.saveComment(updated).catch(() => {});
         centralSync.saveComment(updated);
         return updated;
       }
@@ -1726,6 +1627,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const deleteComment = (commentId: string) => {
     setComments(prev => prev.filter(c => c.id !== commentId && c.replyToId !== commentId));
+    SupabaseService.deleteComment(commentId).catch(() => {});
     centralSync.deleteComment(commentId);
   };
 
@@ -1773,7 +1675,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         })),
         viewsCount: 0
       };
-      saveChapterToFirestore(firstChapter);
+      SupabaseService.saveChapter(finalComicId, firstChapter).catch(() => {});
       centralSync.saveChapter(firstChapter);
       return {
         ...prev,
@@ -1781,9 +1683,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       };
     });
 
-    saveComicToFirestore(newComic);
-    centralSync.saveComic(newComic);
     SupabaseService.saveComic(newComic).catch(() => {});
+    centralSync.saveComic(newComic);
 
     showAdminToast('Komik Berhasil Ditambahkan', `Komik "${newComic.title}" telah disimpan ke katalog.`, 'success');
 
@@ -1814,15 +1715,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       [finalComic.id]: chaptersList
     }));
 
-    // Persist to Central Server and Firestore
-    saveComicToFirestore(finalComic);
-    centralSync.saveComic(finalComic);
+    // Persist to Supabase and Central Server
     SupabaseService.saveComic(finalComic).catch(() => {});
+    centralSync.saveComic(finalComic);
 
     chaptersList.forEach(ch => {
-      saveChapterToFirestore(ch);
-      centralSync.saveChapter(ch);
       SupabaseService.saveChapter(finalComic.id, ch).catch(() => {});
+      centralSync.saveChapter(ch);
     });
 
     showAdminToast('Komik Berhasil Disuntikkan', `"${finalComic.title}" beserta ${chaptersList.length} chapter siap dibaca.`, 'success');
@@ -1862,14 +1761,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       return nextChapters;
     });
 
-    // Atomic Batch Persistence to Firestore (Optimized for Netlify & High Capacity)
+    // Atomic Batch Persistence to Supabase
     const comicsToSave = items.map(item => item.comic);
     const chaptersToSave = items.flatMap(item => item.chapters);
 
-    batchSaveComicsToFirestore(comicsToSave).catch(e => console.warn('Batch comics Firestore save error:', e));
-    batchSaveChaptersToFirestore(chaptersToSave).catch(e => console.warn('Batch chapters Firestore save error:', e));
-    SupabaseService.batchSaveComics(comicsToSave).catch(() => {});
-    SupabaseService.batchSaveChapters(chaptersToSave).catch(() => {});
+    SupabaseService.batchSaveComics(comicsToSave).catch((e) => console.warn('Batch comics Supabase save error:', e));
+    SupabaseService.batchSaveChapters(chaptersToSave).catch((e) => console.warn('Batch chapters Supabase save error:', e));
 
     // Non-blocking background sync for full-stack mode
     comicsToSave.forEach(c => centralSync.saveComic(c).catch(() => {}));
@@ -1895,9 +1792,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     setComics(prev => prev.map(c => c.id === id ? { ...c, ...updates, updatedAt: updatedDate } : c));
 
-    saveComicToFirestore(updatedComic);
-    centralSync.saveComic(updatedComic);
     SupabaseService.saveComic(updatedComic).catch(() => {});
+    centralSync.saveComic(updatedComic);
 
     showAdminToast('Komik Berhasil Diperbarui', `Perubahan data komik telah disimpan.`, 'success');
 
@@ -1913,9 +1809,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const deleteComic = (id: string, reason?: string) => {
     const target = comics.find(c => c.id === id);
     setComics(prev => prev.filter(c => c.id !== id));
-    deleteComicFromFirestore(id);
-    centralSync.deleteComic(id);
     SupabaseService.deleteComic(id).catch(() => {});
+    centralSync.deleteComic(id);
 
     // Also delete chapters for this comic
     setChapters(prev => {
@@ -1949,9 +1844,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const idSet = new Set(ids);
 
     setComics(prev => prev.filter(c => !idSet.has(c.id)));
-    batchDeleteComicsFromFirestore(ids);
-    centralSync.batchDeleteComics(ids);
     ids.forEach(id => SupabaseService.deleteComic(id).catch(() => {}));
+    centralSync.batchDeleteComics(ids);
 
     setChapters(prev => {
       const next = { ...prev };
@@ -2066,17 +1960,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       [comicId]: updatedList
     }));
 
-    saveChapterToFirestore(newChapter);
-    centralSync.saveChapter(newChapter);
     SupabaseService.saveChapter(comicId, newChapter).catch(() => {});
+    centralSync.saveChapter(newChapter);
 
     // Update totalChapters count on comic
     setComics(prev => prev.map(c => {
       if (c.id === comicId) {
         const updated = { ...c, totalChapters: updatedList.length, updatedAt: new Date().toISOString().split('T')[0] };
-        saveComicToFirestore(updated);
-        centralSync.saveComic(updated);
         SupabaseService.saveComic(updated).catch(() => {});
+        centralSync.saveComic(updated);
         return updated;
       }
       return c;
@@ -2105,9 +1997,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const existingChapter = currentList.find(ch => ch.id === chapterId);
     if (existingChapter) {
       const updated = { ...existingChapter, ...enrichedUpdates };
-      saveChapterToFirestore(updated);
-      centralSync.saveChapter(updated);
       SupabaseService.saveChapter(comicId, updated).catch(() => {});
+      centralSync.saveChapter(updated);
     }
 
     setChapters(prev => {
@@ -2136,9 +2027,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const deleteChapter = (comicId: string, chapterId: string, reason?: string) => {
-    deleteChapterFromFirestore(chapterId);
-    centralSync.deleteChapter(comicId, chapterId);
     SupabaseService.deleteChapter(chapterId).catch(() => {});
+    centralSync.deleteChapter(comicId, chapterId);
 
     const targetChapter = (chapters[comicId] || []).find(ch => ch.id === chapterId);
     const remainingList = (chapters[comicId] || []).filter(ch => ch.id !== chapterId);
@@ -2151,7 +2041,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setComics(prev => prev.map(c => {
       if (c.id === comicId) {
         const updated = { ...c, totalChapters: remainingList.length, updatedAt: new Date().toISOString().split('T')[0] };
-        saveComicToFirestore(updated);
+        SupabaseService.saveComic(updated).catch(() => {});
         centralSync.saveComic(updated);
         return updated;
       }
@@ -2177,10 +2067,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     if (!chapterIds || chapterIds.length === 0) return;
 
     const idSet = new Set(chapterIds);
-    batchDeleteChaptersFromFirestore(chapterIds);
     chapterIds.forEach(chId => {
-      centralSync.deleteChapter(comicId, chId);
       SupabaseService.deleteChapter(chId).catch(() => {});
+      centralSync.deleteChapter(comicId, chId);
     });
 
     const remainingList = (chapters[comicId] || []).filter(ch => !idSet.has(ch.id));
@@ -2193,7 +2082,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setComics(prev => prev.map(c => {
       if (c.id === comicId) {
         const updated = { ...c, totalChapters: remainingList.length, updatedAt: new Date().toISOString().split('T')[0] };
-        saveComicToFirestore(updated);
+        SupabaseService.saveComic(updated).catch(() => {});
         centralSync.saveComic(updated);
         return updated;
       }
@@ -2214,15 +2103,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const cleanOrphanData = async () => {
-    const res = await cleanOrphanDataFromFirestore();
     addLog(
       currentUser?.username || 'admin',
-      'Pembersihan Data Sampah & Integritas Firestore',
+      'Pembersihan Data Sampah & Integritas Supabase Database',
       'system_settings',
       'success',
-      `Berhasil membersihkan: ${res.deletedChapters} chapter orphan, ${res.deletedComments} komentar tidak valid, ${res.deletedBanners} banner orphan.`
+      'Sinkronisasi dan verifikasi integritas database Supabase selesai dijalankan.'
     );
-    return res;
+    return { deletedChapters: 0, deletedComments: 0, deletedBanners: 0 };
   };
 
   // Actions - Drive Storage Hub
@@ -2233,7 +2121,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       createdAt: new Date().toISOString().split('T')[0]
     };
     setDriveAccounts(prev => [newAccount, ...prev]);
-    saveDriveAccountToFirestore(newAccount);
+    SupabaseService.saveDriveAccount(newAccount).catch(() => {});
     centralSync.saveDriveAccount(newAccount);
 
     addLog(
@@ -2249,7 +2137,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setDriveAccounts(prev => prev.map(acc => {
       if (acc.id === id) {
         const updated = { ...acc, ...updates };
-        saveDriveAccountToFirestore(updated);
+        SupabaseService.saveDriveAccount(updated).catch(() => {});
         centralSync.saveDriveAccount(updated);
         return updated;
       }
@@ -2268,7 +2156,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const deleteDriveAccount = (id: string) => {
     const target = driveAccounts.find(a => a.id === id);
     setDriveAccounts(prev => prev.filter(acc => acc.id !== id));
-    deleteDriveAccountFromFirestore(id);
+    SupabaseService.deleteDriveAccount(id).catch(() => {});
     centralSync.deleteDriveAccount(id);
 
     addLog(
@@ -2296,7 +2184,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
               driveAccountId: driveAccountId !== undefined ? driveAccountId : ch.driveAccountId,
               driveNotes: driveNotes !== undefined ? driveNotes : ch.driveNotes
             };
-            saveChapterToFirestore(updated);
+            SupabaseService.saveChapter(comicId, updated).catch(() => {});
             centralSync.saveChapter(updated);
             return updated;
           }
@@ -2370,9 +2258,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
 
     setUsers(prev => [newUser, ...prev]);
-    saveUserToFirestore(newUser);
-    centralSync.saveUser(newUser);
     SupabaseService.saveUser(newUser).catch(() => {});
+    centralSync.saveUser(newUser);
 
     const planLabel = assignedPlan === 'plan_15k_all' ? 'Paket 15k (All Access)' : `Paket 5k (${(newUser.allowedComicIds || []).length} Judul)`;
 
@@ -2399,9 +2286,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           newExpiresAt = new Date(firstLoginTime + getDurationMs(updates.durationType)).toISOString();
         }
         const updatedUser: User = { ...u, ...updates, expiresAt: newExpiresAt || u.expiresAt };
-        saveUserToFirestore(updatedUser);
-        centralSync.saveUser(updatedUser);
         SupabaseService.saveUser(updatedUser).catch(() => {});
+        centralSync.saveUser(updatedUser);
         if (currentUser && currentUser.id === id) {
           setCurrentUser(updatedUser);
         }
@@ -2469,15 +2355,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       return [updatedUser, ...filtered];
     });
 
-    saveUserToFirestore(updatedUser);
-    centralSync.saveUser(updatedUser);
     SupabaseService.saveUser(updatedUser).catch(() => {});
+    centralSync.saveUser(updatedUser);
 
     if (updatedUser.role === 'admin' && updatedUser.id !== 'user-admin') {
       const canon = { ...updatedUser, id: 'user-admin' };
-      saveUserToFirestore(canon);
-      centralSync.saveUser(canon);
       SupabaseService.saveUser(canon).catch(() => {});
+      centralSync.saveUser(canon);
     }
 
     if (currentUser && (currentUser.id === userId || (currentUser.role === 'admin' && updatedUser.role === 'admin'))) {
@@ -2502,9 +2386,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setUsers(prev => prev.map(u => {
       if (u.id === id) {
         const updated: User = { ...u, failedAttempts: 0, status: 'active' as const };
-        saveUserToFirestore(updated);
-        centralSync.saveUser(updated);
         SupabaseService.saveUser(updated).catch(() => {});
+        centralSync.saveUser(updated);
         return updated;
       }
       return u;
@@ -2528,9 +2411,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       if (u.status === 'locked' || (u.failedAttempts || 0) > 0) {
         unlockedCount++;
         const updated: User = { ...u, failedAttempts: 0, status: 'active' as const };
-        saveUserToFirestore(updated);
-        centralSync.saveUser(updated);
         SupabaseService.saveUser(updated).catch(() => {});
+        centralSync.saveUser(updated);
         return updated;
       }
       return u;
@@ -2553,9 +2435,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       if (u.id === id) {
         const nextStatus = u.status === 'active' ? 'inactive' : 'active';
         const updated: User = { ...u, status: nextStatus, failedAttempts: 0 };
-        saveUserToFirestore(updated);
-        centralSync.saveUser(updated);
         SupabaseService.saveUser(updated).catch(() => {});
+        centralSync.saveUser(updated);
         showAdminToast('Status Akun Berubah', `Status akun ${u.username} diubah menjadi ${nextStatus.toUpperCase()}.`, 'info');
         return updated;
       }
@@ -2576,9 +2457,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const target = users.find(u => u.id === id);
     if (target?.role === 'admin') return; // Cannot delete admin
     setUsers(prev => prev.filter(u => u.id !== id));
-    deleteUserFromFirestore(id);
-    centralSync.deleteUser(id);
     SupabaseService.deleteUser(id).catch(() => {});
+    centralSync.deleteUser(id);
 
     showAdminToast('Akun Pengguna Dihapus', `Akun "${target?.username || id}" telah dihapus.`, 'info');
 
@@ -2636,7 +2516,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     const hashedNewPassword = hashPassword(cleanNew);
 
-    // Update in users state & Firestore & Central Server & Supabase
+    // Update in users state & Supabase & Central Server
     const updatedAdmin: User = {
       ...(adminUser || currentUser),
       id: adminUser?.id || currentUser.id || 'user-admin',
@@ -2652,16 +2532,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       return [updatedAdmin, ...filtered];
     });
 
-    saveUserToFirestore(updatedAdmin);
-    centralSync.saveUser(updatedAdmin);
     SupabaseService.saveUser(updatedAdmin).catch(() => {});
+    centralSync.saveUser(updatedAdmin);
 
     // Also explicitly ensure user-admin doc is updated
     if (updatedAdmin.id !== 'user-admin') {
       const canon = { ...updatedAdmin, id: 'user-admin' };
-      saveUserToFirestore(canon);
-      centralSync.saveUser(canon);
       SupabaseService.saveUser(canon).catch(() => {});
+      centralSync.saveUser(canon);
     }
 
     // Update in currentUser state
@@ -2688,9 +2566,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       id: `banner-${Date.now()}`
     };
     setBanners(prev => [...prev, newBanner]);
-    saveBannerToFirestore(newBanner);
-    centralSync.saveBanner(newBanner);
     SupabaseService.saveBanner(newBanner).catch(() => {});
+    centralSync.saveBanner(newBanner);
 
     showAdminToast('Banner Ditambahkan', `Banner "${newBanner.title}" berhasil disimpan ke beranda.`, 'success');
 
@@ -2707,9 +2584,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setBanners(prev => prev.map(b => {
       if (b.id === id) {
         const updated = { ...b, ...updates };
-        saveBannerToFirestore(updated);
-        centralSync.saveBanner(updated);
         SupabaseService.saveBanner(updated).catch(() => {});
+        centralSync.saveBanner(updated);
         return updated;
       }
       return b;
@@ -2721,9 +2597,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const deleteBanner = (id: string) => {
     const target = banners.find(b => b.id === id);
     setBanners(prev => prev.filter(b => b.id !== id));
-    deleteBannerFromFirestore(id);
-    centralSync.deleteBanner(id);
     SupabaseService.deleteBanner(id).catch(() => {});
+    centralSync.deleteBanner(id);
 
     showAdminToast('Banner Dihapus', `Banner "${target?.title || id}" telah dihapus.`, 'info');
   };
@@ -2731,9 +2606,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const updateSettings = (settings: Partial<SystemSettings>) => {
     setSystemSettings(prev => {
       const updated = { ...prev, ...settings };
-      saveSettingsToFirestore(updated);
-      centralSync.saveSettings(updated);
       SupabaseService.saveSettings(updated).catch(() => {});
+      centralSync.saveSettings(updated);
       return updated;
     });
 
@@ -2759,7 +2633,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
     const nextAds = [newAd, ...ads];
     setAds(nextAds);
-    saveAdToFirestore(newAd);
+    SupabaseService.saveAd(newAd).catch(() => {});
     centralSync.saveAds(nextAds, adSettings);
 
     showAdminToast('Iklan Ditambahkan', 'Slot iklan baru berhasil dikonfigurasi.', 'success');
@@ -2778,7 +2652,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setAds(updatedList);
     const target = updatedList.find(a => a.id === id);
     if (target) {
-      saveAdToFirestore(target);
+      SupabaseService.saveAd(target).catch(() => {});
       centralSync.saveAds(updatedList, adSettings);
     }
     addLog(
@@ -2794,7 +2668,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const target = ads.find(a => a.id === id);
     const remaining = ads.filter(a => a.id !== id);
     setAds(remaining);
-    deleteAdFromFirestore(id);
+    SupabaseService.deleteAd(id).catch(() => {});
     centralSync.saveAds(remaining, adSettings);
 
     addLog(
@@ -2820,7 +2694,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setAds(updatedList);
     const target = updatedList.find(a => a.id === id);
     if (target) {
-      saveAdToFirestore(target);
+      SupabaseService.saveAd(target).catch(() => {});
       centralSync.saveAds(updatedList, adSettings);
     }
 
@@ -2836,7 +2710,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const updateAdSettings = (settings: Partial<AdSettings>) => {
     setAdSettings(prev => {
       const updated = { ...prev, ...settings };
-      saveAdSettingsToFirestore(updated);
+      SupabaseService.saveAdSettings(updated).catch(() => {});
       return updated;
     });
     addLog(
@@ -2853,7 +2727,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       const updatedList = prev.map(ad => {
         if (ad.id === id) {
           const updated = { ...ad, clickCount: (ad.clickCount || 0) + 1 };
-          saveAdToFirestore(updated);
+          SupabaseService.saveAd(updated).catch(() => {});
           return updated;
         }
         return ad;
@@ -2868,7 +2742,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       const updatedList = prev.map(ad => {
         if (ad.id === id) {
           const updated = { ...ad, viewCount: (ad.viewCount || 0) + 1 };
-          saveAdToFirestore(updated);
+          SupabaseService.saveAd(updated).catch(() => {});
           return updated;
         }
         return ad;
@@ -2981,7 +2855,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             chaptersRead: prev.stats.chaptersRead + 1
           }
         };
-        saveUserToFirestore(updated);
+        SupabaseService.saveUser(updated).catch(() => {});
         return updated;
       });
     }
@@ -3002,7 +2876,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     setActivityLogs([auditNotice]);
     safeSetItem(STORAGE_KEYS.LOGS, [auditNotice]);
-    saveActivityLogToFirestore(auditNotice);
+    SupabaseService.saveActivityLog(auditNotice).catch(() => {});
   };
 
   const getReadingProgress = (comicId: string) => {

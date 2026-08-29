@@ -121,15 +121,19 @@ export const AdminScraperTab: React.FC = () => {
   const [isTriggeringSync, setIsTriggeringSync] = useState(false);
   const [showScraperLogs, setShowScraperLogs] = useState(false);
   const clientScraperStopRef = useRef(false);
+  const clientScraperActiveRef = useRef(false);
 
   // Poll Auto-Scraper Status from Server (if backend is active)
   const fetchAutoScraperStatus = async () => {
+    // If browser client-side turbo scraper is actively running locally, do NOT overwrite its active state
+    if (clientScraperActiveRef.current) return;
     try {
       const res = await fetch('/api/scraper/auto-status');
       const contentType = res.headers.get('content-type') || '';
       if (res.ok && contentType.includes('application/json')) {
         const data = await res.json();
         if (data && typeof data.totalComicsInDB === 'number') {
+          if (clientScraperActiveRef.current) return;
           setAutoScraperInfo(prev => ({
             ...data,
             totalComicsInDB: Math.max(data.totalComicsInDB, comics.length),
@@ -183,6 +187,7 @@ export const AdminScraperTab: React.FC = () => {
 
     // If server-side Express scraper is not running (e.g. Netlify Static SPA hosting), execute Universal Client-Side Turbo Scraper!
     if (!serverSuccess) {
+      clientScraperActiveRef.current = true;
       setAutoScraperInfo(prev => ({
         ...prev,
         isRunning: true,
@@ -230,6 +235,7 @@ export const AdminScraperTab: React.FC = () => {
       } catch (err: any) {
         console.error('Client mass scraper error:', err);
       } finally {
+        clientScraperActiveRef.current = false;
         setAutoScraperInfo(prev => ({
           ...prev,
           isRunning: false,
@@ -243,6 +249,7 @@ export const AdminScraperTab: React.FC = () => {
 
   const handleStopAutoScraper = async () => {
     clientScraperStopRef.current = true;
+    clientScraperActiveRef.current = false;
     try {
       await fetch('/api/scraper/auto-stop', { method: 'POST' });
     } catch (e) {

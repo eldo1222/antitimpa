@@ -1621,13 +1621,42 @@ export async function runClientSideMassScraper(options: ClientScraperOptions): P
           }
         } catch (_) {}
 
+        const mdUrl = `https://api.mangadex.org/manga?${stream.params}&limit=100&offset=${currentOffset}&includes[]=cover_art&includes[]=author&includes[]=artist`;
+
         // 2. Direct MangaDex API Fallback
         if (!mdData || !Array.isArray(mdData.data) || mdData.data.length === 0) {
           try {
-            const mdUrl = `https://api.mangadex.org/manga?${stream.params}&limit=100&offset=${currentOffset}&includes[]=cover_art&includes[]=author&includes[]=artist`;
             const res = await fetch(mdUrl, {
               headers: { Accept: 'application/json' }
             });
+            if (res.ok) {
+              const parsed = await res.json();
+              if (parsed && Array.isArray(parsed.data)) {
+                mdData = parsed;
+              }
+            }
+          } catch (_) {}
+        }
+
+        // 3. Resilient CORS Proxy 1 Fallback (AllOrigins)
+        if (!mdData || !Array.isArray(mdData.data) || mdData.data.length === 0) {
+          try {
+            const allOriginsUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(mdUrl)}`;
+            const res = await fetch(allOriginsUrl);
+            if (res.ok) {
+              const parsed = await res.json();
+              if (parsed && Array.isArray(parsed.data)) {
+                mdData = parsed;
+              }
+            }
+          } catch (_) {}
+        }
+
+        // 4. Resilient CORS Proxy 2 Fallback (CorsProxy.io)
+        if (!mdData || !Array.isArray(mdData.data) || mdData.data.length === 0) {
+          try {
+            const corsProxyUrl = `https://corsproxy.io/?url=${encodeURIComponent(mdUrl)}`;
+            const res = await fetch(corsProxyUrl);
             if (res.ok) {
               const parsed = await res.json();
               if (parsed && Array.isArray(parsed.data)) {
@@ -1818,16 +1847,44 @@ export async function runClientSideMassScraper(options: ClientScraperOptions): P
 
         // 2. Direct Jikan MOE Fallback
         if (!jData || !Array.isArray(jData.data) || jData.data.length === 0) {
-          let jUrl = `https://api.jikan.moe/v4/top/manga?page=${curPage}&limit=25`;
-          if (jStream.type) jUrl += `&type=${jStream.type}`;
-          if (jStream.filter) jUrl += `&filter=${jStream.filter}`;
+          const jUrl = `https://api.jikan.moe/v4/top/manga?page=${curPage}&limit=25${jStream.type ? `&type=${jStream.type}` : ''}${jStream.filter ? `&filter=${jStream.filter}` : ''}`;
 
-          const jRes = await fetch(jUrl, { headers: { Accept: 'application/json' } });
-          if (jRes.ok) {
-            const parsed = await jRes.json();
-            if (parsed && Array.isArray(parsed.data)) {
-              jData = parsed;
+          try {
+            const jRes = await fetch(jUrl, { headers: { Accept: 'application/json' } });
+            if (jRes.ok) {
+              const parsed = await jRes.json();
+              if (parsed && Array.isArray(parsed.data)) {
+                jData = parsed;
+              }
             }
+          } catch (_) {}
+
+          // 3. Resilient CORS Proxy 1 Fallback (AllOrigins)
+          if (!jData || !Array.isArray(jData.data) || jData.data.length === 0) {
+            try {
+              const allOriginsUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(jUrl)}`;
+              const res = await fetch(allOriginsUrl);
+              if (res.ok) {
+                const parsed = await res.json();
+                if (parsed && Array.isArray(parsed.data)) {
+                  jData = parsed;
+                }
+              }
+            } catch (_) {}
+          }
+
+          // 4. Resilient CORS Proxy 2 Fallback (CorsProxy.io)
+          if (!jData || !Array.isArray(jData.data) || jData.data.length === 0) {
+            try {
+              const corsProxyUrl = `https://corsproxy.io/?url=${encodeURIComponent(jUrl)}`;
+              const res = await fetch(corsProxyUrl);
+              if (res.ok) {
+                const parsed = await res.json();
+                if (parsed && Array.isArray(parsed.data)) {
+                  jData = parsed;
+                }
+              }
+            } catch (_) {}
           }
         }
 
