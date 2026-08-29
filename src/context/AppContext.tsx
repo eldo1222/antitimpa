@@ -498,7 +498,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     let isMounted = true;
     let unsubSupabaseRealtime: (() => void) | null = null;
 
-    // Helper to refresh state from Supabase
+    // Helper to refresh state from Supabase / Server
     const refreshFromSupabase = async () => {
       try {
         if (!isSupabaseConfigured()) {
@@ -507,12 +507,48 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         const supabaseData = await SupabaseService.fetchFullDatabase();
         if (supabaseData && isMounted) {
           if (Array.isArray(supabaseData.comics)) {
-            setComics(deduplicateById(supabaseData.comics));
+            setComics(prev => {
+              const remoteComics = deduplicateById(supabaseData.comics);
+              if (remoteComics.length === 0 && prev.length > 0) {
+                return prev;
+              }
+              const remoteIdMap = new Map(remoteComics.map(c => [c.id, c]));
+              const remoteTitleMap = new Map(remoteComics.map(c => [(c.title || '').trim().toLowerCase(), c]));
+
+              // Keep local items that aren't in remote yet (e.g. freshly imported/scraped)
+              const missingInRemote = prev.filter(localComic => {
+                const idMatch = remoteIdMap.has(localComic.id);
+                const titleMatch = remoteTitleMap.has((localComic.title || '').trim().toLowerCase());
+                return !idMatch && !titleMatch;
+              });
+
+              // Self-heal: push missing items to database in background so they persist
+              if (missingInRemote.length > 0) {
+                SupabaseService.batchSaveComics(missingInRemote).catch(() => {});
+                fetch('/api/data/comics/batch-upsert', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ comics: missingInRemote })
+                }).catch(() => {});
+              }
+
+              // Merge remote comics + preserved missing local comics
+              return [...remoteComics, ...missingInRemote];
+            });
           }
           if (supabaseData.chapters && typeof supabaseData.chapters === 'object') {
-            setChapters(sanitizeChaptersMap(supabaseData.chapters));
+            const sanitizedRemote = sanitizeChaptersMap(supabaseData.chapters);
+            setChapters(prev => {
+              const merged = { ...prev };
+              Object.keys(sanitizedRemote).forEach(cId => {
+                if (sanitizedRemote[cId] && sanitizedRemote[cId].length > 0) {
+                  merged[cId] = sanitizedRemote[cId];
+                }
+              });
+              return merged;
+            });
           }
-          if (Array.isArray(supabaseData.users)) {
+          if (Array.isArray(supabaseData.users) && supabaseData.users.length > 0) {
             setUsers(supabaseData.users);
             setCurrentUser(prev => {
               if (!prev) return null;
@@ -547,6 +583,27 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           if (supabaseData.systemSettings) {
             setSystemSettings(prev => ({ ...prev, ...supabaseData.systemSettings }));
           }
+        } else if (!supabaseData && isMounted) {
+          // Fallback to local server API if Supabase is unconfigured
+          try {
+            const serverRes = await fetch('/api/data');
+            if (serverRes.ok) {
+              const serverData = await serverRes.json();
+              if (serverData && isMounted) {
+                if (Array.isArray(serverData.comics) && serverData.comics.length > 0) {
+                  setComics(prev => {
+                    const serverComics = deduplicateById<Comic>(serverData.comics);
+                    const serverIdMap = new Map(serverComics.map((c: Comic) => [c.id, c]));
+                    const missingInServer = prev.filter(l => !serverIdMap.has(l.id));
+                    return [...serverComics, ...missingInServer];
+                  });
+                }
+                if (serverData.chapters && typeof serverData.chapters === 'object') {
+                  setChapters(prev => ({ ...serverData.chapters, ...prev }));
+                }
+              }
+            }
+          } catch (_) {}
         }
       } catch (e) {
         console.warn('[Supabase Sync] Fetch error:', e);
@@ -1741,6 +1798,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     });
 
     SupabaseService.saveComic(newComic).catch(() => {});
+    fetch('/api/data/comics', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newComic)
+    }).catch(() => {});
 
     showAdminToast('Komik Berhasil Ditambahkan', `Komik "${newComic.title}" telah disimpan ke katalog.`, 'success');
 
@@ -1758,7 +1820,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const finalComic: Comic = {
       ...comic,
       totalChapters: chaptersList.length > 0 ? chaptersList.length : (comic.totalChapters || 1),
-      updatedAt: new Date().toISOString().split('T')[0]
+      updatedAt: new Date().toISOString()
     };
 
     setComics(prev => {
@@ -1771,12 +1833,30 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       [finalComic.id]: chaptersList
     }));
 
-    // Persist to Supabase
-    SupabaseService.saveComic(finalComic).catch(() => {});
+    // Persist to Server API
+    fetch('/api/data/comics', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(finalComic)
+    }).catch(() => {});
 
-    chaptersList.forEach(ch => {
-      SupabaseService.saveChapter(finalComic.id, ch).catch(() => {});
-    });
+    fetch('/api/data/batch-inject', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: [{ comic: finalComic, chapters: chaptersList }] })
+    }).catch(() => {});
+
+    // Persist sequentially to Supabase (Save Comic first, then Chapters, to satisfy Foreign Key)
+    (async () => {
+      try {
+        await SupabaseService.saveComic(finalComic);
+        if (chaptersList.length > 0) {
+          await SupabaseService.batchSaveChapters(chaptersList.map(ch => ({ ...ch, comicId: finalComic.id })));
+        }
+      } catch (err) {
+        console.warn('Supabase injection notice:', err);
+      }
+    })();
 
     showAdminToast('Komik Berhasil Disuntikkan', `"${finalComic.title}" beserta ${chaptersList.length} chapter siap dibaca.`, 'success');
 
@@ -1793,13 +1873,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const batchInjectComicsWithChapters = (items: { comic: Comic; chapters: Chapter[] }[]) => {
     if (!items || items.length === 0) return;
 
-    setComics(prev => {
-      const newComics = items.map(item => ({
-        ...item.comic,
-        totalChapters: item.chapters.length > 0 ? item.chapters.length : (item.comic.totalChapters || 1),
-        updatedAt: new Date().toISOString().split('T')[0]
-      }));
+    const newComics = items.map(item => ({
+      ...item.comic,
+      totalChapters: item.chapters.length > 0 ? item.chapters.length : (item.comic.totalChapters || 1),
+      updatedAt: new Date().toISOString()
+    }));
 
+    setComics(prev => {
       const incomingIds = new Set(newComics.map(c => c.id));
       const incomingTitles = new Set(newComics.map(c => c.title.toLowerCase()));
 
@@ -1815,12 +1895,27 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       return nextChapters;
     });
 
-    // Atomic Batch Persistence to Supabase
-    const comicsToSave = items.map(item => item.comic);
-    const chaptersToSave = items.flatMap(item => item.chapters);
+    // 1. Persist to Server API
+    fetch('/api/data/batch-inject', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items })
+    }).catch(() => {});
 
-    SupabaseService.batchSaveComics(comicsToSave).catch((e) => console.warn('Batch comics Supabase save error:', e));
-    SupabaseService.batchSaveChapters(chaptersToSave).catch((e) => console.warn('Batch chapters Supabase save error:', e));
+    // 2. Sequential Batch Persistence to Supabase (Comics first, then Chapters)
+    const comicsToSave = items.map(item => item.comic);
+    const chaptersToSave = items.flatMap(item => item.chapters.map(ch => ({ ...ch, comicId: item.comic.id })));
+
+    (async () => {
+      try {
+        await SupabaseService.batchSaveComics(comicsToSave);
+        if (chaptersToSave.length > 0) {
+          await SupabaseService.batchSaveChapters(chaptersToSave);
+        }
+      } catch (err) {
+        console.warn('Batch Supabase save notice:', err);
+      }
+    })();
 
     showAdminToast('Batch Import Selesai', `Berhasil menyuntikkan ${items.length} komik lengkap ke katalog.`, 'success');
 
@@ -1843,6 +1938,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setComics(prev => prev.map(c => c.id === id ? { ...c, ...updates, updatedAt: updatedDate } : c));
 
     SupabaseService.saveComic(updatedComic).catch(() => {});
+    fetch('/api/data/comics', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updatedComic)
+    }).catch(() => {});
 
     showAdminToast('Komik Berhasil Diperbarui', `Perubahan data komik telah disimpan.`, 'success');
 
@@ -1859,6 +1959,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const target = comics.find(c => c.id === id);
     setComics(prev => prev.filter(c => c.id !== id));
     SupabaseService.deleteComic(id).catch(() => {});
+    fetch(`/api/data/comics/${id}`, { method: 'DELETE' }).catch(() => {});
 
     // Also delete chapters for this comic
     setChapters(prev => {
@@ -1893,6 +1994,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     setComics(prev => prev.filter(c => !idSet.has(c.id)));
     ids.forEach(id => SupabaseService.deleteComic(id).catch(() => {}));
+    fetch('/api/data/comics/batch-delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids })
+    }).catch(() => {});
 
     setChapters(prev => {
       const next = { ...prev };

@@ -17,6 +17,15 @@ import {
  * Translates between TypeScript camelCase models and PostgreSQL snake_case columns.
  */
 
+function safeIsoDate(val?: string | number | Date): string {
+  if (!val) return new Date().toISOString();
+  try {
+    const d = new Date(val);
+    if (!isNaN(d.getTime())) return d.toISOString();
+  } catch (_) {}
+  return new Date().toISOString();
+}
+
 export function mapComicToDb(c: Partial<Comic>): Record<string, any> {
   const row: Record<string, any> = {};
   if (c.id !== undefined) row.id = c.id;
@@ -25,22 +34,22 @@ export function mapComicToDb(c: Partial<Comic>): Record<string, any> {
   if (c.coverImage !== undefined) row.cover_image = c.coverImage;
   if (c.bannerImage !== undefined) row.banner_image = c.bannerImage;
   if (c.synopsis !== undefined) row.synopsis = c.synopsis;
-  if (c.genres !== undefined) row.genres = c.genres;
-  if (c.status !== undefined) row.status = c.status;
-  if (c.comicType !== undefined) row.comic_type = c.comicType;
-  if (c.contentType !== undefined) row.content_type = c.contentType;
-  if (c.storyWriter !== undefined) row.story_writer = c.storyWriter;
-  if (c.artist !== undefined) row.artist = c.artist;
-  if (c.rating !== undefined) row.rating = c.rating;
-  if (c.ratingCount !== undefined) row.rating_count = c.ratingCount;
-  if (c.totalChapters !== undefined) row.total_chapters = c.totalChapters;
-  if (c.totalReaders !== undefined) row.total_readers = c.totalReaders;
+  if (c.genres !== undefined) row.genres = Array.isArray(c.genres) ? c.genres : [];
+  if (c.status !== undefined) row.status = c.status || 'ongoing';
+  if (c.comicType !== undefined) row.comic_type = c.comicType || 'manga';
+  if (c.contentType !== undefined) row.content_type = c.contentType || 'normal';
+  if (c.storyWriter !== undefined) row.story_writer = c.storyWriter || '';
+  if (c.artist !== undefined) row.artist = c.artist || '';
+  if (c.rating !== undefined) row.rating = Number(c.rating) || 0;
+  if (c.ratingCount !== undefined) row.rating_count = Number(c.ratingCount) || 0;
+  if (c.totalChapters !== undefined) row.total_chapters = Number(c.totalChapters) || 0;
+  if (c.totalReaders !== undefined) row.total_readers = Number(c.totalReaders) || 0;
   if (c.isFree !== undefined) row.is_free = c.isFree;
-  if (c.isFeatured !== undefined) row.is_featured = c.isFeatured;
-  if (c.isPublished !== undefined) row.is_published = c.isPublished;
-  if (c.isVisibleOnHome !== undefined) row.is_visible_on_home = c.isVisibleOnHome;
-  if (c.createdAt !== undefined) row.created_at = c.createdAt;
-  if (c.updatedAt !== undefined) row.updated_at = c.updatedAt;
+  if (c.isFeatured !== undefined) row.is_featured = Boolean(c.isFeatured);
+  if (c.isPublished !== undefined) row.is_published = c.isPublished !== false;
+  if (c.isVisibleOnHome !== undefined) row.is_visible_on_home = c.isVisibleOnHome !== false;
+  row.created_at = safeIsoDate(c.createdAt);
+  row.updated_at = safeIsoDate(c.updatedAt);
   if (c.sourceApi !== undefined) row.source_api = c.sourceApi;
   return row;
 }
@@ -79,18 +88,18 @@ export function mapChapterToDb(ch: Partial<Chapter> & { parentComicId?: string }
   if (ch.comicId !== undefined || ch.parentComicId !== undefined) {
     row.comic_id = ch.comicId || ch.parentComicId;
   }
-  if (ch.chapterNumber !== undefined) row.chapter_number = ch.chapterNumber;
-  if (ch.title !== undefined) row.title = ch.title;
+  if (ch.chapterNumber !== undefined) row.chapter_number = Number(ch.chapterNumber) || 1;
+  if (ch.title !== undefined) row.title = ch.title || `Chapter ${ch.chapterNumber || 1}`;
   if (ch.releaseDate !== undefined) row.release_date = ch.releaseDate;
-  if (ch.isLocked !== undefined) row.is_locked = ch.isLocked;
-  if (ch.sourceType !== undefined) row.source_type = ch.sourceType;
-  if (ch.pages !== undefined) row.pages = ch.pages;
+  if (ch.isLocked !== undefined) row.is_locked = Boolean(ch.isLocked);
+  if (ch.sourceType !== undefined) row.source_type = ch.sourceType || 'images';
+  if (ch.pages !== undefined) row.pages = Array.isArray(ch.pages) ? ch.pages : [];
   if (ch.driveFileId !== undefined) row.drive_file_id = ch.driveFileId;
   if (ch.driveEmbedUrl !== undefined) row.drive_embed_url = ch.driveEmbedUrl;
   if (ch.driveAccountId !== undefined) row.drive_account_id = ch.driveAccountId;
-  if (ch.viewsCount !== undefined) row.views_count = ch.viewsCount;
-  if (ch.createdAt !== undefined) row.created_at = ch.createdAt;
-  if (ch.updatedAt !== undefined) row.updated_at = ch.updatedAt;
+  if (ch.viewsCount !== undefined) row.views_count = Number(ch.viewsCount) || 0;
+  row.created_at = safeIsoDate(ch.createdAt);
+  row.updated_at = safeIsoDate(ch.updatedAt);
   return row;
 }
 

@@ -264,6 +264,54 @@ async function startServer() {
     res.json({ success: true, comic });
   });
 
+  // 4b. Batch Upsert Comics
+  app.post("/api/data/comics/batch-upsert", (req, res) => {
+    const { comics } = req.body;
+    if (!Array.isArray(comics) || comics.length === 0) {
+      return res.status(400).json({ error: "Comics array required" });
+    }
+
+    const incomingIds = new Set(comics.map((c) => c.id));
+    const incomingTitles = new Set(comics.map((c) => (c.title || "").trim().toLowerCase()));
+
+    const remaining = dbState.comics.filter(
+      (c) => !incomingIds.has(c.id) && !incomingTitles.has((c.title || "").trim().toLowerCase())
+    );
+
+    dbState.comics = [...comics, ...remaining];
+    broadcastDatabaseUpdate({ comics: dbState.comics });
+    res.json({ success: true, count: comics.length });
+  });
+
+  // 4c. Batch Inject Comics with Chapters (All-in-one atomic endpoint)
+  app.post("/api/data/batch-inject", (req, res) => {
+    const { items } = req.body;
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: "Items array required" });
+    }
+
+    const newComics: Comic[] = [];
+    items.forEach((item) => {
+      if (item.comic && item.comic.id) {
+        newComics.push(item.comic);
+        if (Array.isArray(item.chapters)) {
+          dbState.chapters[item.comic.id] = item.chapters;
+        }
+      }
+    });
+
+    const incomingIds = new Set(newComics.map((c) => c.id));
+    const incomingTitles = new Set(newComics.map((c) => (c.title || "").trim().toLowerCase()));
+
+    const remaining = dbState.comics.filter(
+      (c) => !incomingIds.has(c.id) && !incomingTitles.has((c.title || "").trim().toLowerCase())
+    );
+
+    dbState.comics = [...newComics, ...remaining];
+    broadcastDatabaseUpdate({ comics: dbState.comics, chapters: dbState.chapters });
+    res.json({ success: true, count: newComics.length });
+  });
+
   // 5. Delete Comic
   app.delete("/api/data/comics/:id", (req, res) => {
     const { id } = req.params;
