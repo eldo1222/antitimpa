@@ -152,7 +152,7 @@ export const AdminScraperTab: React.FC = () => {
     return () => clearInterval(interval);
   }, [autoScraperInfo.isRunning]);
 
-  // Dual-Engine Mass Scraper Trigger (Universal for both Netlify SPA & AI Studio Server)
+  // Dual-Engine Mass Scraper Trigger (Universal for both Vercel & Node Server)
   const handleTriggerAutoSync = async () => {
     setIsTriggeringSync(true);
     clientScraperStopRef.current = false;

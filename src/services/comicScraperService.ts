@@ -111,7 +111,7 @@ export async function searchMangaDex(
   const safeLimit = Math.min(500, Math.max(1, limit || 50));
   const safeOffset = Math.max(0, offset || 0);
 
-  // Attempt 1: Call our internal server proxy or Netlify Function
+  // Attempt 1: Call our internal server proxy or Vercel Serverless Function
   try {
     const params = new URLSearchParams();
     if (qTitle) params.append('title', qTitle);
@@ -1088,12 +1088,9 @@ export async function fetchMangaDexChapters(mangaId: string): Promise<any[]> {
     console.warn('Failed to fetch real MangaDex chapters via Express proxy:', err);
   }
 
-  // Attempt 2: Serverless Function Proxy (Vercel / Netlify)
+  // Attempt 2: Serverless Function Proxy (Vercel)
   try {
-    let serverlessRes = await fetch(`/api/mangadex-proxy?action=chapters&mangaId=${mangaId}`);
-    if (!serverlessRes.ok) {
-      serverlessRes = await fetch(`/.netlify/functions/mangadex-proxy?action=chapters&mangaId=${mangaId}`);
-    }
+    const serverlessRes = await fetch(`/api/mangadex-proxy?action=chapters&mangaId=${mangaId}`);
     if (serverlessRes.ok) {
       const data = await serverlessRes.json();
       if (data.chapters && Array.isArray(data.chapters) && data.chapters.length > 0) {
@@ -1174,12 +1171,9 @@ export async function fetchMangaDexPages(chapterId: string): Promise<any[]> {
     // try next
   }
 
-  // Attempt 2: Serverless Function Proxy (Vercel / Netlify)
+  // Attempt 2: Serverless Function Proxy (Vercel)
   try {
-    let serverlessRes = await fetch(`/api/mangadex-proxy?action=pages&chapterId=${chapterId}`);
-    if (!serverlessRes.ok) {
-      serverlessRes = await fetch(`/.netlify/functions/mangadex-proxy?action=pages&chapterId=${chapterId}`);
-    }
+    const serverlessRes = await fetch(`/api/mangadex-proxy?action=pages&chapterId=${chapterId}`);
     if (serverlessRes.ok && serverlessRes.headers.get('content-type')?.includes('application/json')) {
       const data = await serverlessRes.json();
       if (data.pages && Array.isArray(data.pages) && data.pages.length > 0) {
@@ -1618,7 +1612,7 @@ export async function runClientSideMassScraper(options: ClientScraperOptions): P
       try {
         let mdData: any = null;
         
-        // 1. Try Netlify Serverless Proxy First
+        // 1. Try Vercel Serverless Proxy First
         try {
           const proxyRes = await fetch(`/api/mangadex/search?limit=100&offset=${currentOffset}&${stream.params}`);
           const contentType = proxyRes.headers.get('content-type') || '';
@@ -1839,7 +1833,7 @@ export async function runClientSideMassScraper(options: ClientScraperOptions): P
       try {
         let jData: any = null;
 
-        // 1. Try Jikan Netlify Serverless Proxy First
+        // 1. Try Jikan Vercel Serverless Proxy First
         try {
           let proxyUrl = `/api/jikan/top?page=${curPage}&limit=25`;
           if (jStream.type) proxyUrl += `&type=${jStream.type}`;

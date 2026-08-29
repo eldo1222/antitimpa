@@ -160,14 +160,11 @@ export const ComicReaderView: React.FC = () => {
           console.warn('Attempt 1 (Express MangaDex pages) failed:', err);
         }
 
-        // Attempt 2: Serverless Function route (/api/mangadex-proxy or /.netlify/functions/mangadex-proxy)
+        // Attempt 2: Serverless Function route (/api/mangadex-proxy)
         try {
-          let netlifyRes = await fetch(`/api/mangadex-proxy?action=pages&chapterId=${mdChapterId}&quality=data`);
-          if (!netlifyRes.ok) {
-            netlifyRes = await fetch(`/.netlify/functions/mangadex-proxy?action=pages&chapterId=${mdChapterId}&quality=data`);
-          }
-          if (netlifyRes.ok) {
-            const data = await netlifyRes.json();
+          const vercelRes = await fetch(`/api/mangadex-proxy?action=pages&chapterId=${mdChapterId}&quality=data`);
+          if (vercelRes.ok) {
+            const data = await vercelRes.json();
             if (data && data.pages && data.pages.length > 0) {
               setLivePages(data.pages);
               return;
@@ -389,7 +386,7 @@ export const ComicReaderView: React.FC = () => {
     }
 
     // Stage 2: If /api/image-proxy fails, try /api/proxy-image with fallbackUrl
-    if (currentSrc.includes('/api/image-proxy') || currentSrc.includes('/.netlify/functions/mangadex-image')) {
+    if (currentSrc.includes('/api/image-proxy')) {
       if (fallbackUrl) {
         target.src = `/api/proxy-image?url=${encodeURIComponent(fallbackUrl)}`;
         return;
@@ -406,7 +403,7 @@ export const ComicReaderView: React.FC = () => {
     }
 
     // Stage 4: If CORS proxy failed, try loading directly with no-referrer
-    if (currentSrc.includes('corsproxy.io/?url=') || currentSrc.includes('/.netlify/functions/image-proxy?url=')) {
+    if (currentSrc.includes('corsproxy.io/?url=')) {
       const parts = currentSrc.split('?url=');
       const originalUrl = parts[1] ? decodeURIComponent(parts[1]) : '';
       if (originalUrl) {

@@ -158,7 +158,7 @@ export const AdminDatabaseTab: React.FC = () => {
     setSupabaseKeyInput(cleanKey);
     setIsConfigured(true);
 
-    // 2. Simpan ke Firestore SystemSettings agar tersinkronisasi otomatis ke Netlify / semua perangkat
+    // 2. Simpan ke Firestore SystemSettings agar tersinkronisasi otomatis ke Vercel / semua perangkat
     updateSettings({
       supabaseUrl: cleanUrl,
       supabaseAnonKey: cleanKey
