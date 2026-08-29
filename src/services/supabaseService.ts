@@ -386,7 +386,104 @@ export function mapDbToAdSettings(s: Record<string, any>): AdSettings {
 
 export class SupabaseService {
   /**
-   * Fetch All Data from Supabase Database
+   * Helper to fetch all rows with Supabase Range Pagination (>1000 rows without truncation)
+   */
+  public static async fetchAllRows<T = any>(
+    table: string, 
+    select: string = '*', 
+    orderColumn: string = 'created_at', 
+    ascending: boolean = true
+  ): Promise<T[]> {
+    const client = getSupabaseClient();
+    if (!client) return [];
+    
+    const allRows: T[] = [];
+    const pageSize = 1000;
+    let page = 0;
+    let hasMore = true;
+
+    while (hasMore) {
+      const from = page * pageSize;
+      const to = from + pageSize - 1;
+      
+      try {
+        let query = client.from(table).select(select);
+        if (orderColumn) {
+          query = query.order(orderColumn, { ascending });
+        }
+        const { data, error } = await query.range(from, to);
+
+        if (error) {
+          console.warn(`[SupabaseService] Error fetching table '${table}' page ${page}:`, error);
+          break;
+        }
+
+        if (data && data.length > 0) {
+          allRows.push(...(data as T[]));
+          if (data.length < pageSize) {
+            hasMore = false;
+          } else {
+            page++;
+          }
+        } else {
+          hasMore = false;
+        }
+      } catch (err) {
+        console.warn(`[SupabaseService] Exception fetching table '${table}':`, err);
+        break;
+      }
+    }
+
+    return allRows;
+  }
+
+  /**
+   * Get Live Counts directly from Supabase PostgreSQL
+   */
+  public static async getSupabaseLiveStats(): Promise<{
+    isOnline: boolean;
+    comicsCount: number;
+    chaptersCount: number;
+    usersCount: number;
+    bannersCount: number;
+    error?: string;
+  }> {
+    const client = getSupabaseClient();
+    if (!client) {
+      return { isOnline: false, comicsCount: 0, chaptersCount: 0, usersCount: 0, bannersCount: 0, error: 'Koneksi Supabase belum diatur' };
+    }
+
+    try {
+      const [
+        { count: comicsCount, error: cErr },
+        { count: chaptersCount, error: chErr },
+        { count: usersCount, error: uErr },
+        { count: bannersCount, error: bErr }
+      ] = await Promise.all([
+        client.from('comics').select('*', { count: 'exact', head: true }),
+        client.from('chapters').select('*', { count: 'exact', head: true }),
+        client.from('users').select('*', { count: 'exact', head: true }),
+        client.from('banners').select('*', { count: 'exact', head: true })
+      ]);
+
+      if (cErr && cErr.code === '42P01') {
+        return { isOnline: false, comicsCount: 0, chaptersCount: 0, usersCount: 0, bannersCount: 0, error: 'Tabel comics belum dibuat di Supabase. Jalankan SQL Schema terlebih dahulu.' };
+      }
+
+      return {
+        isOnline: true,
+        comicsCount: comicsCount || 0,
+        chaptersCount: chaptersCount || 0,
+        usersCount: usersCount || 0,
+        bannersCount: bannersCount || 0
+      };
+    } catch (e: any) {
+      return { isOnline: false, comicsCount: 0, chaptersCount: 0, usersCount: 0, bannersCount: 0, error: e.message || String(e) };
+    }
+  }
+
+  /**
+   * Fetch All Data from Supabase Database (Multi-Device Single Source of Truth)
    */
   public static async fetchFullDatabase(): Promise<{
     comics: Comic[];
@@ -404,24 +501,14 @@ export class SupabaseService {
     if (!client) return null;
 
     try {
-      // 1. Fetch Comics
-      const { data: comicsData, error: comicsErr } = await client
-        .from('comics')
-        .select('*')
-        .order('updated_at', { ascending: false });
+      // 1. Fetch ALL Comics (Paginated)
+      const comicsRows = await this.fetchAllRows('comics', '*', 'updated_at', false);
+      const comics: Comic[] = comicsRows.map(mapDbToComic);
 
-      if (comicsErr) throw comicsErr;
-      const comics: Comic[] = (comicsData || []).map(mapDbToComic);
-
-      // 2. Fetch Chapters
-      const { data: chaptersData, error: chErr } = await client
-        .from('chapters')
-        .select('*')
-        .order('chapter_number', { ascending: true });
-
-      if (chErr) throw chErr;
+      // 2. Fetch ALL Chapters (Paginated)
+      const chaptersRows = await this.fetchAllRows('chapters', '*', 'chapter_number', true);
       const chaptersMap: Record<string, Chapter[]> = {};
-      (chaptersData || []).forEach(row => {
+      chaptersRows.forEach(row => {
         const ch = mapDbToChapter(row);
         if (!chaptersMap[ch.comicId]) {
           chaptersMap[ch.comicId] = [];
@@ -430,43 +517,38 @@ export class SupabaseService {
       });
 
       // 3. Fetch Users
-      const { data: usersData } = await client
-        .from('users')
-        .select('*');
-      const users: User[] = (usersData || []).map(mapDbToUser);
+      const usersRows = await this.fetchAllRows('users', '*', 'created_at', false);
+      const users: User[] = usersRows.map(mapDbToUser);
 
       // 4. Fetch Banners
-      const { data: bannersData } = await client
-        .from('banners')
-        .select('*')
-        .order('order_index', { ascending: true });
-      const banners: Banner[] = (bannersData || []).map(mapDbToBanner);
+      const bannersRows = await this.fetchAllRows('banners', '*', 'order_index', true);
+      const banners: Banner[] = bannersRows.map(mapDbToBanner);
 
       // 5. Fetch Drive Accounts
       let driveAccounts: DriveAccount[] = [];
       try {
-        const { data: drivesData } = await client.from('drive_accounts').select('*');
+        const drivesData = await this.fetchAllRows('drive_accounts', '*', 'created_at', false);
         if (drivesData) driveAccounts = drivesData.map(mapDbToDriveAccount);
       } catch (e) {}
 
       // 6. Fetch Activity Logs
       let activityLogs: ActivityLog[] = [];
       try {
-        const { data: logsData } = await client.from('activity_logs').select('*').order('created_at', { ascending: false }).limit(100);
-        if (logsData) activityLogs = logsData.map(mapDbToActivityLog);
+        const logsData = await this.fetchAllRows('activity_logs', '*', 'created_at', false);
+        if (logsData) activityLogs = logsData.slice(0, 200).map(mapDbToActivityLog);
       } catch (e) {}
 
       // 7. Fetch Comments
       let comments: Comment[] = [];
       try {
-        const { data: commentsData } = await client.from('comments').select('*').order('created_at', { ascending: false });
+        const commentsData = await this.fetchAllRows('comments', '*', 'created_at', false);
         if (commentsData) comments = commentsData.map(mapDbToComment);
       } catch (e) {}
 
       // 8. Fetch Ads
       let ads: AdItem[] = [];
       try {
-        const { data: adsData } = await client.from('ads').select('*');
+        const adsData = await this.fetchAllRows('ads', '*', 'created_at', false);
         if (adsData) ads = adsData.map(mapDbToAd);
       } catch (e) {}
 
@@ -557,22 +639,38 @@ export class SupabaseService {
   }
 
   /**
-   * Batch Save Comics (Chunks of 100 for high efficiency)
+   * Batch Save Comics with chunking and individual fallback
    */
-  public static async batchSaveComics(comics: Comic[]): Promise<boolean> {
+  public static async batchSaveComics(comics: Comic[]): Promise<{ success: boolean; count: number; error?: string }> {
     const client = getSupabaseClient();
-    if (!client || comics.length === 0) return false;
-    try {
-      const rows = comics.map(c => mapComicToDb(c));
-      for (let i = 0; i < rows.length; i += 100) {
-        const chunk = rows.slice(i, i + 100);
-        await client.from('comics').upsert(chunk, { onConflict: 'id' });
+    if (!client || comics.length === 0) return { success: true, count: 0 };
+    
+    let savedCount = 0;
+    const chunkSize = 50;
+    const rows = comics.map(c => mapComicToDb(c));
+
+    for (let i = 0; i < rows.length; i += chunkSize) {
+      const chunk = rows.slice(i, i + chunkSize);
+      const { error } = await client.from('comics').upsert(chunk, { onConflict: 'id' });
+      
+      if (error) {
+        console.warn(`[SupabaseService] Batch upsert error on comics chunk ${i}, trying individual rows:`, error);
+        // Fallback to row by row for this chunk
+        for (const row of chunk) {
+          const { error: rowErr } = await client.from('comics').upsert(row, { onConflict: 'id' });
+          if (!rowErr) {
+            savedCount++;
+          }
+        }
+      } else {
+        savedCount += chunk.length;
       }
-      return true;
-    } catch (err) {
-      console.warn('[SupabaseService] batchSaveComics error:', err);
-      return false;
     }
+
+    return { 
+      success: savedCount > 0 || comics.length === 0, 
+      count: savedCount 
+    };
   }
 
   /**
@@ -623,22 +721,38 @@ export class SupabaseService {
   }
 
   /**
-   * Batch Save Chapters (Chunks of 100)
+   * Batch Save Chapters with chunking and individual fallback
    */
-  public static async batchSaveChapters(chapters: Chapter[]): Promise<boolean> {
+  public static async batchSaveChapters(chapters: Chapter[]): Promise<{ success: boolean; count: number; error?: string }> {
     const client = getSupabaseClient();
-    if (!client || chapters.length === 0) return false;
-    try {
-      const rows = chapters.map(ch => mapChapterToDb(ch));
-      for (let i = 0; i < rows.length; i += 100) {
-        const chunk = rows.slice(i, i + 100);
-        await client.from('chapters').upsert(chunk, { onConflict: 'id' });
+    if (!client || chapters.length === 0) return { success: true, count: 0 };
+    
+    let savedCount = 0;
+    const chunkSize = 50;
+    const rows = chapters.map(ch => mapChapterToDb(ch));
+
+    for (let i = 0; i < rows.length; i += chunkSize) {
+      const chunk = rows.slice(i, i + chunkSize);
+      const { error } = await client.from('chapters').upsert(chunk, { onConflict: 'id' });
+      
+      if (error) {
+        console.warn(`[SupabaseService] Batch upsert error on chapters chunk ${i}, trying individual rows:`, error);
+        // Fallback to row by row for this chunk
+        for (const row of chunk) {
+          const { error: rowErr } = await client.from('chapters').upsert(row, { onConflict: 'id' });
+          if (!rowErr) {
+            savedCount++;
+          }
+        }
+      } else {
+        savedCount += chunk.length;
       }
-      return true;
-    } catch (err) {
-      console.warn('[SupabaseService] batchSaveChapters error:', err);
-      return false;
     }
+
+    return { 
+      success: savedCount > 0 || chapters.length === 0, 
+      count: savedCount 
+    };
   }
 
   /**
@@ -1037,12 +1151,12 @@ export class SupabaseService {
     try {
       // 1. Upload Comics
       onProgress?.(`Mengunggah ${data.comics.length} judul komik ke Supabase...`, 20);
-      await this.batchSaveComics(data.comics);
+      const comicsResult = await this.batchSaveComics(data.comics);
 
       // 2. Upload Chapters
       const allChapters = Object.values(data.chapters).flat();
       onProgress?.(`Mengunggah ${allChapters.length} chapter ke Supabase...`, 55);
-      await this.batchSaveChapters(allChapters);
+      const chaptersResult = await this.batchSaveChapters(allChapters);
 
       // 3. Upload Users
       if (data.users.length > 0) {
@@ -1069,9 +1183,9 @@ export class SupabaseService {
       onProgress?.('Migrasi selesai! Seluruh komik, chapter, user & banner kini berada di Supabase.', 100);
       return {
         success: true,
-        message: `Berhasil migrasi ${data.comics.length} komik dan ${allChapters.length} chapter ke Supabase PostgreSQL!`,
-        countComics: data.comics.length,
-        countChapters: allChapters.length
+        message: `Berhasil migrasi ${comicsResult.count} dari ${data.comics.length} komik dan ${chaptersResult.count} dari ${allChapters.length} chapter ke Supabase PostgreSQL!`,
+        countComics: comicsResult.count,
+        countChapters: chaptersResult.count
       };
     } catch (err: any) {
       console.error('[Supabase] Migration error:', err);

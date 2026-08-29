@@ -229,6 +229,9 @@ interface AppContextType {
   adminToasts: AdminToastItem[];
   showAdminToast: (title: string, message?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
   removeAdminToast: (id: string) => void;
+
+  // Actions - Supabase Central Synchronization
+  syncWithSupabase: () => Promise<{ success: boolean; message: string; comicsCount: number; chaptersCount: number }>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -2883,6 +2886,80 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return readingHistory.find(h => h.comicId === comicId);
   };
 
+  const syncWithSupabase = useCallback(async (): Promise<{ success: boolean; message: string; comicsCount: number; chaptersCount: number }> => {
+    try {
+      const supabaseData = await SupabaseService.fetchFullDatabase();
+      if (!supabaseData) {
+        return { success: false, message: 'Tidak dapat mengambil data dari Supabase. Periksa koneksi dan kredensial.', comicsCount: 0, chaptersCount: 0 };
+      }
+
+      let cCount = 0;
+      let chCount = 0;
+
+      if (supabaseData.comics && Array.isArray(supabaseData.comics) && supabaseData.comics.length > 0) {
+        const unique = deduplicateById(supabaseData.comics);
+        setComics(unique);
+        safeSetItem(STORAGE_KEYS.COMICS, unique);
+        cCount = unique.length;
+      }
+      if (supabaseData.chapters && typeof supabaseData.chapters === 'object' && Object.keys(supabaseData.chapters).length > 0) {
+        const sanitized = sanitizeChaptersMap(supabaseData.chapters);
+        setChapters(sanitized);
+        safeSetItem(STORAGE_KEYS.CHAPTERS, sanitized);
+        chCount = Object.values(sanitized).flat().length;
+      }
+      if (supabaseData.users && Array.isArray(supabaseData.users) && supabaseData.users.length > 0) {
+        setUsers(supabaseData.users);
+        safeSetItem(STORAGE_KEYS.USERS, supabaseData.users);
+      }
+      if (supabaseData.banners && Array.isArray(supabaseData.banners) && supabaseData.banners.length > 0) {
+        setBanners(supabaseData.banners);
+        safeSetItem(STORAGE_KEYS.BANNERS, supabaseData.banners);
+      }
+      if (supabaseData.driveAccounts && Array.isArray(supabaseData.driveAccounts) && supabaseData.driveAccounts.length > 0) {
+        setDriveAccounts(supabaseData.driveAccounts);
+        safeSetItem(STORAGE_KEYS.DRIVE_ACCOUNTS, supabaseData.driveAccounts);
+      }
+      if (supabaseData.activityLogs && Array.isArray(supabaseData.activityLogs) && supabaseData.activityLogs.length > 0) {
+        setActivityLogs(supabaseData.activityLogs);
+        safeSetItem(STORAGE_KEYS.LOGS, supabaseData.activityLogs);
+      }
+      if (supabaseData.comments && Array.isArray(supabaseData.comments) && supabaseData.comments.length > 0) {
+        setComments(supabaseData.comments);
+        safeSetItem(STORAGE_KEYS.COMMENTS, supabaseData.comments);
+      }
+      if (supabaseData.ads && Array.isArray(supabaseData.ads) && supabaseData.ads.length > 0) {
+        setAds(supabaseData.ads);
+        safeSetItem(STORAGE_KEYS.ADS, supabaseData.ads);
+      }
+      if (supabaseData.adSettings) {
+        setAdSettings(supabaseData.adSettings);
+        safeSetItem(STORAGE_KEYS.AD_SETTINGS, supabaseData.adSettings);
+      }
+      if (supabaseData.systemSettings) {
+        setSystemSettings(prev => {
+          const updated = { ...prev, ...supabaseData.systemSettings };
+          safeSetItem(STORAGE_KEYS.SETTINGS, updated);
+          return updated;
+        });
+      }
+
+      return {
+        success: true,
+        message: `Sinkronisasi sukses! ${cCount} komik dan ${chCount} chapter berhasil dimuat ke aplikasi.`,
+        comicsCount: cCount,
+        chaptersCount: chCount
+      };
+    } catch (e: any) {
+      return {
+        success: false,
+        message: `Gagal sinkronisasi dengan Supabase: ${e.message || e}`,
+        comicsCount: 0,
+        chaptersCount: 0
+      };
+    }
+  }, []);
+
   return (
     <AppContext.Provider
       value={{
@@ -2989,7 +3066,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         getReadingProgress,
         adminToasts,
         showAdminToast,
-        removeAdminToast
+        removeAdminToast,
+        syncWithSupabase
       }}
     >
       {children}

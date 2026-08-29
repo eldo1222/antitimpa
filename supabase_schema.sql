@@ -1,7 +1,7 @@
 -- ==============================================================================
 -- KOMIKYUK / ANTITIMPA - SUPABASE (POSTGRESQL) SCHEMA
 -- ==============================================================================
--- Petunjuk:
+-- Petunjuk Eksekusi:
 -- 1. Buka Supabase Dashboard (https://app.supabase.com) -> Masuk ke Project Anda.
 -- 2. Buka menu "SQL Editor" di bilah kiri.
 -- 3. Paste seluruh kode SQL di bawah ini dan klik tombol "Run" (ikon play hijau).
@@ -23,7 +23,9 @@ CREATE TABLE IF NOT EXISTS public.comics (
     story_writer TEXT DEFAULT '',
     artist TEXT DEFAULT '',
     rating NUMERIC(4, 2) DEFAULT 0.00,
+    rating_count INT DEFAULT 0,
     total_chapters INT DEFAULT 0,
+    total_readers INT DEFAULT 0,
     is_free BOOLEAN DEFAULT TRUE,
     is_vip BOOLEAN DEFAULT FALSE,
     is_featured BOOLEAN DEFAULT FALSE,
@@ -35,7 +37,6 @@ CREATE TABLE IF NOT EXISTS public.comics (
     source_api TEXT DEFAULT 'manual'
 );
 
--- Index pencarian & filter komik
 CREATE INDEX IF NOT EXISTS idx_comics_slug ON public.comics(slug);
 CREATE INDEX IF NOT EXISTS idx_comics_status ON public.comics(status);
 CREATE INDEX IF NOT EXISTS idx_comics_content_type ON public.comics(content_type);
@@ -44,7 +45,7 @@ CREATE INDEX IF NOT EXISTS idx_comics_updated_at ON public.comics(updated_at DES
 -- 2. TABEL CHAPTERS (Daftar Chapter / Bab)
 CREATE TABLE IF NOT EXISTS public.chapters (
     id TEXT PRIMARY KEY,
-    comic_id TEXT NOT NULL REFERENCES public.comics(id) ON DELETE CASCADE,
+    comic_id TEXT NOT NULL,
     chapter_number NUMERIC(8, 2) NOT NULL,
     title TEXT NOT NULL,
     slug TEXT,
@@ -63,7 +64,6 @@ CREATE TABLE IF NOT EXISTS public.chapters (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Index pencarian & sorting chapter
 CREATE INDEX IF NOT EXISTS idx_chapters_comic_id ON public.chapters(comic_id);
 CREATE INDEX IF NOT EXISTS idx_chapters_number ON public.chapters(chapter_number ASC);
 CREATE INDEX IF NOT EXISTS idx_chapters_comic_number ON public.chapters(comic_id, chapter_number DESC);
@@ -72,7 +72,7 @@ CREATE INDEX IF NOT EXISTS idx_chapters_comic_number ON public.chapters(comic_id
 CREATE TABLE IF NOT EXISTS public.users (
     id TEXT PRIMARY KEY,
     username TEXT NOT NULL UNIQUE,
-    email TEXT NOT NULL UNIQUE,
+    email TEXT,
     password_hash TEXT,
     role TEXT DEFAULT 'user',
     package_type TEXT DEFAULT 'free',
@@ -89,10 +89,11 @@ CREATE TABLE IF NOT EXISTS public.users (
 CREATE INDEX IF NOT EXISTS idx_users_email ON public.users(email);
 CREATE INDEX IF NOT EXISTS idx_users_username ON public.users(username);
 
--- 4. TABEL BANNERS (Carousel / Slider Banner)
+-- 4. TABEL BANNERS
 CREATE TABLE IF NOT EXISTS public.banners (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
+    subtitle TEXT DEFAULT 'Komik Populer Terupdate',
     image_url TEXT NOT NULL,
     target_url TEXT,
     target_type TEXT DEFAULT 'comic',
@@ -102,39 +103,100 @@ CREATE TABLE IF NOT EXISTS public.banners (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 5. TABEL DRIVE ACCOUNTS (Multi Google Drive Storage)
+-- 5. TABEL DRIVE_ACCOUNTS
 CREATE TABLE IF NOT EXISTS public.drive_accounts (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     email TEXT,
-    account_type TEXT DEFAULT 'service_account',
-    client_email TEXT,
-    private_key TEXT,
-    folder_id TEXT,
-    is_active BOOLEAN DEFAULT TRUE,
+    folder_url TEXT,
+    status TEXT DEFAULT 'active',
+    notes TEXT,
+    storage_used_gb NUMERIC(6, 2) DEFAULT 0,
+    storage_total_gb NUMERIC(6, 2) DEFAULT 15,
+    color_tag TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 6. TABEL ACTIVITY LOGS (Audit Trail / Security Log)
+-- 6. TABEL ACTIVITY_LOGS
 CREATE TABLE IF NOT EXISTS public.activity_logs (
     id TEXT PRIMARY KEY,
-    user_id TEXT,
-    username TEXT,
+    username TEXT DEFAULT 'System',
     action TEXT NOT NULL,
-    target_type TEXT,
-    target_id TEXT,
+    type TEXT DEFAULT 'system',
+    status TEXT DEFAULT 'info',
     details TEXT,
-    ip_address TEXT,
+    ip_address TEXT DEFAULT '127.0.0.1',
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_activity_logs_created ON public.activity_logs(created_at DESC);
-
--- 7. TABEL SYSTEM SETTINGS (Konfigurasi Global & SEO)
-CREATE TABLE IF NOT EXISTS public.system_settings (
+-- 7. TABEL COMMENTS
+CREATE TABLE IF NOT EXISTS public.comments (
     id TEXT PRIMARY KEY,
-    site_name TEXT DEFAULT 'KomikYuk',
-    site_tagline TEXT DEFAULT 'Baca Komik Online Bahasa Indonesia',
+    comic_id TEXT NOT NULL,
+    chapter_id TEXT,
+    chapter_number NUMERIC(8, 2),
+    user_id TEXT,
+    username TEXT DEFAULT 'Pembaca',
+    user_avatar TEXT,
+    user_role TEXT,
+    user_email TEXT,
+    content TEXT NOT NULL,
+    likes_count INT DEFAULT 0,
+    spoiler BOOLEAN DEFAULT FALSE,
+    reply_to_id TEXT,
+    is_admin BOOLEAN DEFAULT FALSE,
+    is_vip BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 8. TABEL ADS (Iklan Banner, Mitra & Direct Link)
+CREATE TABLE IF NOT EXISTS public.ads (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    type TEXT DEFAULT 'banner',
+    position TEXT DEFAULT 'home_hero_bottom',
+    is_active BOOLEAN DEFAULT TRUE,
+    image_url TEXT,
+    target_url TEXT,
+    alt_text TEXT,
+    badge_label TEXT,
+    sponsor_name TEXT,
+    headline TEXT,
+    description TEXT,
+    cta_text TEXT,
+    html_code TEXT,
+    script_code TEXT,
+    popunder_url TEXT,
+    frequency_hours INT DEFAULT 1,
+    show_for_vip BOOLEAN DEFAULT FALSE,
+    max_clicks_per_day INT,
+    click_count INT DEFAULT 0,
+    view_count INT DEFAULT 0,
+    notes TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 9. TABEL AD_SETTINGS (Pengaturan Iklan Global)
+CREATE TABLE IF NOT EXISTS public.ad_settings (
+    id TEXT PRIMARY KEY DEFAULT 'global_ad_config',
+    ads_enabled BOOLEAN DEFAULT TRUE,
+    hide_ads_for_vip BOOLEAN DEFAULT TRUE,
+    popunder_enabled BOOLEAN DEFAULT TRUE,
+    popunder_cooldown_minutes INT DEFAULT 15,
+    popunder_cooldown_hours INT DEFAULT 1,
+    welcome_popup_enabled BOOLEAN DEFAULT FALSE,
+    mitra_interstitial_enabled BOOLEAN DEFAULT TRUE,
+    dual_chapter_ads_enabled BOOLEAN DEFAULT TRUE,
+    floating_bottom_enabled BOOLEAN DEFAULT TRUE,
+    show_ad_label BOOLEAN DEFAULT TRUE,
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 10. TABEL SYSTEM_SETTINGS (Pengaturan Identitas & Fitur)
+CREATE TABLE IF NOT EXISTS public.system_settings (
+    id TEXT PRIMARY KEY DEFAULT 'global_config',
+    site_name TEXT DEFAULT 'AntiTimpa',
+    site_tagline TEXT,
     site_description TEXT,
     site_logo TEXT,
     site_favicon TEXT,
@@ -145,90 +207,117 @@ CREATE TABLE IF NOT EXISTS public.system_settings (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 8. TABEL COMMENTS (Komentar Pembaca)
-CREATE TABLE IF NOT EXISTS public.comments (
-    id TEXT PRIMARY KEY,
-    comic_id TEXT NOT NULL REFERENCES public.comics(id) ON DELETE CASCADE,
-    chapter_id TEXT,
-    user_id TEXT NOT NULL,
-    username TEXT NOT NULL,
-    avatar TEXT,
-    content TEXT NOT NULL,
-    likes_count INT DEFAULT 0,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_comments_comic ON public.comments(comic_id);
-
--- 9. TABEL ADS & AD SETTINGS (Manajemen Iklan)
-CREATE TABLE IF NOT EXISTS public.ads (
-    id TEXT PRIMARY KEY,
-    placement TEXT NOT NULL,
-    title TEXT,
-    image_url TEXT,
-    target_url TEXT,
-    ad_code TEXT,
-    is_active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS public.ad_settings (
-    id TEXT PRIMARY KEY,
-    enable_global_ads BOOLEAN DEFAULT TRUE,
-    ad_blocker_notice BOOLEAN DEFAULT FALSE,
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
 -- ==============================================================================
--- ROW LEVEL SECURITY (RLS) POLICIES
--- Mengizinkan pembacaan publik tanpa batas (Unlimited Read) & penulisan via anon/authenticated
+-- KEBIJAKAN ROW LEVEL SECURITY (RLS) - PUBLIC READ & WRITE
 -- ==============================================================================
-
 ALTER TABLE public.comics ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.chapters ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.banners ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.drive_accounts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.activity_logs ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.system_settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.comments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ads ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ad_settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.system_settings ENABLE ROW LEVEL SECURITY;
 
--- Buat Policy Allow All untuk Anonymous/Public Client (Frontend App)
-DROP POLICY IF EXISTS "Public Read All Comics" ON public.comics;
-CREATE POLICY "Public Read All Comics" ON public.comics FOR SELECT USING (true);
-DROP POLICY IF EXISTS "Public Write Comics" ON public.comics;
-CREATE POLICY "Public Write Comics" ON public.comics FOR ALL USING (true) WITH CHECK (true);
+-- 1. Comics Policies
+DROP POLICY IF EXISTS "Public Full Access Comics" ON public.comics;
+DROP POLICY IF EXISTS "Allow public read comics" ON public.comics;
+DROP POLICY IF EXISTS "Allow anon insert comics" ON public.comics;
+DROP POLICY IF EXISTS "Allow public all comics" ON public.comics;
+CREATE POLICY "Public Full Access Comics" ON public.comics FOR ALL USING (true) WITH CHECK (true);
 
-DROP POLICY IF EXISTS "Public Read All Chapters" ON public.chapters;
-CREATE POLICY "Public Read All Chapters" ON public.chapters FOR SELECT USING (true);
-DROP POLICY IF EXISTS "Public Write Chapters" ON public.chapters;
-CREATE POLICY "Public Write Chapters" ON public.chapters FOR ALL USING (true) WITH CHECK (true);
+-- 2. Chapters Policies
+DROP POLICY IF EXISTS "Public Full Access Chapters" ON public.chapters;
+DROP POLICY IF EXISTS "Allow public read chapters" ON public.chapters;
+DROP POLICY IF EXISTS "Allow anon insert chapters" ON public.chapters;
+DROP POLICY IF EXISTS "Allow public all chapters" ON public.chapters;
+CREATE POLICY "Public Full Access Chapters" ON public.chapters FOR ALL USING (true) WITH CHECK (true);
 
-DROP POLICY IF EXISTS "Public Access Users" ON public.users;
-CREATE POLICY "Public Access Users" ON public.users FOR ALL USING (true) WITH CHECK (true);
+-- 3. Users Policies
+DROP POLICY IF EXISTS "Public Full Access Users" ON public.users;
+DROP POLICY IF EXISTS "Allow public read users" ON public.users;
+DROP POLICY IF EXISTS "Allow anon insert users" ON public.users;
+DROP POLICY IF EXISTS "Allow public all users" ON public.users;
+CREATE POLICY "Public Full Access Users" ON public.users FOR ALL USING (true) WITH CHECK (true);
 
-DROP POLICY IF EXISTS "Public Access Banners" ON public.banners;
-CREATE POLICY "Public Access Banners" ON public.banners FOR ALL USING (true) WITH CHECK (true);
+-- 4. Banners Policies
+DROP POLICY IF EXISTS "Public Full Access Banners" ON public.banners;
+DROP POLICY IF EXISTS "Allow public read banners" ON public.banners;
+DROP POLICY IF EXISTS "Allow anon insert banners" ON public.banners;
+DROP POLICY IF EXISTS "Allow public all banners" ON public.banners;
+CREATE POLICY "Public Full Access Banners" ON public.banners FOR ALL USING (true) WITH CHECK (true);
 
-DROP POLICY IF EXISTS "Public Access Drives" ON public.drive_accounts;
-CREATE POLICY "Public Access Drives" ON public.drive_accounts FOR ALL USING (true) WITH CHECK (true);
+-- 5. Drive Accounts Policies
+DROP POLICY IF EXISTS "Public Full Access Drive Accounts" ON public.drive_accounts;
+DROP POLICY IF EXISTS "Allow public read drive_accounts" ON public.drive_accounts;
+DROP POLICY IF EXISTS "Allow anon insert drive_accounts" ON public.drive_accounts;
+DROP POLICY IF EXISTS "Allow public all drive_accounts" ON public.drive_accounts;
+CREATE POLICY "Public Full Access Drive Accounts" ON public.drive_accounts FOR ALL USING (true) WITH CHECK (true);
 
-DROP POLICY IF EXISTS "Public Access Logs" ON public.activity_logs;
-CREATE POLICY "Public Access Logs" ON public.activity_logs FOR ALL USING (true) WITH CHECK (true);
+-- 6. Activity Logs Policies
+DROP POLICY IF EXISTS "Public Full Access Activity Logs" ON public.activity_logs;
+DROP POLICY IF EXISTS "Allow public read activity_logs" ON public.activity_logs;
+DROP POLICY IF EXISTS "Allow anon insert activity_logs" ON public.activity_logs;
+DROP POLICY IF EXISTS "Allow public all activity_logs" ON public.activity_logs;
+CREATE POLICY "Public Full Access Activity Logs" ON public.activity_logs FOR ALL USING (true) WITH CHECK (true);
 
-DROP POLICY IF EXISTS "Public Access Settings" ON public.system_settings;
-CREATE POLICY "Public Access Settings" ON public.system_settings FOR ALL USING (true) WITH CHECK (true);
+-- 7. Comments Policies
+DROP POLICY IF EXISTS "Public Full Access Comments" ON public.comments;
+DROP POLICY IF EXISTS "Allow public read comments" ON public.comments;
+DROP POLICY IF EXISTS "Allow anon insert comments" ON public.comments;
+DROP POLICY IF EXISTS "Allow public all comments" ON public.comments;
+CREATE POLICY "Public Full Access Comments" ON public.comments FOR ALL USING (true) WITH CHECK (true);
 
-DROP POLICY IF EXISTS "Public Access Comments" ON public.comments;
-CREATE POLICY "Public Access Comments" ON public.comments FOR ALL USING (true) WITH CHECK (true);
+-- 8. Ads Policies
+DROP POLICY IF EXISTS "Public Full Access Ads" ON public.ads;
+DROP POLICY IF EXISTS "Allow public read ads" ON public.ads;
+DROP POLICY IF EXISTS "Allow anon insert ads" ON public.ads;
+DROP POLICY IF EXISTS "Allow public all ads" ON public.ads;
+CREATE POLICY "Public Full Access Ads" ON public.ads FOR ALL USING (true) WITH CHECK (true);
 
-DROP POLICY IF EXISTS "Public Access Ads" ON public.ads;
-CREATE POLICY "Public Access Ads" ON public.ads FOR ALL USING (true) WITH CHECK (true);
+-- 9. Ad Settings Policies
+DROP POLICY IF EXISTS "Public Full Access Ad Settings" ON public.ad_settings;
+DROP POLICY IF EXISTS "Allow public read ad_settings" ON public.ad_settings;
+DROP POLICY IF EXISTS "Allow anon insert ad_settings" ON public.ad_settings;
+DROP POLICY IF EXISTS "Allow public all ad_settings" ON public.ad_settings;
+CREATE POLICY "Public Full Access Ad Settings" ON public.ad_settings FOR ALL USING (true) WITH CHECK (true);
 
-DROP POLICY IF EXISTS "Public Access AdSettings" ON public.ad_settings;
-CREATE POLICY "Public Access AdSettings" ON public.ad_settings FOR ALL USING (true) WITH CHECK (true);
+-- 10. System Settings Policies
+DROP POLICY IF EXISTS "Public Full Access System Settings" ON public.system_settings;
+DROP POLICY IF EXISTS "Allow public read system_settings" ON public.system_settings;
+DROP POLICY IF EXISTS "Allow anon insert system_settings" ON public.system_settings;
+DROP POLICY IF EXISTS "Allow public all system_settings" ON public.system_settings;
+CREATE POLICY "Public Full Access System Settings" ON public.system_settings FOR ALL USING (true) WITH CHECK (true);
 
--- Enable Realtime for live cross-device sync
-ALTER PUBLICATION supabase_realtime ADD TABLE public.comics, public.chapters, public.banners, public.users, public.system_settings;
+-- ==============================================================================
+-- REALTIME SINKRONISASI AKTIF (Cross-Device Sync HP / Laptop / Tablet)
+-- ==============================================================================
+DO $$
+BEGIN
+  BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.comics;
+  EXCEPTION WHEN others THEN NULL;
+  END;
+  BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.chapters;
+  EXCEPTION WHEN others THEN NULL;
+  END;
+  BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.users;
+  EXCEPTION WHEN others THEN NULL;
+  END;
+  BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.banners;
+  EXCEPTION WHEN others THEN NULL;
+  END;
+  BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.comments;
+  EXCEPTION WHEN others THEN NULL;
+  END;
+  BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.system_settings;
+  EXCEPTION WHEN others THEN NULL;
+  END;
+END $$;

@@ -56,7 +56,8 @@ export const AdminDatabaseTab: React.FC = () => {
     systemSettings,
     cleanOrphanData,
     showAdminToast,
-    updateSettings
+    updateSettings,
+    syncWithSupabase
   } = useApp();
 
   const [activeSubTab, setActiveSubTab] = useState<DatabaseTabMode>('supabase');
@@ -67,6 +68,18 @@ export const AdminDatabaseTab: React.FC = () => {
   const [isConfigured, setIsConfigured] = useState(false);
   const [isTestingPing, setIsTestingPing] = useState(false);
   const [pingStatus, setPingStatus] = useState<{ success: boolean; message: string; latency?: number } | null>(null);
+
+  // Live Supabase Stats State
+  const [isCheckingLiveStats, setIsCheckingLiveStats] = useState(false);
+  const [liveDbStats, setLiveDbStats] = useState<{
+    isOnline: boolean;
+    comicsCount: number;
+    chaptersCount: number;
+    usersCount: number;
+    bannersCount: number;
+    error?: string;
+  } | null>(null);
+  const [isSyncingFromSupabase, setIsSyncingFromSupabase] = useState(false);
   
   // Migration State
   const [isMigrating, setIsMigrating] = useState(false);
@@ -84,6 +97,37 @@ export const AdminDatabaseTab: React.FC = () => {
   const [isCleaning, setIsCleaning] = useState(false);
   const [cleanResult, setCleanResult] = useState<{ deletedChapters: number; deletedComments: number; deletedBanners: number } | null>(null);
 
+  // Check live Supabase DB stats
+  const checkLiveDbStats = async () => {
+    setIsCheckingLiveStats(true);
+    try {
+      const stats = await SupabaseService.getSupabaseLiveStats();
+      setLiveDbStats(stats);
+    } catch (e: any) {
+      setLiveDbStats({ isOnline: false, comicsCount: 0, chaptersCount: 0, usersCount: 0, bannersCount: 0, error: e.message || String(e) });
+    } finally {
+      setIsCheckingLiveStats(false);
+    }
+  };
+
+  // Pull / Sync Data from Supabase to local app state
+  const handleSyncFromSupabase = async () => {
+    setIsSyncingFromSupabase(true);
+    try {
+      const res = await syncWithSupabase();
+      if (res.success) {
+        showAdminToast('Sinkronisasi Supabase Sukses', res.message, 'success');
+        checkLiveDbStats();
+      } else {
+        showAdminToast('Sinkronisasi Gagal', res.message, 'error');
+      }
+    } catch (e: any) {
+      showAdminToast('Sinkronisasi Gagal', e.message || String(e), 'error');
+    } finally {
+      setIsSyncingFromSupabase(false);
+    }
+  };
+
   // Load Supabase credentials on mount and keep in sync with cloud settings
   useEffect(() => {
     const creds = getSupabaseCredentials();
@@ -91,7 +135,11 @@ export const AdminDatabaseTab: React.FC = () => {
     const activeKey = creds.anonKey || systemSettings?.supabaseAnonKey || '';
     setSupabaseUrlInput(activeUrl);
     setSupabaseKeyInput(activeKey);
-    setIsConfigured(Boolean(activeUrl && activeKey && activeUrl.startsWith('http')));
+    const valid = Boolean(activeUrl && activeKey && activeUrl.startsWith('http'));
+    setIsConfigured(valid);
+    if (valid) {
+      checkLiveDbStats();
+    }
   }, [systemSettings?.supabaseUrl, systemSettings?.supabaseAnonKey]);
 
   const handleSaveSupabaseConfig = async (e?: React.FormEvent) => {
@@ -338,27 +386,47 @@ CREATE TABLE IF NOT EXISTS public.system_settings (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Izin Public Read untuk seluruh tabel
+-- Izin Public Read & Write untuk seluruh tabel (Drop jika sudah ada untuk cegah error 42710)
 ALTER TABLE public.comics ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.chapters ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.banners ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.system_settings ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Allow public read comics" ON public.comics FOR SELECT USING (true);
-CREATE POLICY "Allow anon insert comics" ON public.comics FOR ALL USING (true);
+-- 1. Comics Policies
+DROP POLICY IF EXISTS "Public Full Access Comics" ON public.comics;
+DROP POLICY IF EXISTS "Allow public read comics" ON public.comics;
+DROP POLICY IF EXISTS "Allow anon insert comics" ON public.comics;
+DROP POLICY IF EXISTS "Allow public all comics" ON public.comics;
+CREATE POLICY "Public Full Access Comics" ON public.comics FOR ALL USING (true) WITH CHECK (true);
 
-CREATE POLICY "Allow public read chapters" ON public.chapters FOR SELECT USING (true);
-CREATE POLICY "Allow anon insert chapters" ON public.chapters FOR ALL USING (true);
+-- 2. Chapters Policies
+DROP POLICY IF EXISTS "Public Full Access Chapters" ON public.chapters;
+DROP POLICY IF EXISTS "Allow public read chapters" ON public.chapters;
+DROP POLICY IF EXISTS "Allow anon insert chapters" ON public.chapters;
+DROP POLICY IF EXISTS "Allow public all chapters" ON public.chapters;
+CREATE POLICY "Public Full Access Chapters" ON public.chapters FOR ALL USING (true) WITH CHECK (true);
 
-CREATE POLICY "Allow public read users" ON public.users FOR SELECT USING (true);
-CREATE POLICY "Allow anon insert users" ON public.users FOR ALL USING (true);
+-- 3. Users Policies
+DROP POLICY IF EXISTS "Public Full Access Users" ON public.users;
+DROP POLICY IF EXISTS "Allow public read users" ON public.users;
+DROP POLICY IF EXISTS "Allow anon insert users" ON public.users;
+DROP POLICY IF EXISTS "Allow public all users" ON public.users;
+CREATE POLICY "Public Full Access Users" ON public.users FOR ALL USING (true) WITH CHECK (true);
 
-CREATE POLICY "Allow public read banners" ON public.banners FOR SELECT USING (true);
-CREATE POLICY "Allow anon insert banners" ON public.banners FOR ALL USING (true);
+-- 4. Banners Policies
+DROP POLICY IF EXISTS "Public Full Access Banners" ON public.banners;
+DROP POLICY IF EXISTS "Allow public read banners" ON public.banners;
+DROP POLICY IF EXISTS "Allow anon insert banners" ON public.banners;
+DROP POLICY IF EXISTS "Allow public all banners" ON public.banners;
+CREATE POLICY "Public Full Access Banners" ON public.banners FOR ALL USING (true) WITH CHECK (true);
 
-CREATE POLICY "Allow public read system_settings" ON public.system_settings FOR SELECT USING (true);
-CREATE POLICY "Allow anon insert system_settings" ON public.system_settings FOR ALL USING (true);
+-- 5. System Settings Policies
+DROP POLICY IF EXISTS "Public Full Access System Settings" ON public.system_settings;
+DROP POLICY IF EXISTS "Allow public read system_settings" ON public.system_settings;
+DROP POLICY IF EXISTS "Allow anon insert system_settings" ON public.system_settings;
+DROP POLICY IF EXISTS "Allow public all system_settings" ON public.system_settings;
+CREATE POLICY "Public Full Access System Settings" ON public.system_settings FOR ALL USING (true) WITH CHECK (true);
 
 -- 6. AKTIFKAN REALTIME PUBLICATION (SINKRONISASI INSTAN ANTAR PERANGKAT / HP & LAPTOP)
 DO $$
@@ -588,17 +656,60 @@ END $$;`;
                 </div>
               </div>
 
-              {/* 1-Click Migration Trigger */}
+              {/* Action Buttons: Migrate & Pull/Sync */}
               <div className="shrink-0 flex flex-col sm:flex-row items-stretch gap-2.5">
                 <button
+                  onClick={handleSyncFromSupabase}
+                  disabled={isSyncingFromSupabase || isMigrating || !isConfigured}
+                  className="px-4 py-3 rounded-xl bg-[#1b2b27] hover:bg-[#233833] text-emerald-300 border border-emerald-500/40 font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-md transition-all disabled:opacity-50"
+                  title="Tarik seluruh data dari PostgreSQL Supabase ke aplikasi ini"
+                >
+                  <RefreshCw className={`w-4 h-4 ${isSyncingFromSupabase ? 'animate-spin text-emerald-400' : 'text-emerald-400'}`} />
+                  <span>{isSyncingFromSupabase ? 'Menyinkronkan...' : '⚡ Tarik / Sinkronkan dari Supabase'}</span>
+                </button>
+
+                <button
                   onClick={handleStartMigration}
-                  disabled={isMigrating}
+                  disabled={isMigrating || isSyncingFromSupabase}
                   className="px-5 py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/30 transition-all hover:scale-102 disabled:opacity-50"
                 >
                   <Play className={`w-4 h-4 fill-current ${isMigrating ? 'animate-spin' : ''}`} />
                   <span>{isMigrating ? 'Sedang Migrasi...' : '1-Click Migrasi Seluruh Data ke Supabase'}</span>
                 </button>
               </div>
+            </div>
+
+            {/* Live Database Real-time Comparison Box */}
+            <div className="mt-4 pt-3 border-t border-emerald-900/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-3">
+                <span className="text-slate-400 font-medium">Status PostgreSQL Supabase:</span>
+                {isCheckingLiveStats ? (
+                  <span className="text-emerald-400 font-mono flex items-center gap-1.5 animate-pulse">
+                    <RefreshCw className="w-3 h-3 animate-spin" /> Memeriksa status tabel...
+                  </span>
+                ) : liveDbStats?.isOnline ? (
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-bold font-mono text-[11px] border border-emerald-500/30">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                      Live: {liveDbStats.comicsCount} Komik | {liveDbStats.chaptersCount} Chapter | {liveDbStats.usersCount} User
+                    </span>
+                  </div>
+                ) : (
+                  <span className="text-amber-400 font-medium flex items-center gap-1">
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    {liveDbStats?.error || 'Belum terhubung ke Supabase'}
+                  </span>
+                )}
+              </div>
+
+              <button
+                onClick={checkLiveDbStats}
+                disabled={isCheckingLiveStats}
+                className="text-[11px] text-emerald-400 hover:text-emerald-300 font-bold flex items-center gap-1 underline"
+              >
+                <RefreshCw className={`w-3 h-3 ${isCheckingLiveStats ? 'animate-spin' : ''}`} />
+                <span>Cek Ulang Jumlah Data di Supabase</span>
+              </button>
             </div>
 
             {/* Migration Progress Bar */}
