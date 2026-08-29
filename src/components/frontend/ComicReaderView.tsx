@@ -160,9 +160,12 @@ export const ComicReaderView: React.FC = () => {
           console.warn('Attempt 1 (Express MangaDex pages) failed:', err);
         }
 
-        // Attempt 2: Netlify Function route
+        // Attempt 2: Serverless Function route (/api/mangadex-proxy or /.netlify/functions/mangadex-proxy)
         try {
-          const netlifyRes = await fetch(`/.netlify/functions/mangadex-proxy?action=pages&chapterId=${mdChapterId}&quality=data`);
+          let netlifyRes = await fetch(`/api/mangadex-proxy?action=pages&chapterId=${mdChapterId}&quality=data`);
+          if (!netlifyRes.ok) {
+            netlifyRes = await fetch(`/.netlify/functions/mangadex-proxy?action=pages&chapterId=${mdChapterId}&quality=data`);
+          }
           if (netlifyRes.ok) {
             const data = await netlifyRes.json();
             if (data && data.pages && data.pages.length > 0) {
@@ -171,7 +174,7 @@ export const ComicReaderView: React.FC = () => {
             }
           }
         } catch (err) {
-          console.warn('Attempt 2 (Netlify MangaDex pages) failed:', err);
+          console.warn('Attempt 2 (Serverless MangaDex pages) failed:', err);
         }
 
         // Attempt 3: Client-side direct MangaDex API resolution (via proxy for images)
@@ -378,33 +381,34 @@ export const ComicReaderView: React.FC = () => {
     const target = e.currentTarget;
     const currentSrc = target.src;
 
-    // Stage 1: If /api/mangadex/image fails, try Netlify functions route
+    // Stage 1: If /api/mangadex/image fails, try /api/image-proxy or serverless route
     if (currentSrc.includes('/api/mangadex/image')) {
       const queryStr = currentSrc.split('/api/mangadex/image')[1] || '';
-      target.src = `/.netlify/functions/mangadex-image${queryStr}`;
+      target.src = `/api/image-proxy${queryStr}`;
       return;
     }
 
-    // Stage 2: If .netlify/functions/mangadex-image fails, try /api/proxy-image with fallbackUrl
-    if (currentSrc.includes('/.netlify/functions/mangadex-image')) {
+    // Stage 2: If /api/image-proxy fails, try /api/proxy-image with fallbackUrl
+    if (currentSrc.includes('/api/image-proxy') || currentSrc.includes('/.netlify/functions/mangadex-image')) {
       if (fallbackUrl) {
         target.src = `/api/proxy-image?url=${encodeURIComponent(fallbackUrl)}`;
         return;
       }
     }
 
-    // Stage 3: If /api/proxy-image fails, try /.netlify/functions/image-proxy
+    // Stage 3: If /api/proxy-image fails, try external CORS proxy
     if (currentSrc.includes('/api/proxy-image?url=')) {
       const originalUrl = decodeURIComponent(currentSrc.split('/api/proxy-image?url=')[1] || '');
       if (originalUrl) {
-        target.src = `/.netlify/functions/image-proxy?url=${encodeURIComponent(originalUrl)}`;
+        target.src = `https://corsproxy.io/?url=${encodeURIComponent(originalUrl)}`;
         return;
       }
     }
 
-    // Stage 4: If /.netlify/functions/image-proxy failed, try loading directly with no-referrer
-    if (currentSrc.includes('/.netlify/functions/image-proxy?url=')) {
-      const originalUrl = decodeURIComponent(currentSrc.split('/.netlify/functions/image-proxy?url=')[1] || '');
+    // Stage 4: If CORS proxy failed, try loading directly with no-referrer
+    if (currentSrc.includes('corsproxy.io/?url=') || currentSrc.includes('/.netlify/functions/image-proxy?url=')) {
+      const parts = currentSrc.split('?url=');
+      const originalUrl = parts[1] ? decodeURIComponent(parts[1]) : '';
       if (originalUrl) {
         target.src = originalUrl;
         return;

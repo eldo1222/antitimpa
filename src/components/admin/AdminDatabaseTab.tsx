@@ -752,16 +752,16 @@ END $$;`;
                 </div>
               )}
 
-              {/* Netlify & Production Tip */}
+              {/* Vercel & Production Tip */}
               <div className="p-3 bg-[#181826] border border-[#2b2b3f] rounded-xl text-[11px] text-slate-400 space-y-1">
                 <div className="flex items-center gap-1.5 font-bold text-slate-300 text-xs">
-                  <span>🚀 Info Sinkronisasi Netlify & Hosting</span>
+                  <span>🚀 Info Sinkronisasi Vercel & Hosting</span>
                 </div>
                 <p className="leading-relaxed">
-                  Setelah Anda mengklik <strong>"Simpan Kredensial"</strong>, konfigurasi Supabase otomatis tersimpan ke Cloud Firestore sehingga web yang sudah di-deploy ke <strong>Netlify</strong> langsung terhubung ke database Supabase tanpa harus build ulang.
+                  Setelah Anda mengklik <strong>"Simpan Kredensial"</strong>, konfigurasi Supabase otomatis tersimpan ke Cloud Firestore sehingga web yang sudah di-deploy ke <strong>Vercel</strong> langsung terhubung ke database Supabase tanpa harus build ulang.
                 </p>
                 <p className="text-[10px] text-slate-500 pt-0.5">
-                  Opsional: Anda juga dapat memasukkan <code className="text-emerald-400 font-mono">VITE_SUPABASE_URL</code> dan <code className="text-emerald-400 font-mono">VITE_SUPABASE_ANON_KEY</code> di menu <em>Netlify &gt; Site settings &gt; Environment variables</em>.
+                  Opsional: Anda juga dapat memasukkan <code className="text-emerald-400 font-mono">VITE_SUPABASE_URL</code> dan <code className="text-emerald-400 font-mono">VITE_SUPABASE_ANON_KEY</code> di menu <em>Vercel &gt; Settings &gt; Environment Variables</em>.
                 </p>
               </div>
             </div>

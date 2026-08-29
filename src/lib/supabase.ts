@@ -36,7 +36,7 @@ export function getSupabaseCredentials(): { url: string; anonKey: string } {
   let url = runtimeSupabaseUrl;
   let anonKey = runtimeSupabaseKey;
 
-  // 2. Check Vite env variables (available if configured in Netlify env vars or .env)
+  // 2. Check Vite env variables (available if configured in Vercel env vars or .env)
   if (!url || !anonKey) {
     try {
       const envUrl = (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_SUPABASE_URL) || '';

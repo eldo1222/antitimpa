@@ -7,5 +7,6 @@ coverage/
 .env*
 !.env.example
 
-# Local Netlify folder
+# Local Netlify & Vercel folders
 .netlify
+.vercel

@@ -1088,17 +1088,23 @@ export async function fetchMangaDexChapters(mangaId: string): Promise<any[]> {
     console.warn('Failed to fetch real MangaDex chapters via Express proxy:', err);
   }
 
-  // Attempt 2: Netlify Function Proxy
+  // Attempt 2: Serverless Function Proxy (Vercel / Netlify)
   try {
-    const netlifyRes = await fetch(`/.netlify/functions/mangadex-proxy?action=chapters&mangaId=${mangaId}`);
-    if (netlifyRes.ok) {
-      const data = await netlifyRes.json();
+    let serverlessRes = await fetch(`/api/mangadex-proxy?action=chapters&mangaId=${mangaId}`);
+    if (!serverlessRes.ok) {
+      serverlessRes = await fetch(`/.netlify/functions/mangadex-proxy?action=chapters&mangaId=${mangaId}`);
+    }
+    if (serverlessRes.ok) {
+      const data = await serverlessRes.json();
       if (data.chapters && Array.isArray(data.chapters) && data.chapters.length > 0) {
         return data.chapters;
       }
+      if (data.data && Array.isArray(data.data) && data.data.length > 0) {
+        return data.data;
+      }
     }
   } catch (err) {
-    console.warn('Failed to fetch real MangaDex chapters via Netlify proxy:', err);
+    console.warn('Failed to fetch real MangaDex chapters via Serverless proxy:', err);
   }
 
   // Attempt 3: Fallback to direct MangaDex feed
@@ -1168,11 +1174,14 @@ export async function fetchMangaDexPages(chapterId: string): Promise<any[]> {
     // try next
   }
 
-  // Attempt 2: Netlify Function Proxy
+  // Attempt 2: Serverless Function Proxy (Vercel / Netlify)
   try {
-    const netlifyRes = await fetch(`/.netlify/functions/mangadex-proxy?action=pages&chapterId=${chapterId}`);
-    if (netlifyRes.ok && netlifyRes.headers.get('content-type')?.includes('application/json')) {
-      const data = await netlifyRes.json();
+    let serverlessRes = await fetch(`/api/mangadex-proxy?action=pages&chapterId=${chapterId}`);
+    if (!serverlessRes.ok) {
+      serverlessRes = await fetch(`/.netlify/functions/mangadex-proxy?action=pages&chapterId=${chapterId}`);
+    }
+    if (serverlessRes.ok && serverlessRes.headers.get('content-type')?.includes('application/json')) {
+      const data = await serverlessRes.json();
       if (data.pages && Array.isArray(data.pages) && data.pages.length > 0) {
         return data.pages;
       }
@@ -1434,8 +1443,8 @@ export async function buildComicFromScrapeAsync(
 }
 
 // ============================================================================
-// UNIVERSAL HIGH-CAPACITY CLIENT-SIDE MASS SCRAPER ENGINE (NETLIFY + SPA COMPLIANT)
-// Capable of pulling thousands of distinct comics directly in the browser
+// UNIVERSAL HIGH-CAPACITY CLIENT-SIDE MASS SCRAPER ENGINE (VERCEL + CLOUD COMPLIANT)
+// Capable of pulling thousands of distinct comics directly in the browser & cloud
 // ============================================================================
 
 export interface ClientScraperOptions {

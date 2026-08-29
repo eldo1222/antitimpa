@@ -185,7 +185,7 @@ export const AdminScraperTab: React.FC = () => {
       serverSuccess = false;
     }
 
-    // If server-side Express scraper is not running (e.g. Netlify Static SPA hosting), execute Universal Client-Side Turbo Scraper!
+    // If server-side Express scraper is not running (e.g. Vercel Serverless / SPA hosting), execute Universal Client-Side Turbo Scraper!
     if (!serverSuccess) {
       clientScraperActiveRef.current = true;
       setAutoScraperInfo(prev => ({
