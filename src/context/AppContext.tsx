@@ -39,7 +39,6 @@ import { formatGoogleDriveEmbedUrl } from '../utils/driveHelper';
 import { updateFavicon } from '../utils/favicon';
 import { SupabaseService } from '../services/supabaseService';
 import { isSupabaseConfigured, saveCustomSupabaseConfig, fetchUniversalSupabaseConfig } from '../lib/supabase';
-import { centralSync } from '../services/centralSyncService';
 import { auth, googleProvider } from '../lib/firebase';
 import { signInWithPopup, signOut } from 'firebase/auth';
 import bcrypt from 'bcryptjs';
@@ -494,7 +493,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setAdminToasts(prev => prev.filter(t => t.id !== id));
   }, []);
 
-  // Supabase Realtime & Central Server Synchronization (Cross-Browser & Multi-Device)
+  // Supabase Realtime Single Source of Truth Synchronization (Cross-Browser & Multi-Device)
   useEffect(() => {
     let isMounted = true;
     let unsubSupabaseRealtime: (() => void) | null = null;
@@ -507,13 +506,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         }
         const supabaseData = await SupabaseService.fetchFullDatabase();
         if (supabaseData && isMounted) {
-          if (supabaseData.comics && Array.isArray(supabaseData.comics) && supabaseData.comics.length > 0) {
+          if (Array.isArray(supabaseData.comics)) {
             setComics(deduplicateById(supabaseData.comics));
           }
-          if (supabaseData.chapters && typeof supabaseData.chapters === 'object' && Object.keys(supabaseData.chapters).length > 0) {
+          if (supabaseData.chapters && typeof supabaseData.chapters === 'object') {
             setChapters(sanitizeChaptersMap(supabaseData.chapters));
           }
-          if (supabaseData.users && Array.isArray(supabaseData.users) && supabaseData.users.length > 0) {
+          if (Array.isArray(supabaseData.users)) {
             setUsers(supabaseData.users);
             setCurrentUser(prev => {
               if (!prev) return null;
@@ -527,19 +526,19 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
               return match;
             });
           }
-          if (supabaseData.banners && Array.isArray(supabaseData.banners) && supabaseData.banners.length > 0) {
+          if (Array.isArray(supabaseData.banners)) {
             setBanners(supabaseData.banners);
           }
-          if (supabaseData.driveAccounts && Array.isArray(supabaseData.driveAccounts) && supabaseData.driveAccounts.length > 0) {
+          if (Array.isArray(supabaseData.driveAccounts)) {
             setDriveAccounts(supabaseData.driveAccounts);
           }
-          if (supabaseData.activityLogs && Array.isArray(supabaseData.activityLogs) && supabaseData.activityLogs.length > 0) {
+          if (Array.isArray(supabaseData.activityLogs)) {
             setActivityLogs(supabaseData.activityLogs);
           }
-          if (supabaseData.comments && Array.isArray(supabaseData.comments) && supabaseData.comments.length > 0) {
+          if (Array.isArray(supabaseData.comments)) {
             setComments(supabaseData.comments);
           }
-          if (supabaseData.ads && Array.isArray(supabaseData.ads) && supabaseData.ads.length > 0) {
+          if (Array.isArray(supabaseData.ads)) {
             setAds(supabaseData.ads);
           }
           if (supabaseData.adSettings) {
@@ -558,7 +557,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     fetchUniversalSupabaseConfig().then(() => {
       refreshFromSupabase();
 
-      // Start Supabase Postgres Realtime changes across all connected devices
+      // Start Supabase Postgres Realtime changes across all connected devices (Chrome, Safari, Mobile, PC)
       unsubSupabaseRealtime = SupabaseService.subscribeToRealtime({
         onComicChange: (eventType, comic) => {
           if (eventType === 'DELETE') {
@@ -637,6 +636,50 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             });
           }
         },
+        onDriveChange: (eventType, drive) => {
+          if (eventType === 'DELETE') {
+            setDriveAccounts(prev => prev.filter(d => d.id !== drive.id));
+          } else if (drive && drive.id) {
+            setDriveAccounts(prev => {
+              const exists = prev.some(d => d.id === drive.id);
+              if (exists) {
+                return prev.map(d => d.id === drive.id ? { ...d, ...drive } : d);
+              }
+              return [drive as DriveAccount, ...prev];
+            });
+          }
+        },
+        onCommentChange: (eventType, comment) => {
+          if (eventType === 'DELETE') {
+            setComments(prev => prev.filter(c => c.id !== comment.id && c.replyToId !== comment.id));
+          } else if (comment && comment.id) {
+            setComments(prev => {
+              const exists = prev.some(c => c.id === comment.id);
+              if (exists) {
+                return prev.map(c => c.id === comment.id ? { ...c, ...comment } : c);
+              }
+              return [comment as Comment, ...prev];
+            });
+          }
+        },
+        onAdChange: (eventType, ad) => {
+          if (eventType === 'DELETE') {
+            setAds(prev => prev.filter(a => a.id !== ad.id));
+          } else if (ad && ad.id) {
+            setAds(prev => {
+              const exists = prev.some(a => a.id === ad.id);
+              if (exists) {
+                return prev.map(a => a.id === ad.id ? { ...a, ...ad } : a);
+              }
+              return [ad as AdItem, ...prev];
+            });
+          }
+        },
+        onAdSettingsChange: (newAdSettings) => {
+          if (newAdSettings) {
+            setAdSettings(prev => ({ ...prev, ...newAdSettings }));
+          }
+        },
         onSettingsChange: (settings) => {
           if (settings) {
             setSystemSettings(prev => ({
@@ -652,55 +695,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       });
     });
 
-    // 2. Subscribe to Central Server Database (Local / Server-Side state stream)
-    const unsubCentral = centralSync.startSync((remoteData) => {
-      if (remoteData.comics && Array.isArray(remoteData.comics)) {
-        setComics(deduplicateById(remoteData.comics));
-      }
-      if (remoteData.chapters) {
-        setChapters(sanitizeChaptersMap(remoteData.chapters));
-      }
-      if (remoteData.users && Array.isArray(remoteData.users)) {
-        setUsers(remoteData.users);
-        setCurrentUser(prev => {
-          if (!prev) return null;
-          const match = remoteData.users?.find(u => 
-            u.id === prev.id || 
-            (u.role === 'admin' && prev.role === 'admin') || 
-            ((u.username || '').toLowerCase() === (prev.username || '').toLowerCase())
-          );
-          if (!match) return prev;
-          safeSetItem(STORAGE_KEYS.CURRENT_USER, match);
-          return match;
-        });
-      }
-      if (remoteData.banners && Array.isArray(remoteData.banners)) {
-        setBanners(remoteData.banners);
-      }
-      if (remoteData.driveAccounts && Array.isArray(remoteData.driveAccounts)) {
-        setDriveAccounts(remoteData.driveAccounts);
-      }
-      if (remoteData.activityLogs && Array.isArray(remoteData.activityLogs)) {
-        setActivityLogs(remoteData.activityLogs);
-      }
-      if (remoteData.systemSettings) {
-        setSystemSettings(remoteData.systemSettings);
-        if (remoteData.systemSettings.supabaseUrl && remoteData.systemSettings.supabaseAnonKey) {
-          saveCustomSupabaseConfig(remoteData.systemSettings.supabaseUrl, remoteData.systemSettings.supabaseAnonKey, true);
-        }
-      }
-      if (remoteData.comments && Array.isArray(remoteData.comments)) {
-        setComments(remoteData.comments);
-      }
-      if (remoteData.ads && Array.isArray(remoteData.ads)) {
-        setAds(remoteData.ads);
-      }
-      if (remoteData.adSettings) {
-        setAdSettings(remoteData.adSettings);
-      }
-    });
-
-    // 3. Periodic & Focus revalidation from Supabase (Zero quota limit, pure reliability)
+    // 2. Periodic & Focus revalidation from Supabase (Zero quota limit, pure reliability)
     const handleFocus = () => {
       refreshFromSupabase();
     };
@@ -711,7 +706,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     return () => {
       isMounted = false;
-      unsubCentral();
       if (unsubSupabaseRealtime) {
         try { unsubSupabaseRealtime(); } catch (_) {}
       }
@@ -824,7 +818,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
     setActivityLogs(prev => [newLog, ...prev]);
     SupabaseService.saveActivityLog(newLog).catch(() => {});
-    centralSync.logActivity(newLog);
   };
 
   // Access check for reader tiers & plans
@@ -996,7 +989,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           };
           setUsers(prev => [bootstrappedAdmin, ...prev.filter(u => u.username.toLowerCase() !== cleanUsername.toLowerCase())]);
           SupabaseService.saveUser(bootstrappedAdmin).catch(() => {});
-          centralSync.saveUser(bootstrappedAdmin);
           setCurrentUser(bootstrappedAdmin);
           safeSetItem(STORAGE_KEYS.CURRENT_USER, bootstrappedAdmin);
           setIsAdminView(true);
@@ -1045,7 +1037,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       };
       setUsers(prev => prev.map(u => u.id === targetUser.id ? updatedAdmin : u));
       SupabaseService.saveUser(updatedAdmin).catch(() => {});
-      centralSync.saveUser(updatedAdmin);
       setCurrentUser(updatedAdmin);
       safeSetItem(STORAGE_KEYS.CURRENT_USER, updatedAdmin);
       setIsAdminView(true);
@@ -1088,7 +1079,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         const updatedUser: User = { ...targetUser, status: 'expired' };
         setUsers(prev => prev.map(u => u.id === targetUser.id ? updatedUser : u));
         SupabaseService.saveUser(updatedUser).catch(() => {});
-        centralSync.saveUser(updatedUser);
         addLog(targetUser.username, 'Login Ditolak: Masa Aktif Telah Habis', 'login_failed', 'warning', `Masa aktif ${targetUser.durationType} telah berakhir.`);
         return { success: false, message: 'Masa aktif akun Anda telah berakhir. Silakan hubungi Admin untuk memperpanjang paket.' };
       }
@@ -1103,7 +1093,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       const updatedUser: User = { ...targetUser, failedAttempts: newAttempts, status: newStatus };
       setUsers(prev => prev.map(u => u.id === targetUser.id ? updatedUser : u));
       SupabaseService.saveUser(updatedUser).catch(() => {});
-      centralSync.saveUser(updatedUser);
 
       if (isNowLocked) {
         addLog(targetUser.username, 'Akun Otomatis Terkunci: 3x Gagal Password', 'login_failed', 'failed', 'Akun terkunci otomatis setelah 3 kegagalan beruntun.');
@@ -1145,7 +1134,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     setUsers(prev => prev.map(u => u.id === targetUser.id ? updatedUser : u));
     SupabaseService.saveUser(updatedUser).catch(() => {});
-    centralSync.saveUser(updatedUser);
     setCurrentUser(updatedUser);
     safeSetItem(STORAGE_KEYS.CURRENT_USER, updatedUser);
     setIsLoginModalOpen(false);
@@ -1242,7 +1230,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         if (isAdminEmail && existingUser.role !== 'admin') {
           existingUser.role = 'admin';
           SupabaseService.saveUser(existingUser).catch(() => {});
-          centralSync.saveUser(existingUser);
         }
 
         const gUserData: GoogleAuthUser = {
@@ -1391,10 +1378,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       }
     };
 
-    // Save to Supabase & Central Sync
+    // Save to Supabase
     try {
       await SupabaseService.saveUser(newUser);
-      centralSync.saveUser(newUser);
     } catch (e) {
       console.warn('Supabase user save notice:', e);
     }
@@ -1474,7 +1460,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     try {
       await SupabaseService.saveUser(updatedUser);
-      centralSync.saveUser(updatedUser);
     } catch (e) {
       console.warn('Supabase password update notice:', e);
     }
@@ -1619,7 +1604,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         updatedTitle = c.title;
         const updated = { ...c, isVisibleOnHome: nextVal, showOnHome: nextVal };
         SupabaseService.saveComic(updated).catch(() => {});
-        centralSync.saveComic(updated);
         return updated;
       }
       return c;
@@ -1641,7 +1625,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       if (comicIds.includes(c.id)) {
         const updated = { ...c, isVisibleOnHome: isVisible, showOnHome: isVisible };
         SupabaseService.saveComic(updated).catch(() => {});
-        centralSync.saveComic(updated);
         return updated;
       }
       return c;
@@ -1685,7 +1668,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     setComments(prev => [newComment, ...prev]);
     SupabaseService.saveComment(newComment).catch(() => {});
-    centralSync.saveComment(newComment);
     return newComment;
   };
 
@@ -1696,7 +1678,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         const likes = isLiked ? c.likes + 1 : Math.max(0, c.likes - 1);
         const updated = { ...c, isLiked, likes };
         SupabaseService.saveComment(updated).catch(() => {});
-        centralSync.saveComment(updated);
         return updated;
       }
       return c;
@@ -1706,7 +1687,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const deleteComment = (commentId: string) => {
     setComments(prev => prev.filter(c => c.id !== commentId && c.replyToId !== commentId));
     SupabaseService.deleteComment(commentId).catch(() => {});
-    centralSync.deleteComment(commentId);
   };
 
   // Content Management - Comics
@@ -1754,7 +1734,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         viewsCount: 0
       };
       SupabaseService.saveChapter(finalComicId, firstChapter).catch(() => {});
-      centralSync.saveChapter(firstChapter);
       return {
         ...prev,
         [finalComicId]: [firstChapter]
@@ -1762,7 +1741,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     });
 
     SupabaseService.saveComic(newComic).catch(() => {});
-    centralSync.saveComic(newComic);
 
     showAdminToast('Komik Berhasil Ditambahkan', `Komik "${newComic.title}" telah disimpan ke katalog.`, 'success');
 
@@ -1793,13 +1771,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       [finalComic.id]: chaptersList
     }));
 
-    // Persist to Supabase and Central Server
+    // Persist to Supabase
     SupabaseService.saveComic(finalComic).catch(() => {});
-    centralSync.saveComic(finalComic);
 
     chaptersList.forEach(ch => {
       SupabaseService.saveChapter(finalComic.id, ch).catch(() => {});
-      centralSync.saveChapter(ch);
     });
 
     showAdminToast('Komik Berhasil Disuntikkan', `"${finalComic.title}" beserta ${chaptersList.length} chapter siap dibaca.`, 'success');
@@ -1846,10 +1822,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     SupabaseService.batchSaveComics(comicsToSave).catch((e) => console.warn('Batch comics Supabase save error:', e));
     SupabaseService.batchSaveChapters(chaptersToSave).catch((e) => console.warn('Batch chapters Supabase save error:', e));
 
-    // Non-blocking background sync for full-stack mode
-    comicsToSave.forEach(c => centralSync.saveComic(c).catch(() => {}));
-    chaptersToSave.forEach(ch => centralSync.saveChapter(ch).catch(() => {}));
-
     showAdminToast('Batch Import Selesai', `Berhasil menyuntikkan ${items.length} komik lengkap ke katalog.`, 'success');
 
     addLog(
@@ -1871,7 +1843,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setComics(prev => prev.map(c => c.id === id ? { ...c, ...updates, updatedAt: updatedDate } : c));
 
     SupabaseService.saveComic(updatedComic).catch(() => {});
-    centralSync.saveComic(updatedComic);
 
     showAdminToast('Komik Berhasil Diperbarui', `Perubahan data komik telah disimpan.`, 'success');
 
@@ -1888,7 +1859,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const target = comics.find(c => c.id === id);
     setComics(prev => prev.filter(c => c.id !== id));
     SupabaseService.deleteComic(id).catch(() => {});
-    centralSync.deleteComic(id);
 
     // Also delete chapters for this comic
     setChapters(prev => {
@@ -1923,7 +1893,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     setComics(prev => prev.filter(c => !idSet.has(c.id)));
     ids.forEach(id => SupabaseService.deleteComic(id).catch(() => {}));
-    centralSync.batchDeleteComics(ids);
 
     setChapters(prev => {
       const next = { ...prev };
@@ -2039,14 +2008,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }));
 
     SupabaseService.saveChapter(comicId, newChapter).catch(() => {});
-    centralSync.saveChapter(newChapter);
 
     // Update totalChapters count on comic
     setComics(prev => prev.map(c => {
       if (c.id === comicId) {
         const updated = { ...c, totalChapters: updatedList.length, updatedAt: new Date().toISOString().split('T')[0] };
         SupabaseService.saveComic(updated).catch(() => {});
-        centralSync.saveComic(updated);
         return updated;
       }
       return c;
@@ -2076,7 +2043,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     if (existingChapter) {
       const updated = { ...existingChapter, ...enrichedUpdates };
       SupabaseService.saveChapter(comicId, updated).catch(() => {});
-      centralSync.saveChapter(updated);
     }
 
     setChapters(prev => {
@@ -2106,7 +2072,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const deleteChapter = (comicId: string, chapterId: string, reason?: string) => {
     SupabaseService.deleteChapter(chapterId).catch(() => {});
-    centralSync.deleteChapter(comicId, chapterId);
 
     const targetChapter = (chapters[comicId] || []).find(ch => ch.id === chapterId);
     const remainingList = (chapters[comicId] || []).filter(ch => ch.id !== chapterId);
@@ -2120,7 +2085,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       if (c.id === comicId) {
         const updated = { ...c, totalChapters: remainingList.length, updatedAt: new Date().toISOString().split('T')[0] };
         SupabaseService.saveComic(updated).catch(() => {});
-        centralSync.saveComic(updated);
         return updated;
       }
       return c;
@@ -2147,7 +2111,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const idSet = new Set(chapterIds);
     chapterIds.forEach(chId => {
       SupabaseService.deleteChapter(chId).catch(() => {});
-      centralSync.deleteChapter(comicId, chId);
     });
 
     const remainingList = (chapters[comicId] || []).filter(ch => !idSet.has(ch.id));
@@ -2161,7 +2124,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       if (c.id === comicId) {
         const updated = { ...c, totalChapters: remainingList.length, updatedAt: new Date().toISOString().split('T')[0] };
         SupabaseService.saveComic(updated).catch(() => {});
-        centralSync.saveComic(updated);
         return updated;
       }
       return c;
@@ -2200,7 +2162,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
     setDriveAccounts(prev => [newAccount, ...prev]);
     SupabaseService.saveDriveAccount(newAccount).catch(() => {});
-    centralSync.saveDriveAccount(newAccount);
 
     addLog(
       currentUser?.username || 'admin',
@@ -2216,7 +2177,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       if (acc.id === id) {
         const updated = { ...acc, ...updates };
         SupabaseService.saveDriveAccount(updated).catch(() => {});
-        centralSync.saveDriveAccount(updated);
         return updated;
       }
       return acc;
@@ -2235,7 +2195,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const target = driveAccounts.find(a => a.id === id);
     setDriveAccounts(prev => prev.filter(acc => acc.id !== id));
     SupabaseService.deleteDriveAccount(id).catch(() => {});
-    centralSync.deleteDriveAccount(id);
 
     addLog(
       currentUser?.username || 'admin',
@@ -2263,7 +2222,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
               driveNotes: driveNotes !== undefined ? driveNotes : ch.driveNotes
             };
             SupabaseService.saveChapter(comicId, updated).catch(() => {});
-            centralSync.saveChapter(updated);
             return updated;
           }
           return ch;
@@ -2337,7 +2295,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     setUsers(prev => [newUser, ...prev]);
     SupabaseService.saveUser(newUser).catch(() => {});
-    centralSync.saveUser(newUser);
 
     const planLabel = assignedPlan === 'plan_15k_all' ? 'Paket 15k (All Access)' : `Paket 5k (${(newUser.allowedComicIds || []).length} Judul)`;
 
@@ -2365,7 +2322,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         }
         const updatedUser: User = { ...u, ...updates, expiresAt: newExpiresAt || u.expiresAt };
         SupabaseService.saveUser(updatedUser).catch(() => {});
-        centralSync.saveUser(updatedUser);
         if (currentUser && currentUser.id === id) {
           setCurrentUser(updatedUser);
         }
@@ -2434,12 +2390,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     });
 
     SupabaseService.saveUser(updatedUser).catch(() => {});
-    centralSync.saveUser(updatedUser);
 
     if (updatedUser.role === 'admin' && updatedUser.id !== 'user-admin') {
       const canon = { ...updatedUser, id: 'user-admin' };
       SupabaseService.saveUser(canon).catch(() => {});
-      centralSync.saveUser(canon);
     }
 
     if (currentUser && (currentUser.id === userId || (currentUser.role === 'admin' && updatedUser.role === 'admin'))) {
@@ -2465,7 +2419,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       if (u.id === id) {
         const updated: User = { ...u, failedAttempts: 0, status: 'active' as const };
         SupabaseService.saveUser(updated).catch(() => {});
-        centralSync.saveUser(updated);
         return updated;
       }
       return u;
@@ -2490,7 +2443,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         unlockedCount++;
         const updated: User = { ...u, failedAttempts: 0, status: 'active' as const };
         SupabaseService.saveUser(updated).catch(() => {});
-        centralSync.saveUser(updated);
         return updated;
       }
       return u;
@@ -2514,7 +2466,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         const nextStatus = u.status === 'active' ? 'inactive' : 'active';
         const updated: User = { ...u, status: nextStatus, failedAttempts: 0 };
         SupabaseService.saveUser(updated).catch(() => {});
-        centralSync.saveUser(updated);
         showAdminToast('Status Akun Berubah', `Status akun ${u.username} diubah menjadi ${nextStatus.toUpperCase()}.`, 'info');
         return updated;
       }
@@ -2536,7 +2487,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     if (target?.role === 'admin') return; // Cannot delete admin
     setUsers(prev => prev.filter(u => u.id !== id));
     SupabaseService.deleteUser(id).catch(() => {});
-    centralSync.deleteUser(id);
 
     showAdminToast('Akun Pengguna Dihapus', `Akun "${target?.username || id}" telah dihapus.`, 'info');
 
@@ -2594,7 +2544,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     const hashedNewPassword = hashPassword(cleanNew);
 
-    // Update in users state & Supabase & Central Server
+    // Update in users state & Supabase
     const updatedAdmin: User = {
       ...(adminUser || currentUser),
       id: adminUser?.id || currentUser.id || 'user-admin',
@@ -2611,13 +2561,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     });
 
     SupabaseService.saveUser(updatedAdmin).catch(() => {});
-    centralSync.saveUser(updatedAdmin);
 
     // Also explicitly ensure user-admin doc is updated
     if (updatedAdmin.id !== 'user-admin') {
       const canon = { ...updatedAdmin, id: 'user-admin' };
       SupabaseService.saveUser(canon).catch(() => {});
-      centralSync.saveUser(canon);
     }
 
     // Update in currentUser state
@@ -2645,7 +2593,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
     setBanners(prev => [...prev, newBanner]);
     SupabaseService.saveBanner(newBanner).catch(() => {});
-    centralSync.saveBanner(newBanner);
 
     showAdminToast('Banner Ditambahkan', `Banner "${newBanner.title}" berhasil disimpan ke beranda.`, 'success');
 
@@ -2663,7 +2610,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       if (b.id === id) {
         const updated = { ...b, ...updates };
         SupabaseService.saveBanner(updated).catch(() => {});
-        centralSync.saveBanner(updated);
         return updated;
       }
       return b;
@@ -2676,7 +2622,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const target = banners.find(b => b.id === id);
     setBanners(prev => prev.filter(b => b.id !== id));
     SupabaseService.deleteBanner(id).catch(() => {});
-    centralSync.deleteBanner(id);
 
     showAdminToast('Banner Dihapus', `Banner "${target?.title || id}" telah dihapus.`, 'info');
   };
@@ -2685,7 +2630,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setSystemSettings(prev => {
       const updated = { ...prev, ...settings };
       SupabaseService.saveSettings(updated).catch(() => {});
-      centralSync.saveSettings(updated);
       return updated;
     });
 
@@ -2712,7 +2656,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const nextAds = [newAd, ...ads];
     setAds(nextAds);
     SupabaseService.saveAd(newAd).catch(() => {});
-    centralSync.saveAds(nextAds, adSettings);
 
     showAdminToast('Iklan Ditambahkan', 'Slot iklan baru berhasil dikonfigurasi.', 'success');
 
@@ -2731,7 +2674,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const target = updatedList.find(a => a.id === id);
     if (target) {
       SupabaseService.saveAd(target).catch(() => {});
-      centralSync.saveAds(updatedList, adSettings);
     }
     addLog(
       currentUser?.username || 'admin',
@@ -2747,7 +2689,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const remaining = ads.filter(a => a.id !== id);
     setAds(remaining);
     SupabaseService.deleteAd(id).catch(() => {});
-    centralSync.saveAds(remaining, adSettings);
 
     addLog(
       currentUser?.username || 'admin',
@@ -2773,7 +2714,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const target = updatedList.find(a => a.id === id);
     if (target) {
       SupabaseService.saveAd(target).catch(() => {});
-      centralSync.saveAds(updatedList, adSettings);
     }
 
     addLog(
@@ -2810,7 +2750,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         }
         return ad;
       });
-      centralSync.saveAds(updatedList, adSettings);
       return updatedList;
     });
   };
@@ -2825,7 +2764,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         }
         return ad;
       });
-      centralSync.saveAds(updatedList, adSettings);
       return updatedList;
     });
   };

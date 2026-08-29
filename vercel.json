@@ -40,6 +40,10 @@
       "destination": "/api/doujindesu-proxy"
     },
     {
+      "source": "/api/supabase-config",
+      "destination": "/api/supabase-config"
+    },
+    {
       "source": "/api/proxy-image",
       "destination": "/api/image-proxy"
     },

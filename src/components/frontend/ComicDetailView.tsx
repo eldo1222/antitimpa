@@ -23,7 +23,7 @@ import {
   ExternalLink,
   Tv
 } from 'lucide-react';
-import { CommentSection } from '../CommentSection';
+import { CommentSection } from './CommentSection';
 import { AdBanner } from './AdBanner';
 import { WhereToReadModal } from '../common/WhereToReadModal';
 import { Chapter } from '../../types';
