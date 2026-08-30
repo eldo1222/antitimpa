@@ -39,6 +39,7 @@ import {
   formatSupabaseKey
 } from '../../lib/supabase';
 import { SupabaseService } from '../../services/supabaseService';
+import { AdminDiagnosticModal } from './AdminDiagnosticModal';
 
 type CollectionName = 'comics' | 'chapters' | 'users' | 'drive_accounts' | 'banners' | 'activity_logs' | 'system_settings';
 
@@ -63,6 +64,7 @@ export const AdminDatabaseTab: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [copiedDocId, setCopiedDocId] = useState<string | null>(null);
   const [selectedDocJson, setSelectedDocJson] = useState<{ id: string; data: any } | null>(null);
+  const [isDiagnosticModalOpen, setIsDiagnosticModalOpen] = useState(false);
 
   // Diagnostic State
   const [isCheckingDiagnostic, setIsCheckingDiagnostic] = useState(false);
@@ -737,6 +739,16 @@ END $$;`;
               </p>
             </div>
           </div>
+
+          <div className="flex items-center gap-2 self-start md:self-center">
+            <button
+              onClick={() => setIsDiagnosticModalOpen(true)}
+              className="px-3.5 py-2 bg-gradient-to-r from-amber-500/20 to-orange-500/20 border border-amber-500/40 hover:border-amber-500/70 text-amber-300 hover:text-white rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer shadow-md shadow-amber-500/10"
+            >
+              <Activity className="w-4 h-4 text-amber-400" />
+              <span>Jalankan Diagnostik (1-Item Write Test)</span>
+            </button>
+          </div>
         </div>
 
         {/* Status Highlights Grid */}
@@ -1409,6 +1421,12 @@ END $$;`;
           </div>
         </div>
       )}
+
+      {/* 1-Item Write Diagnostic Modal */}
+      <AdminDiagnosticModal
+        isOpen={isDiagnosticModalOpen}
+        onClose={() => setIsDiagnosticModalOpen(false)}
+      />
     </div>
   );
 };

@@ -1,7 +1,25 @@
-import { getSupabaseClient, isSupabaseConfigured, parseSupabaseError } from '../../../lib/supabase';
+import { getSupabaseClient, isSupabaseConfigured, parseSupabaseError, formatSupabaseDiagnosticError, SupabaseDiagnosticReport } from '../../../lib/supabase';
 import { DATABASE_TABLES, logDatabaseError } from '../../../services/database/databaseContract';
 import { Comic } from '../types/comic.types';
 import { mapComicToDb, mapDbToComic } from './comicMapper';
+import { validateComicData } from './comicValidation';
+
+export interface ComicWriteResult {
+  success: boolean;
+  count?: number;
+  error?: string;
+  code?: string;
+  details?: string | null;
+  hint?: string | null;
+  table?: string;
+  operation?: string;
+  comicIds?: string[];
+  columns?: string[];
+  safePayload?: any;
+  rawError?: any;
+  diagnosticReport?: SupabaseDiagnosticReport;
+  isConfigured: boolean;
+}
 
 export class ComicRepository {
   public static async getAll(): Promise<{ data: Comic[]; error?: string }> {
@@ -55,7 +73,7 @@ export class ComicRepository {
     }
   }
 
-  public static async save(comic: Comic): Promise<{ success: boolean; error?: string; isConfigured: boolean }> {
+  public static async save(comic: Comic): Promise<ComicWriteResult> {
     if (!isSupabaseConfigured()) {
       return { success: false, isConfigured: false, error: 'Supabase credentials not configured' };
     }
@@ -66,20 +84,90 @@ export class ComicRepository {
 
     try {
       const row = mapComicToDb(comic);
+      const validation = validateComicData(comic, row);
+
+      if (!validation.isValid) {
+        const valErrMsg = `[VALIDATION FAILED BEFORE SUPABASE] Comic "${comic.title || comic.id}": ${validation.errors.join('; ')}`;
+        console.error(valErrMsg, { comic, validation });
+        return {
+          success: false,
+          isConfigured: true,
+          error: valErrMsg,
+          code: 'CLIENT_VALIDATION_ERROR',
+          table: DATABASE_TABLES.COMICS,
+          operation: 'UPSERT',
+          comicIds: [comic.id],
+          columns: validation.columnsFound,
+          safePayload: row
+        };
+      }
+
+      // DIAGNOSTIC LOG (Safe payload without credentials)
+      console.log(`[SUPABASE COMIC UPSERT]`, {
+        table: DATABASE_TABLES.COMICS,
+        operation: 'UPSERT',
+        count: 1,
+        ids: [comic.id],
+        columns: Object.keys(row)
+      });
+
       const { error } = await client.from(DATABASE_TABLES.COMICS).upsert(row, { onConflict: 'id' });
       if (error) {
         logDatabaseError({ table: DATABASE_TABLES.COMICS, operation: 'UPSERT', error, details: { comicId: comic.id } });
-        const parsed = parseSupabaseError(error);
-        return { success: false, isConfigured: true, error: parsed.userFriendlyMessage };
+        const diagReport = formatSupabaseDiagnosticError({
+          table: DATABASE_TABLES.COMICS,
+          operation: 'UPSERT',
+          error,
+          count: 1,
+          ids: [comic.id],
+          columns: Object.keys(row),
+          safePayload: row
+        });
+        console.error(diagReport.formattedOutput, error);
+        return {
+          success: false,
+          isConfigured: true,
+          error: error.message || diagReport.message,
+          code: diagReport.code,
+          details: diagReport.details,
+          hint: diagReport.hint,
+          table: DATABASE_TABLES.COMICS,
+          operation: 'UPSERT',
+          comicIds: [comic.id],
+          columns: Object.keys(row),
+          safePayload: row,
+          rawError: error,
+          diagnosticReport: diagReport
+        };
       }
-      return { success: true, isConfigured: true };
+
+      return { success: true, count: 1, isConfigured: true, table: DATABASE_TABLES.COMICS, operation: 'UPSERT', comicIds: [comic.id] };
     } catch (err: any) {
       logDatabaseError({ table: DATABASE_TABLES.COMICS, operation: 'UPSERT', error: err, details: { comicId: comic.id } });
-      return { success: false, isConfigured: true, error: err?.message || 'Network / fetch error' };
+      const diagReport = formatSupabaseDiagnosticError({
+        table: DATABASE_TABLES.COMICS,
+        operation: 'UPSERT',
+        error: err,
+        count: 1,
+        ids: [comic.id]
+      });
+      return {
+        success: false,
+        isConfigured: true,
+        error: err?.message || 'Network / fetch error',
+        code: diagReport.code,
+        details: diagReport.details,
+        hint: diagReport.hint,
+        table: DATABASE_TABLES.COMICS,
+        operation: 'UPSERT',
+        comicIds: [comic.id],
+        rawError: err,
+        diagnosticReport: diagReport
+      };
     }
   }
 
-  public static async batchSave(comics: Comic[]): Promise<{ success: boolean; count: number; error?: string; isConfigured: boolean }> {
+  public static async batchSave(comics: Comic[]): Promise<ComicWriteResult> {
     if (comics.length === 0) return { success: true, count: 0, isConfigured: true };
     if (!isSupabaseConfigured()) {
       return { success: false, count: 0, isConfigured: false, error: 'Supabase not configured' };
@@ -90,21 +178,101 @@ export class ComicRepository {
     }
 
     try {
-      const rows = comics.map(mapComicToDb);
+      // 1. Validation check for all items in batch
+      const rows: Record<string, any>[] = [];
+      for (const comic of comics) {
+        const row = mapComicToDb(comic);
+        const validation = validateComicData(comic, row);
+        if (!validation.isValid) {
+          const valErrMsg = `[VALIDATION FAILED BEFORE SUPABASE] Comic ID "${comic.id}" / "${comic.title}": ${validation.errors.join('; ')}`;
+          console.error(valErrMsg, { comic, validation });
+          return {
+            success: false,
+            count: 0,
+            isConfigured: true,
+            error: valErrMsg,
+            code: 'CLIENT_VALIDATION_ERROR',
+            table: DATABASE_TABLES.COMICS,
+            operation: 'UPSERT',
+            comicIds: [comic.id],
+            columns: validation.columnsFound,
+            safePayload: row
+          };
+        }
+        rows.push(row);
+      }
+
+      const allIds = comics.map(c => c.id);
+      const allColumns = rows.length > 0 ? Object.keys(rows[0]) : [];
+
+      // DIAGNOSTIC LOG
+      console.log(`[SUPABASE COMIC UPSERT]`, {
+        table: DATABASE_TABLES.COMICS,
+        operation: 'UPSERT',
+        count: rows.length,
+        ids: allIds.slice(0, 10),
+        columns: allColumns
+      });
+
       const CHUNK_SIZE = 50;
       for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
         const chunk = rows.slice(i, i + CHUNK_SIZE);
+        const chunkIds = comics.slice(i, i + CHUNK_SIZE).map(c => c.id);
         const { error } = await client.from(DATABASE_TABLES.COMICS).upsert(chunk, { onConflict: 'id' });
         if (error) {
-          logDatabaseError({ table: DATABASE_TABLES.COMICS, operation: 'UPSERT', error, details: { chunkIndex: i, total: rows.length } });
-          const parsed = parseSupabaseError(error);
-          return { success: false, count: i, isConfigured: true, error: parsed.userFriendlyMessage };
+          logDatabaseError({ table: DATABASE_TABLES.COMICS, operation: 'UPSERT', error, details: { chunkIndex: i, total: rows.length, chunkIds } });
+          const diagReport = formatSupabaseDiagnosticError({
+            table: DATABASE_TABLES.COMICS,
+            operation: 'UPSERT',
+            error,
+            count: chunk.length,
+            ids: chunkIds,
+            columns: allColumns,
+            safePayload: chunk.slice(0, 2)
+          });
+          console.error(diagReport.formattedOutput, error);
+          return {
+            success: false,
+            count: i,
+            isConfigured: true,
+            error: error.message || diagReport.message,
+            code: diagReport.code,
+            details: diagReport.details,
+            hint: diagReport.hint,
+            table: DATABASE_TABLES.COMICS,
+            operation: 'UPSERT',
+            comicIds: chunkIds,
+            columns: allColumns,
+            safePayload: chunk.slice(0, 2),
+            rawError: error,
+            diagnosticReport: diagReport
+          };
         }
       }
-      return { success: true, count: comics.length, isConfigured: true };
+      return { success: true, count: comics.length, isConfigured: true, table: DATABASE_TABLES.COMICS, operation: 'UPSERT', comicIds: allIds };
     } catch (err: any) {
       logDatabaseError({ table: DATABASE_TABLES.COMICS, operation: 'UPSERT', error: err, details: { total: comics.length } });
-      return { success: false, count: 0, isConfigured: true, error: err?.message || 'Network error' };
+      const diagReport = formatSupabaseDiagnosticError({
+        table: DATABASE_TABLES.COMICS,
+        operation: 'UPSERT',
+        error: err,
+        count: comics.length,
+        ids: comics.map(c => c.id)
+      });
+      return {
+        success: false,
+        count: 0,
+        isConfigured: true,
+        error: err?.message || 'Network error',
+        code: diagReport.code,
+        details: diagReport.details,
+        hint: diagReport.hint,
+        table: DATABASE_TABLES.COMICS,
+        operation: 'UPSERT',
+        comicIds: comics.map(c => c.id),
+        rawError: err,
+        diagnosticReport: diagReport
+      };
     }
   }
 
@@ -149,3 +317,4 @@ export class ComicRepository {
     }
   }
 }
+

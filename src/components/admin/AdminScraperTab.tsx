@@ -43,9 +43,11 @@ import {
   ExternalLink,
   BookOpen,
   ArrowDownToLine,
-  RotateCcw
+  RotateCcw,
+  Activity
 } from 'lucide-react';
 import { ComicContentType, ComicCategoryType } from '../../types';
+import { AdminDiagnosticModal } from './AdminDiagnosticModal';
 
 export const AdminScraperTab: React.FC = () => {
   const { comics, chapters, injectComicWithChapters, batchInjectComicsWithChapters, driveAccounts, addActivityLog } = useApp();
@@ -56,6 +58,8 @@ export const AdminScraperTab: React.FC = () => {
   const [searchResults, setSearchResults] = useState<ScrapedComicResult[]>([]);
   const [hasSearched, setHasSearched] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [isDiagnosticOpen, setIsDiagnosticOpen] = useState(false);
+
 
   // Komikcast filters
   const [komikcastCategoryFilter, setKomikcastCategoryFilter] = useState<'all' | 'manga' | 'manhwa' | 'manhua' | 'doujin' | '18plus'>('all');
@@ -411,12 +415,16 @@ export const AdminScraperTab: React.FC = () => {
       primaryDriveAccountId: defaultDriveAccountId
     });
 
-    injectComicWithChapters(comic, comicChaps);
+    const injectResult = await injectComicWithChapters(comic, comicChaps);
 
-    setImportedSlugs(prev => ({ ...prev, [item.slug || item.title]: true }));
-    addActivityLog('comic_create', `Admin mengimpor "${comic.title}" (${(comic.comicType || 'manga').toUpperCase()}) dari ${item.sourceApi} dengan ${comicChaps.length} chapter asli`);
-    setBatchStatus(`✅ Berhasil mengimpor "${comic.title}" (${comicChaps.length} chapter asli) ke katalog web!`);
-    setTimeout(() => setBatchStatus(null), 3500);
+    if (injectResult.success) {
+      setImportedSlugs(prev => ({ ...prev, [item.slug || item.title]: true }));
+      addActivityLog('comic_create', `Admin mengimpor "${comic.title}" (${(comic.comicType || 'manga').toUpperCase()}) dari ${item.sourceApi} dengan ${comicChaps.length} chapter asli`);
+      setBatchStatus(`✅ Berhasil mengimpor "${comic.title}" (${comicChaps.length} chapter) ke database & katalog!`);
+      setTimeout(() => setBatchStatus(null), 3500);
+    } else {
+      setBatchStatus(`❌ GAGAL Sinkronisasi Supabase: ${injectResult.error || 'Penulisan ditolak'}`);
+    }
   };
 
   // 5. Tarik Komik Cepat (Batch Pull & Auto-Hide from Home)
@@ -455,16 +463,19 @@ export const AdminScraperTab: React.FC = () => {
       })
     );
 
-    batchInjectComicsWithChapters(itemsToInject);
+    const batchRes = await batchInjectComicsWithChapters(itemsToInject);
 
-    const newSlugs: Record<string, boolean> = {};
-    itemsToInject.forEach(it => {
-      newSlugs[it.comic.slug || it.comic.title] = true;
-    });
-    setImportedSlugs(prev => ({ ...prev, ...newSlugs }));
-
-    setBatchStatus(`✅ Berhasil menarik ${itemsToInject.length} judul ${targetCategory.toUpperCase()} ke admin (Status: Disembunyikan dari Beranda).`);
-    setTimeout(() => setBatchStatus(null), 4500);
+    if (batchRes.success) {
+      const newSlugs: Record<string, boolean> = {};
+      itemsToInject.forEach(it => {
+        newSlugs[it.comic.slug || it.comic.title] = true;
+      });
+      setImportedSlugs(prev => ({ ...prev, ...newSlugs }));
+      setBatchStatus(`✅ Berhasil menarik ${itemsToInject.length} judul ${targetCategory.toUpperCase()} ke Supabase & admin.`);
+      setTimeout(() => setBatchStatus(null), 4500);
+    } else {
+      setBatchStatus(`❌ Batch Gagal ke Supabase: ${batchRes.error}`);
+    }
   };
 
   // 6. Import all visible items
@@ -502,16 +513,19 @@ export const AdminScraperTab: React.FC = () => {
       })
     );
 
-    batchInjectComicsWithChapters(itemsToInject);
+    const batchRes = await batchInjectComicsWithChapters(itemsToInject);
 
-    const newSlugs: Record<string, boolean> = {};
-    itemsToInject.forEach(it => {
-      newSlugs[it.comic.slug || it.comic.title] = true;
-    });
-    setImportedSlugs(prev => ({ ...prev, ...newSlugs }));
-
-    setBatchStatus(`✅ Berhasil menyuntikkan ${itemsToInject.length} judul komik beserta chapter asli ke katalog!`);
-    setTimeout(() => setBatchStatus(null), 4500);
+    if (batchRes.success) {
+      const newSlugs: Record<string, boolean> = {};
+      itemsToInject.forEach(it => {
+        newSlugs[it.comic.slug || it.comic.title] = true;
+      });
+      setImportedSlugs(prev => ({ ...prev, ...newSlugs }));
+      setBatchStatus(`✅ Berhasil menyuntikkan ${itemsToInject.length} judul komik ke database & katalog!`);
+      setTimeout(() => setBatchStatus(null), 4500);
+    } else {
+      setBatchStatus(`❌ Impor Semua Gagal ke Supabase: ${batchRes.error}`);
+    }
   };
 
   // 7. Custom JSON Importer
@@ -534,10 +548,14 @@ export const AdminScraperTab: React.FC = () => {
         })
       );
 
-      batchInjectComicsWithChapters(itemsToInject);
-      setBatchStatus(`✅ Berhasil mengimpor ${itemsToInject.length} komik dari data JSON custom ke web!`);
-      setCustomJson('');
-      setTimeout(() => setBatchStatus(null), 4000);
+      const batchRes = await batchInjectComicsWithChapters(itemsToInject);
+      if (batchRes.success) {
+        setBatchStatus(`✅ Berhasil mengimpor ${itemsToInject.length} komik dari data JSON custom ke Supabase & web!`);
+        setCustomJson('');
+        setTimeout(() => setBatchStatus(null), 4000);
+      } else {
+        setBatchStatus(`❌ JSON Import Gagal ke Supabase: ${batchRes.error}`);
+      }
     } catch (err) {
       alert('Format JSON tidak valid! Pastikan format JSON sesuai struktur komik.');
     }
@@ -630,6 +648,14 @@ export const AdminScraperTab: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2 w-full sm:w-auto">
+          <button
+            onClick={() => setIsDiagnosticOpen(true)}
+            className="px-3 py-2 bg-amber-500/15 border border-amber-500/40 text-amber-300 hover:bg-amber-500/25 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
+          >
+            <Activity className="w-3.5 h-3.5 text-amber-400" />
+            <span>Mode Diagnostik (Uji 1 Komik)</span>
+          </button>
+
           <button
             onClick={() => setShowConfigSettings(prev => !prev)}
             className={`px-3 py-2 text-xs font-semibold rounded-xl border transition-all flex items-center gap-1.5 cursor-pointer ${
@@ -740,17 +766,17 @@ export const AdminScraperTab: React.FC = () => {
               <span className="text-[#ff5b14] font-black">{selectedBatchSize} Komik</span>
             </label>
             <div className="flex flex-wrap gap-1.5">
-              {[100, 300, 500, 1000, 2500, 5000, 10000].map(sz => (
+              {[1, 5, 100, 300, 500, 1000, 2500, 5000, 10000].map(sz => (
                 <button
                   key={sz}
                   onClick={() => setSelectedBatchSize(sz)}
                   className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                     selectedBatchSize === sz
-                      ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
+                      ? sz === 1 ? 'bg-amber-500 text-black shadow-md shadow-amber-500/30' : 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
                       : 'bg-[#1b1b2a] text-slate-400 hover:text-white hover:bg-[#25253a]'
                   }`}
                 >
-                  {sz >= 1000 ? `${sz / 1000}k` : sz} Komik
+                  {sz === 1 ? '🔬 1 Komik (Uji Coba)' : sz >= 1000 ? `${sz / 1000}k` : `${sz} Komik`}
                 </button>
               ))}
             </div>
@@ -1915,6 +1941,12 @@ export const AdminScraperTab: React.FC = () => {
           </button>
         </div>
       )}
+
+      {/* Diagnostic Modal */}
+      <AdminDiagnosticModal
+        isOpen={isDiagnosticOpen}
+        onClose={() => setIsDiagnosticOpen(false)}
+      />
     </div>
   );
 };

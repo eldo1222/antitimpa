@@ -142,8 +142,8 @@ interface AppContextType {
 
   // Actions - Comics & Chapters
   addComic: (comic: Omit<Comic, 'id' | 'createdAt' | 'updatedAt' | 'rating' | 'ratingCount' | 'totalReaders' | 'totalChapters'> & { id?: string; createdAt?: string; updatedAt?: string; rating?: number; ratingCount?: number; totalReaders?: number; totalChapters?: number }) => void;
-  injectComicWithChapters: (comic: Comic, chaptersList: Chapter[]) => void;
-  batchInjectComicsWithChapters: (items: { comic: Comic; chapters: Chapter[] }[]) => void;
+  injectComicWithChapters: (comic: Comic, chaptersList: Chapter[]) => Promise<{ success: boolean; comicSuccess: boolean; chapterSuccess: boolean; error?: string }>;
+  batchInjectComicsWithChapters: (items: { comic: Comic; chapters: Chapter[] }[]) => Promise<{ success: boolean; comicSuccess: boolean; chapterSuccess: boolean; error?: string }>;
   updateComic: (id: string, updates: Partial<Comic>) => void;
   deleteComic: (id: string, reason?: string) => void;
   batchDeleteComics: (ids: string[], reason?: string) => void;
@@ -1824,52 +1824,115 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   // Direct High-Reliability Injection for Scraped Comics with all their chapters
-  const injectComicWithChapters = async (comic: Comic, chaptersList: Chapter[]) => {
+  const injectComicWithChapters = async (comic: Comic, chaptersList: Chapter[]): Promise<{ success: boolean; comicSuccess: boolean; chapterSuccess: boolean; error?: string }> => {
     const finalComic: Comic = {
       ...comic,
       totalChapters: chaptersList.length > 0 ? chaptersList.length : (comic.totalChapters || 1),
       updatedAt: new Date().toISOString()
     };
 
-    setComics(prev => {
-      const filtered = prev.filter(c => c.id !== finalComic.id && c.title.toLowerCase() !== finalComic.title.toLowerCase());
-      return [finalComic, ...filtered];
-    });
-
-    setChapters(prev => ({
-      ...prev,
-      [finalComic.id]: chaptersList
-    }));
-
-    // Persist sequentially to Supabase (Save Comic first, then Chapters, to satisfy Foreign Key)
+    // Sequential Persistence to Supabase (Save Comic first, then Chapters, to satisfy Foreign Key)
     try {
-      const res = await SupabaseService.saveComic(finalComic);
-      if (res.success) {
-        if (chaptersList.length > 0) {
-          await SupabaseService.batchSaveChapters(chaptersList.map(ch => ({ ...ch, comicId: finalComic.id })));
+      const comicRes = await SupabaseService.saveComic(finalComic);
+      
+      if (!comicRes.success && comicRes.isConfigured) {
+        // SUPABASE COMIC WRITE FAILED
+        console.error('[SUPABASE WRITE FAILED - COMIC]', comicRes);
+        const errDetail = comicRes.diagnosticReport?.formattedOutput || 
+          `Code: ${comicRes.code || 'ERR'}\nMessage: ${comicRes.error}\nDetails: ${comicRes.details || 'None'}\nHint: ${comicRes.hint || 'None'}`;
+
+        showAdminToast(
+          `SUPABASE COMIC UPSERT FAILED [${comicRes.code || 'ERROR'}]`,
+          `${comicRes.error}${comicRes.hint ? ` | Hint: ${comicRes.hint}` : ''}`,
+          'error'
+        );
+
+        addLog(
+          currentUser?.username || 'admin',
+          `Suntik Komik GAGAL: "${finalComic.title}"`,
+          'comic_create',
+          'failed',
+          `Gagal menyimpan komik ke Supabase.\n${errDetail}`
+        );
+
+        return { success: false, comicSuccess: false, chapterSuccess: false, error: comicRes.error };
+      }
+
+      // If Supabase not configured, store in local state
+      if (!comicRes.isConfigured) {
+        setComics(prev => {
+          const filtered = prev.filter(c => c.id !== finalComic.id && c.title.toLowerCase() !== finalComic.title.toLowerCase());
+          return [finalComic, ...filtered];
+        });
+        setChapters(prev => ({
+          ...prev,
+          [finalComic.id]: chaptersList
+        }));
+        showAdminToast('Disuntikkan Sebagai Draft Lokal', 'Supabase belum dikonfigurasi. Komik & chapter siap dibaca di browser ini.', 'info');
+        return { success: true, comicSuccess: true, chapterSuccess: true };
+      }
+
+      // Comic write succeeded! Now save chapters
+      let chapterSuccess = true;
+      let chapterErrorMsg = '';
+
+      if (chaptersList.length > 0) {
+        const chRes = await SupabaseService.batchSaveChapters(chaptersList.map(ch => ({ ...ch, comicId: finalComic.id })));
+        if (!chRes.success) {
+          chapterSuccess = false;
+          chapterErrorMsg = chRes.error || 'Unknown chapter error';
+          console.error('[SUPABASE WRITE FAILED - CHAPTERS]', chRes);
+          const chErrDetail = chRes.diagnosticReport?.formattedOutput || 
+            `Code: ${chRes.code || 'ERR'}\nMessage: ${chRes.error}\nDetails: ${chRes.details || 'None'}\nHint: ${chRes.hint || 'None'}`;
+
+          showAdminToast(
+            `SUPABASE CHAPTER WRITE FAILED [${chRes.code || 'ERROR'}]`,
+            `Komik "${finalComic.title}" BERHASIL tersimpan, tetapi ${chaptersList.length} chapter GAGAL: ${chRes.error}`,
+            'error'
+          );
+
+          addLog(
+            currentUser?.username || 'admin',
+            `Suntik Chapter GAGAL: "${finalComic.title}"`,
+            'chapter_create',
+            'failed',
+            `Komik berhasil masuk tabel 'comics', namun chapter gagal masuk tabel 'chapters'.\n${chErrDetail}`
+          );
         }
-        showAdminToast('Komik Berhasil Disuntikkan', `"${finalComic.title}" beserta ${chaptersList.length} chapter siap dibaca & tersinkron ke Supabase.`, 'success');
+      }
+
+      // Update local state since Supabase comic write succeeded
+      setComics(prev => {
+        const filtered = prev.filter(c => c.id !== finalComic.id && c.title.toLowerCase() !== finalComic.title.toLowerCase());
+        return [finalComic, ...filtered];
+      });
+      setChapters(prev => ({
+        ...prev,
+        [finalComic.id]: chapterSuccess ? chaptersList : []
+      }));
+
+      if (chapterSuccess) {
+        showAdminToast('Komik & Chapter Tersimpan', `"${finalComic.title}" beserta ${chaptersList.length} chapter sukses tersimpan ke database Supabase.`, 'success');
         addLog(
           currentUser?.username || 'admin',
           `Suntik Komik API: "${finalComic.title}"`,
           'comic_create',
           'success',
-          `Berhasil menyuntikkan komik ${finalComic.title} (${(finalComic.comicType || 'manga').toUpperCase()}) beserta ${chaptersList.length} chapter siap baca.`
+          `Berhasil menyuntikkan komik ${finalComic.title} (${(finalComic.comicType || 'manga').toUpperCase()}) beserta ${chaptersList.length} chapter ke Supabase.`
         );
-      } else if (!res.isConfigured) {
-        showAdminToast('Disuntikkan Sebagai Draft Lokal', 'Komik & chapter siap dibaca di browser ini.', 'info');
-      } else {
-        showAdminToast('Peringatan Sinkronisasi', `Disuntikkan lokal, gagal sync Supabase: ${res.error}`, 'error');
       }
+
+      return { success: chapterSuccess, comicSuccess: true, chapterSuccess, error: chapterErrorMsg || undefined };
     } catch (err: any) {
-      console.error('[Supabase] Ingestion error:', err);
-      showAdminToast('Tersimpan Lokal', `Komik disimpan lokal: ${err?.message || err}`, 'info');
+      console.error('[Supabase Ingestion Exception]:', err);
+      showAdminToast('Gagal Menyimpan Komik', `Exception: ${err?.message || err}`, 'error');
+      return { success: false, comicSuccess: false, chapterSuccess: false, error: err?.message || String(err) };
     }
   };
 
   // Batch inject multiple comics atomically
-  const batchInjectComicsWithChapters = async (items: { comic: Comic; chapters: Chapter[] }[]) => {
-    if (!items || items.length === 0) return;
+  const batchInjectComicsWithChapters = async (items: { comic: Comic; chapters: Chapter[] }[]): Promise<{ success: boolean; comicSuccess: boolean; chapterSuccess: boolean; error?: string }> => {
+    if (!items || items.length === 0) return { success: true, comicSuccess: true, chapterSuccess: true };
 
     const newComics = items.map(item => ({
       ...item.comic,
@@ -1877,49 +1940,118 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       updatedAt: new Date().toISOString()
     }));
 
-    setComics(prev => {
-      const incomingIds = new Set(newComics.map(c => c.id));
-      const incomingTitles = new Set(newComics.map(c => c.title.toLowerCase()));
-
-      const remaining = prev.filter(c => !incomingIds.has(c.id) && !incomingTitles.has(c.title.toLowerCase()));
-      return [...newComics, ...remaining];
-    });
-
-    setChapters(prev => {
-      const nextChapters = { ...prev };
-      items.forEach(item => {
-        nextChapters[item.comic.id] = item.chapters;
-      });
-      return nextChapters;
-    });
-
     // Sequential Batch Persistence to Supabase (Comics first, then Chapters)
     const comicsToSave = items.map(item => item.comic);
     const chaptersToSave = items.flatMap(item => item.chapters.map(ch => ({ ...ch, comicId: item.comic.id })));
 
     try {
-      const res = await SupabaseService.batchSaveComics(comicsToSave);
-      if (res.success && chaptersToSave.length > 0) {
-        await SupabaseService.batchSaveChapters(chaptersToSave);
+      const comicRes = await SupabaseService.batchSaveComics(comicsToSave);
+
+      if (!comicRes.success && comicRes.isConfigured) {
+        // FAILED: Do NOT mark as success and do NOT claim saved
+        console.error('[SUPABASE BATCH WRITE FAILED - COMICS]', comicRes);
+        const errDetail = comicRes.diagnosticReport?.formattedOutput || 
+          `Code: ${comicRes.code || 'ERR'}\nMessage: ${comicRes.error}\nDetails: ${comicRes.details || 'None'}\nHint: ${comicRes.hint || 'None'}`;
+
+        showAdminToast(
+          `SUPABASE BATCH COMIC UPSERT FAILED [${comicRes.code || 'ERROR'}]`,
+          `${comicRes.error}${comicRes.hint ? ` | Hint: ${comicRes.hint}` : ''}`,
+          'error'
+        );
+
+        addLog(
+          currentUser?.username || 'admin',
+          `Batch Import GAGAL: ${items.length} Komik`,
+          'comic_create',
+          'failed',
+          `Batch Supabase Upsert gagal untuk ${items.length} komik.\n${errDetail}`
+        );
+
+        return { success: false, comicSuccess: false, chapterSuccess: false, error: comicRes.error };
       }
-      if (res.success) {
-        showAdminToast('Batch Import Selesai', `Berhasil menyuntikkan ${items.length} komik lengkap ke Supabase & katalog.`, 'success');
-      } else if (!res.isConfigured) {
-        showAdminToast('Batch Import Selesai (Lokal)', `${items.length} komik disimpan secara lokal di sesi ini.`, 'info');
-      } else {
-        showAdminToast('Batch Import (Peringatan Sync)', `Komik disimpan lokal, gagal sync Supabase: ${res.error}`, 'error');
+
+      if (!comicRes.isConfigured) {
+        setComics(prev => {
+          const incomingIds = new Set(newComics.map(c => c.id));
+          const incomingTitles = new Set(newComics.map(c => c.title.toLowerCase()));
+          const remaining = prev.filter(c => !incomingIds.has(c.id) && !incomingTitles.has(c.title.toLowerCase()));
+          return [...newComics, ...remaining];
+        });
+        setChapters(prev => {
+          const nextChapters = { ...prev };
+          items.forEach(item => {
+            nextChapters[item.comic.id] = item.chapters;
+          });
+          return nextChapters;
+        });
+        showAdminToast('Batch Import Selesai (Draft Lokal)', `Supabase tidak terkonfigurasi. ${items.length} komik disimpan secara lokal di browser.`, 'info');
+        return { success: true, comicSuccess: true, chapterSuccess: true };
       }
-      addLog(
-        currentUser?.username || 'admin',
-        `Batch Injection: ${items.length} Komik`,
-        'comic_create',
-        'success',
-        `Berhasil menyuntikkan ${items.length} judul komik lengkap dengan chapter siap baca ke katalog.`
-      );
+
+      // Comics batch succeeded! Now batch save chapters
+      let chapterSuccess = true;
+      let chapterErrorMsg = '';
+
+      if (chaptersToSave.length > 0) {
+        const chapterRes = await SupabaseService.batchSaveChapters(chaptersToSave);
+        if (!chapterRes.success) {
+          chapterSuccess = false;
+          chapterErrorMsg = chapterRes.error || 'Unknown chapter batch error';
+          console.error('[SUPABASE BATCH WRITE FAILED - CHAPTERS]', chapterRes);
+          const chErrDetail = chapterRes.diagnosticReport?.formattedOutput || 
+            `Code: ${chapterRes.code || 'ERR'}\nMessage: ${chapterRes.error}\nDetails: ${chapterRes.details || 'None'}\nHint: ${chapterRes.hint || 'None'}`;
+
+          showAdminToast(
+            `SUPABASE CHAPTER BATCH FAILED [${chapterRes.code || 'ERROR'}]`,
+            `${comicsToSave.length} Komik BERHASIL di database, tetapi ${chaptersToSave.length} Chapter GAGAL: ${chapterRes.error}`,
+            'error'
+          );
+
+          addLog(
+            currentUser?.username || 'admin',
+            `Batch Chapter GAGAL: ${chaptersToSave.length} Chapter`,
+            'chapter_create',
+            'failed',
+            `Komik berhasil di database Supabase, namun chapter gagal.\n${chErrDetail}`
+          );
+        }
+      }
+
+      // Update local state
+      setComics(prev => {
+        const incomingIds = new Set(newComics.map(c => c.id));
+        const incomingTitles = new Set(newComics.map(c => c.title.toLowerCase()));
+        const remaining = prev.filter(c => !incomingIds.has(c.id) && !incomingTitles.has(c.title.toLowerCase()));
+        return [...newComics, ...remaining];
+      });
+
+      setChapters(prev => {
+        const nextChapters = { ...prev };
+        items.forEach(item => {
+          nextChapters[item.comic.id] = chapterSuccess ? item.chapters : [];
+        });
+        return nextChapters;
+      });
+
+      if (chapterSuccess) {
+        showAdminToast('Batch Import Sukses', `Berhasil menyimpan ${items.length} komik & ${chaptersToSave.length} chapter ke Supabase.`, 'success');
+        addLog(
+          currentUser?.username || 'admin',
+          `Batch Injection: ${items.length} Komik`,
+          'comic_create',
+          'success',
+          `Berhasil menyuntikkan ${items.length} judul komik lengkap dengan chapter ke database Supabase.`
+        );
+      }
+
+      return { success: chapterSuccess, comicSuccess: true, chapterSuccess, error: chapterErrorMsg || undefined };
     } catch (err: any) {
-      showAdminToast('Tersimpan Lokal', `Batch tersimpan lokal: ${err?.message || err}`, 'info');
+      console.error('[Supabase Batch Exception]:', err);
+      showAdminToast('Batch Import Gagal', `Exception: ${err?.message || err}`, 'error');
+      return { success: false, comicSuccess: false, chapterSuccess: false, error: err?.message || String(err) };
     }
   };
+
 
   const updateComic = async (id: string, updates: Partial<Comic>) => {
     const updatedDate = new Date().toISOString().split('T')[0];
