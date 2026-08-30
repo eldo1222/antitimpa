@@ -91,6 +91,8 @@ interface AppContextType {
   selectedGenreFilter: string;
   ads: AdItem[];
   adSettings: AdSettings;
+  realtimeStatus: 'connected' | 'connecting' | 'disconnected';
+  lastSyncTime: string | null;
   
   // Navigation & UI state
   activeTab: 'home' | 'discover' | 'library' | 'profile';
@@ -472,6 +474,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // Admin Toast Notifications State
   const [adminToasts, setAdminToasts] = useState<AdminToastItem[]>([]);
+  const [realtimeStatus, setRealtimeStatus] = useState<'connected' | 'connecting' | 'disconnected'>('connecting');
+  const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
 
   const showAdminToast = useCallback((title: string, message?: string, type: 'success' | 'info' | 'warning' | 'error' = 'success') => {
     const id = `toast-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
@@ -498,7 +502,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     let isMounted = true;
     let unsubSupabaseRealtime: (() => void) | null = null;
 
-    // Helper to refresh state from Supabase / Server
+    // Helper to refresh state from Supabase snapshot
     const refreshFromSupabase = async () => {
       try {
         if (!isSupabaseConfigured()) {
@@ -507,46 +511,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         const supabaseData = await SupabaseService.fetchFullDatabase();
         if (supabaseData && isMounted) {
           if (Array.isArray(supabaseData.comics)) {
-            setComics(prev => {
-              const remoteComics = deduplicateById(supabaseData.comics);
-              if (remoteComics.length === 0 && prev.length > 0) {
-                return prev;
-              }
-              const remoteIdMap = new Map(remoteComics.map(c => [c.id, c]));
-              const remoteTitleMap = new Map(remoteComics.map(c => [(c.title || '').trim().toLowerCase(), c]));
-
-              // Keep local items that aren't in remote yet (e.g. freshly imported/scraped)
-              const missingInRemote = prev.filter(localComic => {
-                const idMatch = remoteIdMap.has(localComic.id);
-                const titleMatch = remoteTitleMap.has((localComic.title || '').trim().toLowerCase());
-                return !idMatch && !titleMatch;
-              });
-
-              // Self-heal: push missing items to database in background so they persist
-              if (missingInRemote.length > 0) {
-                SupabaseService.batchSaveComics(missingInRemote).catch(() => {});
-                fetch('/api/data/comics/batch-upsert', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ comics: missingInRemote })
-                }).catch(() => {});
-              }
-
-              // Merge remote comics + preserved missing local comics
-              return [...remoteComics, ...missingInRemote];
-            });
+            const remoteComics = deduplicateById(supabaseData.comics);
+            setComics(remoteComics);
           }
           if (supabaseData.chapters && typeof supabaseData.chapters === 'object') {
             const sanitizedRemote = sanitizeChaptersMap(supabaseData.chapters);
-            setChapters(prev => {
-              const merged = { ...prev };
-              Object.keys(sanitizedRemote).forEach(cId => {
-                if (sanitizedRemote[cId] && sanitizedRemote[cId].length > 0) {
-                  merged[cId] = sanitizedRemote[cId];
-                }
-              });
-              return merged;
-            });
+            setChapters(sanitizedRemote);
           }
           if (Array.isArray(supabaseData.users) && supabaseData.users.length > 0) {
             setUsers(supabaseData.users);
@@ -583,6 +553,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           if (supabaseData.systemSettings) {
             setSystemSettings(prev => ({ ...prev, ...supabaseData.systemSettings }));
           }
+          setLastSyncTime(new Date().toLocaleTimeString('id-ID'));
         } else if (!supabaseData && isMounted) {
           // Fallback to local server API if Supabase is unconfigured
           try {
@@ -591,16 +562,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
               const serverData = await serverRes.json();
               if (serverData && isMounted) {
                 if (Array.isArray(serverData.comics) && serverData.comics.length > 0) {
-                  setComics(prev => {
-                    const serverComics = deduplicateById<Comic>(serverData.comics);
-                    const serverIdMap = new Map(serverComics.map((c: Comic) => [c.id, c]));
-                    const missingInServer = prev.filter(l => !serverIdMap.has(l.id));
-                    return [...serverComics, ...missingInServer];
-                  });
+                  setComics(deduplicateById<Comic>(serverData.comics));
                 }
                 if (serverData.chapters && typeof serverData.chapters === 'object') {
-                  setChapters(prev => ({ ...serverData.chapters, ...prev }));
+                  setChapters(serverData.chapters);
                 }
+                setLastSyncTime(new Date().toLocaleTimeString('id-ID'));
               }
             }
           } catch (_) {}
@@ -612,10 +579,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     // 1. Initial configuration bootstrap and database fetch
     fetchUniversalSupabaseConfig().then(() => {
-      refreshFromSupabase();
+      if (!isMounted) return;
 
-      // Start Supabase Postgres Realtime changes across all connected devices (Chrome, Safari, Mobile, PC)
+      // Start Supabase Postgres Realtime changes across all connected devices
       unsubSupabaseRealtime = SupabaseService.subscribeToRealtime({
+        onStatusChange: (status) => {
+          if (isMounted) setRealtimeStatus(status);
+        },
         onComicChange: (eventType, comic) => {
           if (eventType === 'DELETE') {
             setComics(prev => prev.filter(c => c.id !== comic.id));
@@ -750,6 +720,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           }
         }
       });
+
+      // Now fetch full database snapshot
+      refreshFromSupabase();
     });
 
     // 2. Periodic & Focus revalidation from Supabase (Zero quota limit, pure reliability)
@@ -1768,12 +1741,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       return [newComic, ...filtered];
     });
 
-    // Only create default first chapter if this comic doesn't already have chapters
-    setChapters(prev => {
-      if (prev[finalComicId] && prev[finalComicId].length > 0) {
-        return prev;
-      }
-      const firstChapter: Chapter = {
+    // 1. Prepare default first chapter if this comic doesn't already have chapters
+    const existingChs = chapters[finalComicId] || [];
+    let firstChapter: Chapter | null = null;
+    if (existingChs.length === 0) {
+      firstChapter = {
         id: `ch-${finalComicId}-1`,
         comicId: finalComicId,
         chapterNumber: 1,
@@ -1790,14 +1762,28 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         })),
         viewsCount: 0
       };
-      SupabaseService.saveChapter(finalComicId, firstChapter).catch(() => {});
-      return {
+      setChapters(prev => ({
         ...prev,
-        [finalComicId]: [firstChapter]
-      };
-    });
+        [finalComicId]: [firstChapter!]
+      }));
+    }
 
-    SupabaseService.saveComic(newComic).catch(() => {});
+    // 2. Persist to Supabase sequentially (Comic first, then Chapter)
+    (async () => {
+      try {
+        const comicRes = await SupabaseService.saveComic(newComic);
+        if (!comicRes) {
+          console.warn('[Supabase] Warning: saveComic returned false.');
+        }
+        if (firstChapter) {
+          await SupabaseService.saveChapter(finalComicId, firstChapter);
+        }
+      } catch (err: any) {
+        console.error('[Supabase] Failed to save comic:', err);
+        showAdminToast('Peringatan Database', `Komik disimpan lokal, namun sinkronisasi Supabase gagal: ${err.message || err}`, 'warning');
+      }
+    })();
+
     fetch('/api/data/comics', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -3096,6 +3082,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         readingHistory,
         comments,
         selectedGenreFilter,
+        ads,
+        adSettings,
+        realtimeStatus,
+        lastSyncTime,
         activeTab,
         selectedComicId,
         readingChapterId,
@@ -3167,8 +3157,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         updateSettings,
         addActivityLog: (type: string, message: string) => addLog(currentUser?.username || 'admin', message, type as any, 'info'),
         clearActivityLogs,
-        ads,
-        adSettings,
         addAd,
         updateAd,
         deleteAd,

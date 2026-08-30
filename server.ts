@@ -170,16 +170,16 @@ async function startServer() {
 
   app.get("/api/supabase-config", (_req, res) => {
     let config = { 
-      url: process.env.VITE_SUPABASE_URL || "", 
-      anonKey: process.env.VITE_SUPABASE_ANON_KEY || "" 
+      url: process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "", 
+      anonKey: process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || "" 
     };
     if (fs.existsSync(SUPABASE_CONFIG_FILE)) {
       try {
         const saved = JSON.parse(fs.readFileSync(SUPABASE_CONFIG_FILE, "utf-8"));
         if (saved && (saved.url || saved.anonKey)) {
           config = {
-            url: saved.url || config.url,
-            anonKey: saved.anonKey || config.anonKey
+            url: config.url || saved.url || "",
+            anonKey: config.anonKey || saved.anonKey || ""
           };
         }
       } catch (_) {}

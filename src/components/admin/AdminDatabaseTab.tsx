@@ -54,6 +54,8 @@ export const AdminDatabaseTab: React.FC = () => {
     banners, 
     activityLogs, 
     systemSettings,
+    realtimeStatus,
+    lastSyncTime,
     cleanOrphanData,
     showAdminToast,
     updateSettings,
@@ -603,7 +605,7 @@ END $$;`;
         </div>
 
         {/* Status Highlights Grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-2 border-t border-[#1f1f30] text-xs">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 pt-2 border-t border-[#1f1f30] text-xs">
           <div className="p-2.5 bg-[#171724] rounded-xl border border-[#242436]">
             <span className="text-[10px] text-slate-500 block uppercase font-bold tracking-wider">Total Judul Komik</span>
             <span className="font-mono text-emerald-400 font-extrabold text-sm">{comics.length} Komik</span>
@@ -617,9 +619,23 @@ END $$;`;
             <span className="font-mono text-amber-300 font-extrabold text-sm">{users.length} Akun</span>
           </div>
           <div className="p-2.5 bg-[#171724] rounded-xl border border-[#242436]">
-            <span className="text-[10px] text-slate-500 block uppercase font-bold tracking-wider">Engine Utama</span>
-            <span className="font-mono text-white font-extrabold text-xs truncate block">
-              {isConfigured ? '⚡ Supabase PostgreSQL' : '🔥 Cloud Firestore'}
+            <span className="text-[10px] text-slate-500 block uppercase font-bold tracking-wider">Supabase Realtime</span>
+            <span className={`font-mono font-extrabold text-xs truncate flex items-center gap-1.5 mt-0.5 ${
+              realtimeStatus === 'connected' ? 'text-emerald-400' :
+              realtimeStatus === 'connecting' ? 'text-amber-400' : 'text-slate-400'
+            }`}>
+              <span className={`w-2 h-2 rounded-full ${
+                realtimeStatus === 'connected' ? 'bg-emerald-400 animate-pulse' :
+                realtimeStatus === 'connecting' ? 'bg-amber-400 animate-ping' : 'bg-slate-500'
+              }`} />
+              {realtimeStatus === 'connected' ? 'Aktif (Live Sync)' :
+               realtimeStatus === 'connecting' ? 'Menghubungkan...' : 'Offline'}
+            </span>
+          </div>
+          <div className="p-2.5 bg-[#171724] rounded-xl border border-[#242436]">
+            <span className="text-[10px] text-slate-500 block uppercase font-bold tracking-wider">Terakhir Sinkron</span>
+            <span className="font-mono text-slate-300 font-extrabold text-xs truncate block mt-0.5">
+              {lastSyncTime || 'Baru saja'}
             </span>
           </div>
         </div>

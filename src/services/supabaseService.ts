@@ -1009,11 +1009,16 @@ export class SupabaseService {
     onAdChange?: (eventType: 'INSERT' | 'UPDATE' | 'DELETE', ad: AdItem | { id: string }) => void;
     onAdSettingsChange?: (adSettings: Partial<AdSettings>) => void;
     onSettingsChange?: (settings: Partial<SystemSettings>) => void;
+    onStatusChange?: (status: 'connected' | 'connecting' | 'disconnected') => void;
   }): () => void {
     const client = getSupabaseClient();
-    if (!client) return () => {};
+    if (!client) {
+      callbacks.onStatusChange?.('disconnected');
+      return () => {};
+    }
 
     try {
+      callbacks.onStatusChange?.('connecting');
       const channelId = `antitimpa-realtime-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
       const channel = client.channel(channelId);
 
@@ -1103,6 +1108,10 @@ export class SupabaseService {
         .subscribe((status) => {
           if (status === 'SUBSCRIBED') {
             console.log('[Supabase Realtime] Connected and listening for cross-device updates.');
+            callbacks.onStatusChange?.('connected');
+          } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+            console.warn('[Supabase Realtime] Status changed:', status);
+            callbacks.onStatusChange?.('disconnected');
           }
         });
 
@@ -1115,6 +1124,7 @@ export class SupabaseService {
       };
     } catch (e) {
       console.warn('[Supabase Realtime] Subscription initialization warning:', e);
+      callbacks.onStatusChange?.('disconnected');
       return () => {};
     }
   }
@@ -1133,6 +1143,7 @@ export class SupabaseService {
     onAdChange?: (eventType: 'INSERT' | 'UPDATE' | 'DELETE', ad: AdItem | { id: string }) => void;
     onAdSettingsChange?: (adSettings: Partial<AdSettings>) => void;
     onSettingsChange?: (settings: Partial<SystemSettings>) => void;
+    onStatusChange?: (status: 'connected' | 'connecting' | 'disconnected') => void;
   }): () => void {
     return SupabaseService.subscribeToSupabase(callbacks);
   }
