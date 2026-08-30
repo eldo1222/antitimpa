@@ -725,14 +725,18 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       refreshFromSupabase();
     });
 
-    // 2. Periodic & Focus revalidation from Supabase (Zero quota limit, pure reliability)
-    const handleFocus = () => {
-      refreshFromSupabase();
+    // 2. Periodic & Focus revalidation from Supabase (10-second resilient snapshot sync)
+    const handleRevalidate = () => {
+      if (document.visibilityState === 'visible') {
+        refreshFromSupabase();
+      }
     };
     if (typeof window !== 'undefined') {
-      window.addEventListener('focus', handleFocus);
+      window.addEventListener('focus', handleRevalidate);
+      window.addEventListener('online', handleRevalidate);
+      document.addEventListener('visibilitychange', handleRevalidate);
     }
-    const syncInterval = setInterval(refreshFromSupabase, 25000);
+    const syncInterval = setInterval(refreshFromSupabase, 10000);
 
     return () => {
       isMounted = false;
@@ -740,7 +744,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         try { unsubSupabaseRealtime(); } catch (_) {}
       }
       if (typeof window !== 'undefined') {
-        window.removeEventListener('focus', handleFocus);
+        window.removeEventListener('focus', handleRevalidate);
+        window.removeEventListener('online', handleRevalidate);
+        document.removeEventListener('visibilitychange', handleRevalidate);
       }
       clearInterval(syncInterval);
     };
@@ -1723,10 +1729,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const addComic = (comicData: Omit<Comic, 'id' | 'createdAt' | 'updatedAt' | 'rating' | 'ratingCount' | 'totalReaders' | 'totalChapters'> & { id?: string; createdAt?: string; updatedAt?: string; rating?: number; ratingCount?: number; totalReaders?: number; totalChapters?: number }) => {
     const finalComicId = comicData.id || `comic-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
     const now = new Date().toISOString().split('T')[0];
+    const explicitSlug = comicData.slug?.trim() || '';
 
     const newComic: Comic = {
       ...comicData,
       id: finalComicId,
+      slug: explicitSlug || SupabaseService.generateSlug(comicData.title, finalComicId),
       rating: comicData.rating ?? 4.85,
       ratingCount: comicData.ratingCount ?? Math.floor(Math.random() * 2000) + 500,
       totalReaders: comicData.totalReaders ?? 0,
@@ -1773,14 +1781,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       try {
         const comicRes = await SupabaseService.saveComic(newComic);
         if (!comicRes) {
-          console.warn('[Supabase] Warning: saveComic returned false.');
+          showAdminToast('Peringatan Supabase', 'Gagal menyimpan komik ke Supabase PostgreSQL. Periksa schema / RLS.', 'error');
+        } else {
+          showAdminToast('Komik Berhasil Ditambahkan', `Komik "${newComic.title}" tersimpan di Supabase.`, 'success');
         }
         if (firstChapter) {
           await SupabaseService.saveChapter(finalComicId, firstChapter);
         }
       } catch (err: any) {
         console.error('[Supabase] Failed to save comic:', err);
-        showAdminToast('Peringatan Database', `Komik disimpan lokal, namun sinkronisasi Supabase gagal: ${err.message || err}`, 'warning');
+        showAdminToast('Database Error', `Gagal menyimpan komik ke Supabase: ${err.message || err}`, 'error');
       }
     })();
 
@@ -1789,8 +1799,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(newComic)
     }).catch(() => {});
-
-    showAdminToast('Komik Berhasil Ditambahkan', `Komik "${newComic.title}" telah disimpan ke katalog.`, 'success');
 
     addLog(
       currentUser?.username || 'admin',
@@ -2678,44 +2686,75 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   // Banner Management
-  const addBanner = (bannerData: Omit<Banner, 'id'>) => {
+  const addBanner = async (bannerData: Omit<Banner, 'id'>) => {
     const newBanner: Banner = {
       ...bannerData,
       id: `banner-${Date.now()}`
     };
+    
+    // Optimistic addition
     setBanners(prev => [...prev, newBanner]);
-    SupabaseService.saveBanner(newBanner).catch(() => {});
 
-    showAdminToast('Banner Ditambahkan', `Banner "${newBanner.title}" berhasil disimpan ke beranda.`, 'success');
-
-    addLog(
-      currentUser?.username || 'admin',
-      `Tambah Banner Hero: "${newBanner.title}"`,
-      'banner_update',
-      'success',
-      'Banner carousel beranda diperbarui'
-    );
-  };
-
-  const updateBanner = (id: string, updates: Partial<Banner>) => {
-    setBanners(prev => prev.map(b => {
-      if (b.id === id) {
-        const updated = { ...b, ...updates };
-        SupabaseService.saveBanner(updated).catch(() => {});
-        return updated;
+    try {
+      const ok = await SupabaseService.saveBanner(newBanner);
+      if (!ok) {
+        // Rollback optimistic addition
+        setBanners(prev => prev.filter(b => b.id !== newBanner.id));
+        showAdminToast('Gagal Menyimpan Banner', 'Supabase PostgreSQL menolak penyimpanan banner. Periksa izin RLS.', 'error');
+        return;
       }
-      return b;
-    }));
-
-    showAdminToast('Banner Diperbarui', 'Perubahan banner berhasil disimpan.', 'success');
+      showAdminToast('Banner Ditambahkan', `Banner "${newBanner.title}" berhasil disimpan ke Supabase & beranda.`, 'success');
+      addLog(
+        currentUser?.username || 'admin',
+        `Tambah Banner Hero: "${newBanner.title}"`,
+        'banner_update',
+        'success',
+        'Banner carousel beranda diperbarui'
+      );
+    } catch (err: any) {
+      setBanners(prev => prev.filter(b => b.id !== newBanner.id));
+      showAdminToast('Database Error', `Gagal menyimpan banner: ${err?.message || err}`, 'error');
+    }
   };
 
-  const deleteBanner = (id: string) => {
-    const target = banners.find(b => b.id === id);
-    setBanners(prev => prev.filter(b => b.id !== id));
-    SupabaseService.deleteBanner(id).catch(() => {});
+  const updateBanner = async (id: string, updates: Partial<Banner>) => {
+    const prevBanners = [...banners];
+    const updatedBanners = banners.map(b => b.id === id ? { ...b, ...updates } : b);
+    const target = updatedBanners.find(b => b.id === id);
+    if (!target) return;
 
-    showAdminToast('Banner Dihapus', `Banner "${target?.title || id}" telah dihapus.`, 'info');
+    setBanners(updatedBanners);
+    try {
+      const ok = await SupabaseService.saveBanner(target);
+      if (!ok) {
+        setBanners(prevBanners);
+        showAdminToast('Gagal Memperbarui Banner', 'Supabase menolak perubahan banner.', 'error');
+        return;
+      }
+      showAdminToast('Banner Diperbarui', 'Perubahan banner berhasil disimpan.', 'success');
+    } catch (err: any) {
+      setBanners(prevBanners);
+      showAdminToast('Database Error', `Gagal update banner: ${err?.message || err}`, 'error');
+    }
+  };
+
+  const deleteBanner = async (id: string) => {
+    const target = banners.find(b => b.id === id);
+    const prevBanners = [...banners];
+    setBanners(prev => prev.filter(b => b.id !== id));
+
+    try {
+      const ok = await SupabaseService.deleteBanner(id);
+      if (!ok) {
+        setBanners(prevBanners);
+        showAdminToast('Gagal Menghapus Banner', 'Supabase menolak penghapusan banner.', 'error');
+        return;
+      }
+      showAdminToast('Banner Dihapus', `Banner "${target?.title || id}" telah dihapus.`, 'info');
+    } catch (err: any) {
+      setBanners(prevBanners);
+      showAdminToast('Database Error', `Gagal menghapus banner: ${err?.message || err}`, 'error');
+    }
   };
 
   const updateSettings = (settings: Partial<SystemSettings>) => {

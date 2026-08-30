@@ -26,11 +26,27 @@ function safeIsoDate(val?: string | number | Date): string {
   return new Date().toISOString();
 }
 
+export function generateSlug(title?: string, id?: string): string {
+  const base = (title || '')
+    .toLowerCase()
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  if (base && base.length > 0) return base;
+  return `comic-${id ? String(id).replace(/[^a-zA-Z0-9_-]/g, '') : Date.now()}`;
+}
+
 export function mapComicToDb(c: Partial<Comic>): Record<string, any> {
   const row: Record<string, any> = {};
   if (c.id !== undefined) row.id = c.id;
-  if (c.title !== undefined) row.title = c.title;
-  if (c.slug !== undefined) row.slug = c.slug || c.title?.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+  if (c.title !== undefined) row.title = c.title || 'Untitled';
+  
+  // comics.slug is NOT NULL in PostgreSQL schema
+  const explicitSlug = typeof c.slug === 'string' ? c.slug.trim() : '';
+  row.slug = explicitSlug || generateSlug(c.title, c.id);
+
   if (c.coverImage !== undefined) row.cover_image = c.coverImage;
   if (c.bannerImage !== undefined) row.banner_image = c.bannerImage;
   if (c.synopsis !== undefined) row.synopsis = c.synopsis;
@@ -394,6 +410,8 @@ export function mapDbToAdSettings(s: Record<string, any>): AdSettings {
 }
 
 export class SupabaseService {
+  public static generateSlug = generateSlug;
+
   /**
    * Helper to fetch all rows with Supabase Range Pagination (>1000 rows without truncation)
    */

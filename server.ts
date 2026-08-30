@@ -165,40 +165,21 @@ async function startServer() {
     res.json({ status: "ok", timestamp: new Date().toISOString(), version: dbState.version });
   });
 
-  // Supabase Universal Config persistence for all devices
-  const SUPABASE_CONFIG_FILE = path.join(DATA_DIR, "supabase-config.json");
-
+  // Supabase Universal Config endpoint (Strictly authoritative Environment Variables)
   app.get("/api/supabase-config", (_req, res) => {
-    let config = { 
-      url: process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "", 
-      anonKey: process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || "" 
-    };
-    if (fs.existsSync(SUPABASE_CONFIG_FILE)) {
-      try {
-        const saved = JSON.parse(fs.readFileSync(SUPABASE_CONFIG_FILE, "utf-8"));
-        if (saved && (saved.url || saved.anonKey)) {
-          config = {
-            url: config.url || saved.url || "",
-            anonKey: config.anonKey || saved.anonKey || ""
-          };
-        }
-      } catch (_) {}
-    }
-    res.json(config);
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+    const url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "";
+    const anonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || "";
+    res.json({ url, anonKey });
   });
 
-  app.post("/api/supabase-config", (req, res) => {
-    const { url, anonKey } = req.body || {};
-    try {
-      fs.writeFileSync(
-        SUPABASE_CONFIG_FILE, 
-        JSON.stringify({ url: url || "", anonKey: anonKey || "" }, null, 2), 
-        "utf-8"
-      );
-      res.json({ success: true, url, anonKey });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
+  app.post("/api/supabase-config", (_req, res) => {
+    res.status(200).json({ 
+      success: true, 
+      message: "Supabase config is managed centrally via environment variables." 
+    });
   });
 
   // ----------------------------------------------------

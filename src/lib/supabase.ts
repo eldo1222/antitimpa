@@ -34,6 +34,15 @@ export function formatSupabaseKey(rawKey: string): string {
 let configFetchPromise: Promise<{ url: string; anonKey: string }> | null = null;
 
 export async function fetchUniversalSupabaseConfig(): Promise<{ url: string; anonKey: string }> {
+  // 1. Check if Vite client-side environment variables are directly available
+  const envUrl = (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_SUPABASE_URL) || '';
+  const envKey = (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_SUPABASE_ANON_KEY) || '';
+  if (envUrl && envKey) {
+    runtimeSupabaseUrl = formatSupabaseUrl(envUrl);
+    runtimeSupabaseKey = formatSupabaseKey(envKey);
+    return { url: runtimeSupabaseUrl, anonKey: runtimeSupabaseKey };
+  }
+
   if (runtimeSupabaseUrl && runtimeSupabaseKey) {
     return { url: runtimeSupabaseUrl, anonKey: runtimeSupabaseKey };
   }
@@ -42,24 +51,21 @@ export async function fetchUniversalSupabaseConfig(): Promise<{ url: string; ano
 
   configFetchPromise = (async () => {
     try {
-      const res = await fetch('/api/supabase-config');
+      const res = await fetch('/api/supabase-config', { 
+        cache: 'no-store',
+        headers: { 'Pragma': 'no-cache', 'Cache-Control': 'no-cache' }
+      });
       if (res.ok) {
         const data = await res.json();
         if (data.url && data.anonKey) {
           runtimeSupabaseUrl = formatSupabaseUrl(data.url);
           runtimeSupabaseKey = formatSupabaseKey(data.anonKey);
-          if (typeof window !== 'undefined') {
-            try {
-              localStorage.setItem('antitimpa_custom_supabase_config', JSON.stringify({
-                url: runtimeSupabaseUrl,
-                anonKey: runtimeSupabaseKey
-              }));
-            } catch (_) {}
-          }
           return { url: runtimeSupabaseUrl, anonKey: runtimeSupabaseKey };
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      console.warn('[Supabase Config] Unable to fetch /api/supabase-config:', e);
+    }
     return getSupabaseCredentials();
   })();
 
@@ -71,7 +77,7 @@ if (typeof window !== 'undefined') {
   fetchUniversalSupabaseConfig().catch(() => {});
 }
 
-// Retrieve Supabase URL & Anon Key from Environment, LocalStorage, or Runtime cache
+// Retrieve Supabase URL & Anon Key from Environment or Runtime cache
 export function getSupabaseCredentials(): { url: string; anonKey: string } {
   // 1. Check runtime memory
   let url = runtimeSupabaseUrl;
@@ -84,20 +90,6 @@ export function getSupabaseCredentials(): { url: string; anonKey: string } {
       const envKey = (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_SUPABASE_ANON_KEY) || '';
       if (envUrl) url = envUrl;
       if (envKey) anonKey = envKey;
-    } catch (_) {}
-  }
-
-  // 3. Check LocalStorage configuration
-  if (!url || !anonKey) {
-    try {
-      const customConfig = typeof window !== 'undefined' ? localStorage.getItem('antitimpa_custom_supabase_config') : null;
-      if (customConfig) {
-        const parsed = JSON.parse(customConfig);
-        if (parsed.url && parsed.anonKey) {
-          url = parsed.url;
-          anonKey = parsed.anonKey;
-        }
-      }
     } catch (_) {}
   }
 
