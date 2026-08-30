@@ -1791,27 +1791,35 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     // 2. Persist to Supabase
     try {
-      const comicRes = await SupabaseService.saveComic(newComic);
-      if (!comicRes) {
-        setComics(prevComics);
-        showAdminToast('Gagal Menyimpan Komik', 'Supabase PostgreSQL menolak penyimpanan komik.', 'error');
-        return;
+      const res = await SupabaseService.saveComic(newComic);
+      if (res.success) {
+        if (firstChapter) {
+          await SupabaseService.saveChapter(finalComicId, firstChapter);
+        }
+        showAdminToast('Komik Berhasil Ditambahkan', `"${newComic.title}" tersimpan & tersinkronisasi di Supabase PostgreSQL.`, 'success');
+        addLog(
+          currentUser?.username || 'admin',
+          `Tambah Komik: "${newComic.title}"`,
+          'comic_create',
+          'success',
+          `Komik (${(newComic.comicType || 'manga').toUpperCase()}) berhasil ditambahkan ke katalog & tersinkron ke Supabase`
+        );
+      } else if (!res.isConfigured) {
+        showAdminToast(
+          'Tersimpan Sebagai Draft Lokal',
+          'Komik tersimpan di sesi ini. Buka Tab Database & masukkan URL/Key Supabase untuk sinkronisasi ke seluruh perangkat.',
+          'info'
+        );
+      } else {
+        showAdminToast(
+          'Peringatan Sinkronisasi Supabase',
+          `Tersimpan lokal, namun gagal sync ke Supabase: ${res.error}. Periksa SQL Schema di Tab Database.`,
+          'error'
+        );
       }
-      if (firstChapter) {
-        await SupabaseService.saveChapter(finalComicId, firstChapter);
-      }
-      showAdminToast('Komik Berhasil Ditambahkan', `Komik "${newComic.title}" tersimpan di Supabase.`, 'success');
-      addLog(
-        currentUser?.username || 'admin',
-        `Tambah Komik: "${newComic.title}"`,
-        'comic_create',
-        'success',
-        `Komik (${(newComic.comicType || 'manga').toUpperCase()}) berhasil ditambahkan ke katalog`
-      );
     } catch (err: any) {
       console.error('[Supabase] Failed to save comic:', err);
-      setComics(prevComics);
-      showAdminToast('Database Error', `Gagal menyimpan komik ke Supabase: ${err?.message || err}`, 'error');
+      showAdminToast('Tersimpan Lokal', `Komik disimpan lokal: ${err?.message || err}`, 'info');
     }
   };
 
@@ -1822,9 +1830,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       totalChapters: chaptersList.length > 0 ? chaptersList.length : (comic.totalChapters || 1),
       updatedAt: new Date().toISOString()
     };
-
-    const prevComics = [...comics];
-    const prevChapters = { ...chapters };
 
     setComics(prev => {
       const filtered = prev.filter(c => c.id !== finalComic.id && c.title.toLowerCase() !== finalComic.title.toLowerCase());
@@ -1838,28 +1843,27 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     // Persist sequentially to Supabase (Save Comic first, then Chapters, to satisfy Foreign Key)
     try {
-      const okComic = await SupabaseService.saveComic(finalComic);
-      if (!okComic) {
-        setComics(prevComics);
-        setChapters(prevChapters);
-        showAdminToast('Gagal Menyuntikkan Komik', 'Supabase menolak komik yang di-scrape.', 'error');
-        return;
+      const res = await SupabaseService.saveComic(finalComic);
+      if (res.success) {
+        if (chaptersList.length > 0) {
+          await SupabaseService.batchSaveChapters(chaptersList.map(ch => ({ ...ch, comicId: finalComic.id })));
+        }
+        showAdminToast('Komik Berhasil Disuntikkan', `"${finalComic.title}" beserta ${chaptersList.length} chapter siap dibaca & tersinkron ke Supabase.`, 'success');
+        addLog(
+          currentUser?.username || 'admin',
+          `Suntik Komik API: "${finalComic.title}"`,
+          'comic_create',
+          'success',
+          `Berhasil menyuntikkan komik ${finalComic.title} (${(finalComic.comicType || 'manga').toUpperCase()}) beserta ${chaptersList.length} chapter siap baca.`
+        );
+      } else if (!res.isConfigured) {
+        showAdminToast('Disuntikkan Sebagai Draft Lokal', 'Komik & chapter siap dibaca di browser ini.', 'info');
+      } else {
+        showAdminToast('Peringatan Sinkronisasi', `Disuntikkan lokal, gagal sync Supabase: ${res.error}`, 'error');
       }
-      if (chaptersList.length > 0) {
-        await SupabaseService.batchSaveChapters(chaptersList.map(ch => ({ ...ch, comicId: finalComic.id })));
-      }
-      showAdminToast('Komik Berhasil Disuntikkan', `"${finalComic.title}" beserta ${chaptersList.length} chapter siap dibaca.`, 'success');
-      addLog(
-        currentUser?.username || 'admin',
-        `Suntik Komik API: "${finalComic.title}"`,
-        'comic_create',
-        'success',
-        `Berhasil menyuntikkan komik ${finalComic.title} (${(finalComic.comicType || 'manga').toUpperCase()}) beserta ${chaptersList.length} chapter siap baca.`
-      );
     } catch (err: any) {
-      setComics(prevComics);
-      setChapters(prevChapters);
-      showAdminToast('Database Error', `Gagal menyimpan injeksi ke Supabase: ${err?.message || err}`, 'error');
+      console.error('[Supabase] Ingestion error:', err);
+      showAdminToast('Tersimpan Lokal', `Komik disimpan lokal: ${err?.message || err}`, 'info');
     }
   };
 
@@ -1872,9 +1876,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       totalChapters: item.chapters.length > 0 ? item.chapters.length : (item.comic.totalChapters || 1),
       updatedAt: new Date().toISOString()
     }));
-
-    const prevComics = [...comics];
-    const prevChapters = { ...chapters };
 
     setComics(prev => {
       const incomingIds = new Set(newComics.map(c => c.id));
@@ -1898,16 +1899,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     try {
       const res = await SupabaseService.batchSaveComics(comicsToSave);
-      if (!res.success && comicsToSave.length > 0) {
-        setComics(prevComics);
-        setChapters(prevChapters);
-        showAdminToast('Gagal Batch Import', 'Supabase menolak batch penyimpanan komik.', 'error');
-        return;
-      }
-      if (chaptersToSave.length > 0) {
+      if (res.success && chaptersToSave.length > 0) {
         await SupabaseService.batchSaveChapters(chaptersToSave);
       }
-      showAdminToast('Batch Import Selesai', `Berhasil menyuntikkan ${items.length} komik lengkap ke Supabase & katalog.`, 'success');
+      if (res.success) {
+        showAdminToast('Batch Import Selesai', `Berhasil menyuntikkan ${items.length} komik lengkap ke Supabase & katalog.`, 'success');
+      } else if (!res.isConfigured) {
+        showAdminToast('Batch Import Selesai (Lokal)', `${items.length} komik disimpan secara lokal di sesi ini.`, 'info');
+      } else {
+        showAdminToast('Batch Import (Peringatan Sync)', `Komik disimpan lokal, gagal sync Supabase: ${res.error}`, 'error');
+      }
       addLog(
         currentUser?.username || 'admin',
         `Batch Injection: ${items.length} Komik`,
@@ -1916,9 +1917,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         `Berhasil menyuntikkan ${items.length} judul komik lengkap dengan chapter siap baca ke katalog.`
       );
     } catch (err: any) {
-      setComics(prevComics);
-      setChapters(prevChapters);
-      showAdminToast('Database Error', `Gagal batch save ke Supabase: ${err?.message || err}`, 'error');
+      showAdminToast('Tersimpan Lokal', `Batch tersimpan lokal: ${err?.message || err}`, 'info');
     }
   };
 
@@ -1929,17 +1928,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       ? { ...existing, ...updates, updatedAt: updatedDate }
       : ({ id, ...updates, updatedAt: updatedDate } as Comic);
 
-    const prevComics = [...comics];
     setComics(prev => prev.map(c => c.id === id ? updatedComic : c));
 
     try {
-      const ok = await SupabaseService.saveComic(updatedComic);
-      if (!ok) {
-        setComics(prevComics);
-        showAdminToast('Gagal Update Komik', 'Supabase menolak update komik.', 'error');
-        return;
+      const res = await SupabaseService.saveComic(updatedComic);
+      if (res.success) {
+        showAdminToast('Komik Berhasil Diperbarui', `Perubahan data komik telah disimpan & tersinkronisasi ke Supabase.`, 'success');
+      } else if (!res.isConfigured) {
+        showAdminToast('Diperbarui (Draft Lokal)', 'Perubahan komik aktif di sesi ini.', 'info');
+      } else {
+        showAdminToast('Peringatan Sinkronisasi', `Diperbarui lokal, gagal sync Supabase: ${res.error}`, 'error');
       }
-      showAdminToast('Komik Berhasil Diperbarui', `Perubahan data komik telah disimpan ke Supabase.`, 'success');
       addLog(
         currentUser?.username || 'admin',
         `Update Data Komik: "${updates.title || existing?.title || id}"`,
@@ -1948,15 +1947,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         `Perubahan atribut komik berhasil disimpan`
       );
     } catch (err: any) {
-      setComics(prevComics);
-      showAdminToast('Database Error', `Gagal update komik: ${err?.message || err}`, 'error');
+      showAdminToast('Diperbarui Lokal', `Perubahan disimpan lokal: ${err?.message || err}`, 'info');
     }
   };
 
   const deleteComic = async (id: string, reason?: string) => {
     const target = comics.find(c => c.id === id);
-    const prevComics = [...comics];
-    const prevChapters = { ...chapters };
 
     setComics(prev => prev.filter(c => c.id !== id));
     setChapters(prev => {
@@ -1969,25 +1965,23 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setReadingHistory(prev => prev.filter(h => h.comicId !== id));
 
     try {
-      const ok = await SupabaseService.deleteComic(id);
-      if (!ok) {
-        setComics(prevComics);
-        setChapters(prevChapters);
-        showAdminToast('Gagal Menghapus Komik', 'Supabase menolak penghapusan komik.', 'error');
-        return;
+      const res = await SupabaseService.deleteComic(id);
+      if (res.success) {
+        showAdminToast('Komik Berhasil Dihapus', `Komik "${target?.title || id}" telah dihapus dari Supabase & katalog.`, 'info');
+      } else if (!res.isConfigured) {
+        showAdminToast('Komik Dihapus (Lokal)', `Komik "${target?.title || id}" dihapus dari sesi ini.`, 'info');
+      } else {
+        showAdminToast('Peringatan Sinkronisasi', `Dihapus dari lokal, Supabase error: ${res.error}`, 'error');
       }
-      showAdminToast('Komik Berhasil Dihapus', `Komik "${target?.title || id}" telah dihapus.`, 'info');
       addLog(
         currentUser?.username || 'admin',
         `Hapus Komik: "${target?.title || id}"`,
         'comic_delete',
         'warning',
-        `Komik dan seluruh chapter terkait telah dihapus permanen dari Supabase.${reason ? ` [Alasan Audit: ${reason}]` : ''}`
+        `Komik dan seluruh chapter terkait telah dihapus permanen.${reason ? ` [Alasan Audit: ${reason}]` : ''}`
       );
     } catch (err: any) {
-      setComics(prevComics);
-      setChapters(prevChapters);
-      showAdminToast('Database Error', `Gagal menghapus komik: ${err?.message || err}`, 'error');
+      showAdminToast('Dihapus Lokal', `Komik dihapus dari lokal: ${err?.message || err}`, 'info');
     }
   };
 
@@ -1996,8 +1990,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     const targetTitles = comics.filter(c => ids.includes(c.id)).map(c => `"${c.title}"`);
     const idSet = new Set(ids);
-    const prevComics = [...comics];
-    const prevChapters = { ...chapters };
 
     setComics(prev => prev.filter(c => !idSet.has(c.id)));
     setChapters(prev => {
@@ -2012,8 +2004,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setReadingHistory(prev => prev.filter(h => !idSet.has(h.comicId)));
 
     try {
-      await Promise.all(ids.map(id => SupabaseService.deleteComic(id)));
-      showAdminToast('Batch Hapus Berhasil', `${ids.length} komik telah dihapus dari katalog Supabase.`, 'info');
+      const res = await SupabaseService.batchDeleteComics(ids);
+      if (res.success) {
+        showAdminToast('Batch Hapus Berhasil', `${ids.length} komik telah dihapus dari Supabase & katalog.`, 'info');
+      } else if (!res.isConfigured) {
+        showAdminToast('Batch Hapus Selesai (Lokal)', `${ids.length} komik dihapus dari sesi ini.`, 'info');
+      } else {
+        showAdminToast('Peringatan Sinkronisasi', `Dihapus dari lokal, Supabase error: ${res.error}`, 'error');
+      }
       addLog(
         currentUser?.username || 'admin',
         `Batch Hapus Komik (${ids.length} Judul)`,
@@ -2022,9 +2020,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         `Menghapus ${ids.length} komik dari database: ${targetTitles.slice(0, 5).join(', ')}${targetTitles.length > 5 ? ` (+${targetTitles.length - 5} lainnya)` : ''}.${reason ? ` [Alasan Audit: ${reason}]` : ''}`
       );
     } catch (err: any) {
-      setComics(prevComics);
-      setChapters(prevChapters);
-      showAdminToast('Database Error', `Gagal batch hapus komik: ${err?.message || err}`, 'error');
+      showAdminToast('Dihapus Lokal', `Komik dihapus dari lokal: ${err?.message || err}`, 'info');
     }
   };
 
@@ -2127,30 +2123,28 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }));
 
     try {
-      const ok = await SupabaseService.saveChapter(comicId, newChapter);
-      if (!ok) {
-        setChapters(prevChapters);
-        setComics(prevComics);
-        showAdminToast('Gagal Menyimpan Chapter', 'Supabase menolak penambahan chapter.', 'error');
-        return;
+      const res = await SupabaseService.saveChapter(comicId, newChapter);
+      if (res.success) {
+        if (targetComic) {
+          const updatedComic = { ...targetComic, totalChapters: updatedList.length, updatedAt: new Date().toISOString().split('T')[0] };
+          await SupabaseService.saveComic(updatedComic);
+        }
+        const sourceLabel = st === 'pdf' ? 'Dokumen PDF' : st === 'drive' ? 'Google Drive Reader' : `${generatedPages.length} Halaman Gambar`;
+        showAdminToast('Chapter Berhasil Ditambahkan', `"${targetComic?.title || 'Komik'}" Chapter ${chapterData.chapterNumber} tersimpan di Supabase.`, 'success');
+        addLog(
+          currentUser?.username || 'admin',
+          `Upload Chapter Baru (${(st || 'manual').toUpperCase()}): "${targetComic?.title || 'Komik'}" Ch. ${chapterData.chapterNumber}`,
+          'chapter_create',
+          'success',
+          `Judul: "${chapterData.title}" (${sourceLabel})`
+        );
+      } else if (!res.isConfigured) {
+        showAdminToast('Chapter Tersimpan (Draft Lokal)', `Chapter ${chapterData.chapterNumber} siap dibaca di browser ini.`, 'info');
+      } else {
+        showAdminToast('Peringatan Sinkronisasi', `Chapter disimpan lokal, gagal sync Supabase: ${res.error}`, 'error');
       }
-      if (targetComic) {
-        const updatedComic = { ...targetComic, totalChapters: updatedList.length, updatedAt: new Date().toISOString().split('T')[0] };
-        await SupabaseService.saveComic(updatedComic);
-      }
-      const sourceLabel = st === 'pdf' ? 'Dokumen PDF' : st === 'drive' ? 'Google Drive Reader' : `${generatedPages.length} Halaman Gambar`;
-      showAdminToast('Chapter Berhasil Ditambahkan', `"${targetComic?.title || 'Komik'}" Chapter ${chapterData.chapterNumber} berhasil disimpan.`, 'success');
-      addLog(
-        currentUser?.username || 'admin',
-        `Upload Chapter Baru (${(st || 'manual').toUpperCase()}): "${targetComic?.title || 'Komik'}" Ch. ${chapterData.chapterNumber}`,
-        'chapter_create',
-        'success',
-        `Judul: "${chapterData.title}" (${sourceLabel})`
-      );
     } catch (err: any) {
-      setChapters(prevChapters);
-      setComics(prevComics);
-      showAdminToast('Database Error', `Gagal simpan chapter: ${err?.message || err}`, 'error');
+      showAdminToast('Tersimpan Lokal', `Chapter disimpan lokal: ${err?.message || err}`, 'info');
     }
   };
 
@@ -2165,7 +2159,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     if (!existingChapter) return;
 
     const updated = { ...existingChapter, ...enrichedUpdates };
-    const prevChapters = { ...chapters };
 
     setChapters(prev => {
       const list = prev[comicId] || [];
@@ -2177,13 +2170,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     });
 
     try {
-      const ok = await SupabaseService.saveChapter(comicId, updated);
-      if (!ok) {
-        setChapters(prevChapters);
-        showAdminToast('Gagal Update Chapter', 'Supabase menolak update chapter.', 'error');
-        return;
+      const res = await SupabaseService.saveChapter(comicId, updated);
+      if (res.success) {
+        showAdminToast('Chapter Diperbarui', 'Perubahan chapter tersimpan di Supabase.', 'success');
+      } else if (!res.isConfigured) {
+        showAdminToast('Chapter Diperbarui (Lokal)', 'Perubahan chapter disimpan di browser ini.', 'info');
+      } else {
+        showAdminToast('Peringatan Sinkronisasi', `Chapter diperbarui lokal, gagal sync Supabase: ${res.error}`, 'error');
       }
-      showAdminToast('Chapter Diperbarui', 'Perubahan chapter berhasil disimpan.', 'success');
       addLog(
         currentUser?.username || 'admin',
         `Update Chapter ID ${chapterId}`,
@@ -2192,16 +2186,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         `Perubahan data chapter pada komik ID ${comicId}`
       );
     } catch (err: any) {
-      setChapters(prevChapters);
-      showAdminToast('Database Error', `Gagal update chapter: ${err?.message || err}`, 'error');
+      showAdminToast('Diperbarui Lokal', `Perubahan chapter disimpan lokal: ${err?.message || err}`, 'info');
     }
   };
 
   const deleteChapter = async (comicId: string, chapterId: string, reason?: string) => {
     const targetChapter = (chapters[comicId] || []).find(ch => ch.id === chapterId);
     const remainingList = (chapters[comicId] || []).filter(ch => ch.id !== chapterId);
-    const prevChapters = { ...chapters };
-    const prevComics = [...comics];
 
     setChapters(prev => ({
       ...prev,
@@ -2218,30 +2209,28 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setReadingHistory(prev => prev.filter(h => !(h.comicId === comicId && h.chapterId === chapterId)));
 
     try {
-      const ok = await SupabaseService.deleteChapter(chapterId);
-      if (!ok) {
-        setChapters(prevChapters);
-        setComics(prevComics);
-        showAdminToast('Gagal Menghapus Chapter', 'Supabase menolak penghapusan chapter.', 'error');
-        return;
-      }
+      const res = await SupabaseService.deleteChapter(chapterId);
       const targetComic = comics.find(c => c.id === comicId);
       if (targetComic) {
         const updatedComic = { ...targetComic, totalChapters: remainingList.length, updatedAt: new Date().toISOString().split('T')[0] };
         await SupabaseService.saveComic(updatedComic);
       }
-      showAdminToast('Chapter Dihapus', `Chapter ${targetChapter?.chapterNumber || ''} telah dihapus.`, 'info');
+      if (res.success) {
+        showAdminToast('Chapter Dihapus', `Chapter ${targetChapter?.chapterNumber || ''} telah dihapus dari Supabase.`, 'info');
+      } else if (!res.isConfigured) {
+        showAdminToast('Chapter Dihapus (Lokal)', `Chapter ${targetChapter?.chapterNumber || ''} telah dihapus dari sesi ini.`, 'info');
+      } else {
+        showAdminToast('Peringatan Sinkronisasi', `Dihapus dari lokal, Supabase error: ${res.error}`, 'error');
+      }
       addLog(
         currentUser?.username || 'admin',
         `Hapus Chapter: "${targetComic?.title || comicId}" Ch. ${targetChapter?.chapterNumber || chapterId}`,
         'chapter_delete',
         'warning',
-        `Chapter pada komik ${targetComic?.title || comicId} berhasil dihapus dari Supabase.${reason ? ` [Alasan Audit: ${reason}]` : ''}`
+        `Chapter pada komik ${targetComic?.title || comicId} berhasil dihapus.${reason ? ` [Alasan Audit: ${reason}]` : ''}`
       );
     } catch (err: any) {
-      setChapters(prevChapters);
-      setComics(prevComics);
-      showAdminToast('Database Error', `Gagal menghapus chapter: ${err?.message || err}`, 'error');
+      showAdminToast('Dihapus Lokal', `Chapter dihapus dari lokal: ${err?.message || err}`, 'info');
     }
   };
 
@@ -2250,8 +2239,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     const idSet = new Set(chapterIds);
     const remainingList = (chapters[comicId] || []).filter(ch => !idSet.has(ch.id));
-    const prevChapters = { ...chapters };
-    const prevComics = [...comics];
 
     setChapters(prev => ({
       ...prev,
@@ -2268,24 +2255,28 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setReadingHistory(prev => prev.filter(h => !(h.comicId === comicId && idSet.has(h.chapterId))));
 
     try {
-      await Promise.all(chapterIds.map(chId => SupabaseService.deleteChapter(chId)));
+      const res = await SupabaseService.batchDeleteChapters(chapterIds);
       const targetComic = comics.find(c => c.id === comicId);
       if (targetComic) {
         const updatedComic = { ...targetComic, totalChapters: remainingList.length, updatedAt: new Date().toISOString().split('T')[0] };
         await SupabaseService.saveComic(updatedComic);
       }
-      showAdminToast('Batch Hapus Chapter Berhasil', `${chapterIds.length} chapter telah dihapus.`, 'info');
+      if (res.success) {
+        showAdminToast('Batch Hapus Chapter Berhasil', `${chapterIds.length} chapter telah dihapus dari Supabase.`, 'info');
+      } else if (!res.isConfigured) {
+        showAdminToast('Batch Hapus Chapter (Lokal)', `${chapterIds.length} chapter dihapus dari sesi ini.`, 'info');
+      } else {
+        showAdminToast('Peringatan Sinkronisasi', `Dihapus dari lokal, Supabase error: ${res.error}`, 'error');
+      }
       addLog(
         currentUser?.username || 'admin',
         `Batch Hapus Chapter (${chapterIds.length} Chapter): "${targetComic?.title || comicId}"`,
         'chapter_delete',
         'warning',
-        `${chapterIds.length} chapter pada komik "${targetComic?.title || comicId}" berhasil dihapus dari Supabase.${reason ? ` [Alasan Audit: ${reason}]` : ''}`
+        `${chapterIds.length} chapter pada komik "${targetComic?.title || comicId}" berhasil dihapus.${reason ? ` [Alasan Audit: ${reason}]` : ''}`
       );
     } catch (err: any) {
-      setChapters(prevChapters);
-      setComics(prevComics);
-      showAdminToast('Database Error', `Gagal batch hapus chapter: ${err?.message || err}`, 'error');
+      showAdminToast('Dihapus Lokal', `Chapter dihapus dari lokal: ${err?.message || err}`, 'info');
     }
   };
 

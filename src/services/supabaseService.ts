@@ -651,42 +651,80 @@ export class SupabaseService {
   /**
    * Save / Upsert Single Comic
    */
-  public static async saveComic(comic: Comic): Promise<boolean> {
+  public static async saveComic(comic: Comic): Promise<{ success: boolean; isConfigured: boolean; error?: string; code?: string }> {
+    const isConf = isSupabaseConfigured();
+    if (!isConf) {
+      return { 
+        success: false, 
+        isConfigured: false, 
+        error: 'Kredensial Supabase belum terkonfigurasi di Server/Tab Database.' 
+      };
+    }
     const client = getSupabaseClient();
-    if (!client) return false;
+    if (!client) {
+      return { 
+        success: false, 
+        isConfigured: false, 
+        error: 'Gagal menginisialisasi client Supabase.' 
+      };
+    }
     try {
       const row = mapComicToDb(comic);
       const { error } = await client.from('comics').upsert(row, { onConflict: 'id' });
-      if (error) throw error;
-      return true;
-    } catch (err) {
-      console.warn('[SupabaseService] saveComic error:', err);
-      return false;
+      if (error) {
+        let customMsg = error.message;
+        if (error.code === '42P01' || error.message?.includes('relation "public.comics" does not exist') || error.message?.includes('relation') && error.message?.includes('does not exist')) {
+          customMsg = "Tabel 'comics' belum ada di Supabase. Jalankan SQL Schema di Supabase Dashboard -> SQL Editor.";
+        } else if (error.message?.includes('violates row-level security') || error.code === '42501') {
+          customMsg = "Izin RLS Supabase menolak akses tulis. Pastikan RLS Policy dari SQL Schema sudah dijalankan.";
+        }
+        return { 
+          success: false, 
+          isConfigured: true, 
+          error: customMsg, 
+          code: error.code 
+        };
+      }
+      return { success: true, isConfigured: true };
+    } catch (err: any) {
+      console.warn('[SupabaseService] saveComic exception:', err);
+      return { 
+        success: false, 
+        isConfigured: true, 
+        error: err?.message || 'Gagal menyimpan komik ke Supabase' 
+      };
     }
   }
 
   /**
    * Batch Save Comics with chunking and individual fallback
    */
-  public static async batchSaveComics(comics: Comic[]): Promise<{ success: boolean; count: number; error?: string }> {
+  public static async batchSaveComics(comics: Comic[]): Promise<{ success: boolean; isConfigured: boolean; count: number; error?: string }> {
+    const isConf = isSupabaseConfigured();
+    if (!isConf) {
+      return { success: false, isConfigured: false, count: 0, error: 'Supabase belum terkonfigurasi' };
+    }
     const client = getSupabaseClient();
-    if (!client || comics.length === 0) return { success: true, count: 0 };
+    if (!client || comics.length === 0) return { success: true, isConfigured: Boolean(client), count: 0 };
     
     let savedCount = 0;
     const chunkSize = 50;
     const rows = comics.map(c => mapComicToDb(c));
+    let lastError: any = null;
 
     for (let i = 0; i < rows.length; i += chunkSize) {
       const chunk = rows.slice(i, i + chunkSize);
       const { error } = await client.from('comics').upsert(chunk, { onConflict: 'id' });
       
       if (error) {
+        lastError = error;
         console.warn(`[SupabaseService] Batch upsert error on comics chunk ${i}, trying individual rows:`, error);
-        // Fallback to row by row for this chunk
         for (const row of chunk) {
           const { error: rowErr } = await client.from('comics').upsert(row, { onConflict: 'id' });
           if (!rowErr) {
             savedCount++;
+          } else {
+            lastError = rowErr;
           }
         }
       } else {
@@ -696,79 +734,104 @@ export class SupabaseService {
 
     return { 
       success: savedCount > 0 || comics.length === 0, 
-      count: savedCount 
+      isConfigured: true,
+      count: savedCount,
+      error: lastError ? (lastError.message || String(lastError)) : undefined
     };
   }
 
   /**
    * Delete Single Comic
    */
-  public static async deleteComic(comicId: string): Promise<boolean> {
+  public static async deleteComic(comicId: string): Promise<{ success: boolean; isConfigured: boolean; error?: string }> {
+    const isConf = isSupabaseConfigured();
+    if (!isConf) return { success: false, isConfigured: false, error: 'Supabase belum terkonfigurasi' };
     const client = getSupabaseClient();
-    if (!client) return false;
+    if (!client) return { success: false, isConfigured: false, error: 'Client Supabase null' };
     try {
       await client.from('chapters').delete().eq('comic_id', comicId);
       const { error } = await client.from('comics').delete().eq('id', comicId);
-      return !error;
-    } catch (err) {
-      return false;
+      if (error) {
+        return { success: false, isConfigured: true, error: error.message };
+      }
+      return { success: true, isConfigured: true };
+    } catch (err: any) {
+      return { success: false, isConfigured: true, error: err?.message || String(err) };
     }
   }
 
   /**
    * Batch Delete Comics
    */
-  public static async batchDeleteComics(comicIds: string[]): Promise<boolean> {
+  public static async batchDeleteComics(comicIds: string[]): Promise<{ success: boolean; isConfigured: boolean; error?: string }> {
+    const isConf = isSupabaseConfigured();
+    if (!isConf) return { success: false, isConfigured: false, error: 'Supabase belum terkonfigurasi' };
     const client = getSupabaseClient();
-    if (!client || comicIds.length === 0) return false;
+    if (!client || comicIds.length === 0) return { success: true, isConfigured: Boolean(client) };
     try {
       await client.from('chapters').delete().in('comic_id', comicIds);
       const { error } = await client.from('comics').delete().in('id', comicIds);
-      return !error;
-    } catch (err) {
-      return false;
+      if (error) {
+        return { success: false, isConfigured: true, error: error.message };
+      }
+      return { success: true, isConfigured: true };
+    } catch (err: any) {
+      return { success: false, isConfigured: true, error: err?.message || String(err) };
     }
   }
 
   /**
    * Save Single Chapter
    */
-  public static async saveChapter(comicId: string, chapter: Chapter): Promise<boolean> {
+  public static async saveChapter(comicId: string, chapter: Chapter): Promise<{ success: boolean; isConfigured: boolean; error?: string }> {
+    const isConf = isSupabaseConfigured();
+    if (!isConf) return { success: false, isConfigured: false, error: 'Supabase belum terkonfigurasi' };
     const client = getSupabaseClient();
-    if (!client) return false;
+    if (!client) return { success: false, isConfigured: false, error: 'Client Supabase null' };
     try {
       const row = mapChapterToDb({ ...chapter, comicId });
       const { error } = await client.from('chapters').upsert(row, { onConflict: 'id' });
-      if (error) throw error;
-      return true;
-    } catch (err) {
+      if (error) {
+        let customMsg = error.message;
+        if (error.code === '42P01' || error.message?.includes('relation "public.chapters" does not exist')) {
+          customMsg = "Tabel 'chapters' belum ada di Supabase. Jalankan SQL Schema di Supabase Editor.";
+        }
+        return { success: false, isConfigured: true, error: customMsg };
+      }
+      return { success: true, isConfigured: true };
+    } catch (err: any) {
       console.warn('[SupabaseService] saveChapter error:', err);
-      return false;
+      return { success: false, isConfigured: true, error: err?.message || String(err) };
     }
   }
 
   /**
    * Batch Save Chapters with chunking and individual fallback
    */
-  public static async batchSaveChapters(chapters: Chapter[]): Promise<{ success: boolean; count: number; error?: string }> {
+  public static async batchSaveChapters(chapters: Chapter[]): Promise<{ success: boolean; isConfigured: boolean; count: number; error?: string }> {
+    const isConf = isSupabaseConfigured();
+    if (!isConf) return { success: false, isConfigured: false, count: 0, error: 'Supabase belum terkonfigurasi' };
     const client = getSupabaseClient();
-    if (!client || chapters.length === 0) return { success: true, count: 0 };
+    if (!client || chapters.length === 0) return { success: true, isConfigured: Boolean(client), count: 0 };
     
     let savedCount = 0;
     const chunkSize = 50;
     const rows = chapters.map(ch => mapChapterToDb(ch));
+    let lastError: any = null;
 
     for (let i = 0; i < rows.length; i += chunkSize) {
       const chunk = rows.slice(i, i + chunkSize);
       const { error } = await client.from('chapters').upsert(chunk, { onConflict: 'id' });
       
       if (error) {
+        lastError = error;
         console.warn(`[SupabaseService] Batch upsert error on chapters chunk ${i}, trying individual rows:`, error);
-        // Fallback to row by row for this chunk
         for (const row of chunk) {
           const { error: rowErr } = await client.from('chapters').upsert(row, { onConflict: 'id' });
           if (!rowErr) {
             savedCount++;
+          } else {
+            lastError = rowErr;
           }
         }
       } else {
@@ -778,35 +841,43 @@ export class SupabaseService {
 
     return { 
       success: savedCount > 0 || chapters.length === 0, 
-      count: savedCount 
+      isConfigured: true,
+      count: savedCount,
+      error: lastError ? (lastError.message || String(lastError)) : undefined
     };
   }
 
   /**
    * Delete Single Chapter
    */
-  public static async deleteChapter(chapterId: string): Promise<boolean> {
+  public static async deleteChapter(chapterId: string): Promise<{ success: boolean; isConfigured: boolean; error?: string }> {
+    const isConf = isSupabaseConfigured();
+    if (!isConf) return { success: false, isConfigured: false, error: 'Supabase belum terkonfigurasi' };
     const client = getSupabaseClient();
-    if (!client) return false;
+    if (!client) return { success: false, isConfigured: false, error: 'Client Supabase null' };
     try {
       const { error } = await client.from('chapters').delete().eq('id', chapterId);
-      return !error;
-    } catch (err) {
-      return false;
+      if (error) return { success: false, isConfigured: true, error: error.message };
+      return { success: true, isConfigured: true };
+    } catch (err: any) {
+      return { success: false, isConfigured: true, error: err?.message || String(err) };
     }
   }
 
   /**
    * Batch Delete Chapters
    */
-  public static async batchDeleteChapters(chapterIds: string[]): Promise<boolean> {
+  public static async batchDeleteChapters(chapterIds: string[]): Promise<{ success: boolean; isConfigured: boolean; error?: string }> {
+    const isConf = isSupabaseConfigured();
+    if (!isConf) return { success: false, isConfigured: false, error: 'Supabase belum terkonfigurasi' };
     const client = getSupabaseClient();
-    if (!client || chapterIds.length === 0) return false;
+    if (!client || chapterIds.length === 0) return { success: true, isConfigured: Boolean(client) };
     try {
       const { error } = await client.from('chapters').delete().in('id', chapterIds);
-      return !error;
-    } catch (err) {
-      return false;
+      if (error) return { success: false, isConfigured: true, error: error.message };
+      return { success: true, isConfigured: true };
+    } catch (err: any) {
+      return { success: false, isConfigured: true, error: err?.message || String(err) };
     }
   }
 

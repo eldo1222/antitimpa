@@ -4,6 +4,8 @@ import { Comic, ComicCategoryType, ComicContentType, ComicProjectType } from '..
 import { getComicProjectType, getComicProjectTypeLabel } from '../../utils/comicUtils';
 import { PRESET_GENRES } from '../../data/genres';
 import { AdminModalPortal } from '../common/AdminModalPortal';
+import { isSupabaseConfigured } from '../../lib/supabase';
+import { SupabaseService } from '../../services/supabaseService';
 import { 
   Plus, 
   Trash2, 
@@ -33,7 +35,9 @@ import {
   ChevronsRight,
   Crown,
   Filter,
-  Flame
+  Flame,
+  Database,
+  RefreshCw
 } from 'lucide-react';
 
 export const AdminComicsTab: React.FC = () => {
@@ -531,22 +535,37 @@ export const AdminComicsTab: React.FC = () => {
     <div className="space-y-4">
       <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between pb-2 border-b border-[#1c1c2a]">
         <div>
-          <h2 className="text-base font-bold text-white flex items-center gap-2">
-            <BookOpen className="w-4 h-4 text-[#ff5b14]" />
-            <span>Katalog &amp; Manajemen Komik</span>
-          </h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-base font-bold text-white flex items-center gap-2">
+              <BookOpen className="w-4 h-4 text-[#ff5b14]" />
+              <span>Katalog &amp; Manajemen Komik</span>
+            </h2>
+            {isSupabaseConfigured() ? (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-bold">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                Supabase SQL Aktif
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] font-bold">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                Draft Lokal
+              </span>
+            )}
+          </div>
           <p className="text-xs text-slate-400">
             Total {comics.length} judul komik • Halaman {validCurrentPage} dari {totalPages} • Filter Proyek, Visibilitas Beranda &amp; Akses 18+
           </p>
         </div>
 
-        <button
-          onClick={handleOpenAdd}
-          className="px-3.5 py-2 bg-[#ff5b14] hover:bg-[#e04e0e] text-white font-bold text-xs rounded-xl shadow-md flex items-center gap-1.5 transition-all cursor-pointer"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Tambah Komik Manual</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleOpenAdd}
+            className="px-3.5 py-2 bg-[#ff5b14] hover:bg-[#e04e0e] text-white font-bold text-xs rounded-xl shadow-md flex items-center gap-1.5 transition-all cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Tambah Komik Manual</span>
+          </button>
+        </div>
       </div>
 
       {selectedComicIds.length > 0 && (
