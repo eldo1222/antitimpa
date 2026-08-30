@@ -27,9 +27,7 @@ import {
   AlertTriangle,
   Play,
   ArrowRight,
-  Flame
 } from 'lucide-react';
-import firebaseConfigJson from '../../../firebase-applet-config.json';
 import { 
   getSupabaseCredentials, 
   isSupabaseConfigured, 
@@ -42,8 +40,7 @@ import {
 } from '../../lib/supabase';
 import { SupabaseService } from '../../services/supabaseService';
 
-type CollectionName = 'comics' | 'chapters' | 'users' | 'driveAccounts' | 'banners' | 'activityLogs' | 'systemSettings';
-type DatabaseTabMode = 'supabase' | 'firestore';
+type CollectionName = 'comics' | 'chapters' | 'users' | 'drive_accounts' | 'banners' | 'activity_logs' | 'system_settings';
 
 export const AdminDatabaseTab: React.FC = () => {
   const { 
@@ -57,13 +54,15 @@ export const AdminDatabaseTab: React.FC = () => {
     realtimeStatus,
     lastSyncTime,
     lastRealtimeEvent,
-    cleanOrphanData,
     showAdminToast,
     updateSettings,
     syncWithSupabase
   } = useApp();
 
-  const [activeSubTab, setActiveSubTab] = useState<DatabaseTabMode>('supabase');
+  const [selectedCollection, setSelectedCollection] = useState<CollectionName>('comics');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [copiedDocId, setCopiedDocId] = useState<string | null>(null);
+  const [selectedDocJson, setSelectedDocJson] = useState<{ id: string; data: any } | null>(null);
 
   // Diagnostic State
   const [isCheckingDiagnostic, setIsCheckingDiagnostic] = useState(false);
@@ -92,6 +91,11 @@ export const AdminDatabaseTab: React.FC = () => {
     chaptersCount: number;
     usersCount: number;
     bannersCount: number;
+    driveAccountsCount?: number;
+    activityLogsCount?: number;
+    commentsCount?: number;
+    adsCount?: number;
+    missingTables?: string[];
     error?: string;
   } | null>(null);
   const [isSyncingFromSupabase, setIsSyncingFromSupabase] = useState(false);
@@ -102,12 +106,6 @@ export const AdminDatabaseTab: React.FC = () => {
   const [migrationStatusText, setMigrationStatusText] = useState('');
   const [migrationResult, setMigrationResult] = useState<{ success: boolean; message: string; countComics: number; countChapters: number } | null>(null);
   const [copiedSql, setCopiedSql] = useState(false);
-
-  // Firestore Viewer State
-  const [selectedCollection, setSelectedCollection] = useState<CollectionName>('comics');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedDocJson, setSelectedDocJson] = useState<{ id: string; data: any } | null>(null);
-  const [copiedDocId, setCopiedDocId] = useState<string | null>(null);
   const [copiedUrl, setCopiedUrl] = useState(false);
   const [isCleaning, setIsCleaning] = useState(false);
   const [cleanResult, setCleanResult] = useState<{ deletedChapters: number; deletedComments: number; deletedBanners: number } | null>(null);
@@ -345,7 +343,9 @@ CREATE TABLE IF NOT EXISTS public.comics (
     story_writer TEXT DEFAULT '',
     artist TEXT DEFAULT '',
     rating NUMERIC(4, 2) DEFAULT 0.00,
+    rating_count INT DEFAULT 0,
     total_chapters INT DEFAULT 0,
+    total_readers INT DEFAULT 0,
     is_free BOOLEAN DEFAULT TRUE,
     is_vip BOOLEAN DEFAULT FALSE,
     is_featured BOOLEAN DEFAULT FALSE,
@@ -365,7 +365,7 @@ CREATE INDEX IF NOT EXISTS idx_comics_updated_at ON public.comics(updated_at DES
 -- 2. TABEL CHAPTERS (Daftar Chapter / Bab)
 CREATE TABLE IF NOT EXISTS public.chapters (
     id TEXT PRIMARY KEY,
-    comic_id TEXT NOT NULL REFERENCES public.comics(id) ON DELETE CASCADE,
+    comic_id TEXT NOT NULL,
     chapter_number NUMERIC(8, 2) NOT NULL,
     title TEXT NOT NULL,
     slug TEXT,
@@ -392,7 +392,7 @@ CREATE INDEX IF NOT EXISTS idx_chapters_comic_number ON public.chapters(comic_id
 CREATE TABLE IF NOT EXISTS public.users (
     id TEXT PRIMARY KEY,
     username TEXT NOT NULL UNIQUE,
-    email TEXT NOT NULL UNIQUE,
+    email TEXT,
     password_hash TEXT,
     role TEXT DEFAULT 'user',
     package_type TEXT DEFAULT 'free',
@@ -413,6 +413,7 @@ CREATE INDEX IF NOT EXISTS idx_users_username ON public.users(username);
 CREATE TABLE IF NOT EXISTS public.banners (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
+    subtitle TEXT DEFAULT 'Komik Populer Terupdate',
     image_url TEXT NOT NULL,
     target_url TEXT,
     target_type TEXT DEFAULT 'comic',
@@ -422,7 +423,96 @@ CREATE TABLE IF NOT EXISTS public.banners (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 5. TABEL SYSTEM_SETTINGS
+-- 5. TABEL DRIVE_ACCOUNTS
+CREATE TABLE IF NOT EXISTS public.drive_accounts (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    email TEXT,
+    folder_url TEXT,
+    status TEXT DEFAULT 'active',
+    notes TEXT,
+    storage_used_gb NUMERIC(6, 2) DEFAULT 0,
+    storage_total_gb NUMERIC(6, 2) DEFAULT 15,
+    color_tag TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 6. TABEL ACTIVITY_LOGS
+CREATE TABLE IF NOT EXISTS public.activity_logs (
+    id TEXT PRIMARY KEY,
+    username TEXT DEFAULT 'System',
+    action TEXT NOT NULL,
+    type TEXT DEFAULT 'system',
+    status TEXT DEFAULT 'info',
+    details TEXT,
+    ip_address TEXT DEFAULT '127.0.0.1',
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 7. TABEL COMMENTS
+CREATE TABLE IF NOT EXISTS public.comments (
+    id TEXT PRIMARY KEY,
+    comic_id TEXT NOT NULL,
+    chapter_id TEXT,
+    chapter_number NUMERIC(8, 2),
+    user_id TEXT,
+    username TEXT DEFAULT 'Pembaca',
+    user_avatar TEXT,
+    user_role TEXT,
+    user_email TEXT,
+    content TEXT NOT NULL,
+    likes_count INT DEFAULT 0,
+    spoiler BOOLEAN DEFAULT FALSE,
+    reply_to_id TEXT,
+    is_admin BOOLEAN DEFAULT FALSE,
+    is_vip BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 8. TABEL ADS (Iklan Banner, Mitra & Direct Link)
+CREATE TABLE IF NOT EXISTS public.ads (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    type TEXT DEFAULT 'banner',
+    position TEXT DEFAULT 'home_hero_bottom',
+    is_active BOOLEAN DEFAULT TRUE,
+    image_url TEXT,
+    target_url TEXT,
+    alt_text TEXT,
+    badge_label TEXT,
+    sponsor_name TEXT,
+    headline TEXT,
+    description TEXT,
+    cta_text TEXT,
+    html_code TEXT,
+    script_code TEXT,
+    popunder_url TEXT,
+    frequency_hours INT DEFAULT 1,
+    show_for_vip BOOLEAN DEFAULT FALSE,
+    max_clicks_per_day INT,
+    click_count INT DEFAULT 0,
+    view_count INT DEFAULT 0,
+    notes TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 9. TABEL AD_SETTINGS (Pengaturan Iklan Global)
+CREATE TABLE IF NOT EXISTS public.ad_settings (
+    id TEXT PRIMARY KEY DEFAULT 'global_ad_config',
+    ads_enabled BOOLEAN DEFAULT TRUE,
+    hide_ads_for_vip BOOLEAN DEFAULT TRUE,
+    popunder_enabled BOOLEAN DEFAULT TRUE,
+    popunder_cooldown_minutes INT DEFAULT 15,
+    popunder_cooldown_hours INT DEFAULT 1,
+    welcome_popup_enabled BOOLEAN DEFAULT FALSE,
+    mitra_interstitial_enabled BOOLEAN DEFAULT TRUE,
+    dual_chapter_ads_enabled BOOLEAN DEFAULT TRUE,
+    floating_bottom_enabled BOOLEAN DEFAULT TRUE,
+    show_ad_label BOOLEAN DEFAULT TRUE,
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 10. TABEL SYSTEM_SETTINGS (Pengaturan Identitas & Fitur)
 CREATE TABLE IF NOT EXISTS public.system_settings (
     id TEXT PRIMARY KEY DEFAULT 'global_config',
     site_name TEXT DEFAULT 'AntiTimpa',
@@ -437,49 +527,80 @@ CREATE TABLE IF NOT EXISTS public.system_settings (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Izin Public Read & Write untuk seluruh tabel (Drop jika sudah ada untuk cegah error 42710)
+-- Kebijakan Row Level Security (RLS) - Public Read & Write
 ALTER TABLE public.comics ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.chapters ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.banners ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.drive_accounts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.activity_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.comments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ads ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ad_settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.system_settings ENABLE ROW LEVEL SECURITY;
 
--- 1. Comics Policies
+-- Policies
 DROP POLICY IF EXISTS "Public Full Access Comics" ON public.comics;
 DROP POLICY IF EXISTS "Allow public read comics" ON public.comics;
 DROP POLICY IF EXISTS "Allow anon insert comics" ON public.comics;
 DROP POLICY IF EXISTS "Allow public all comics" ON public.comics;
 CREATE POLICY "Public Full Access Comics" ON public.comics FOR ALL USING (true) WITH CHECK (true);
 
--- 2. Chapters Policies
 DROP POLICY IF EXISTS "Public Full Access Chapters" ON public.chapters;
 DROP POLICY IF EXISTS "Allow public read chapters" ON public.chapters;
 DROP POLICY IF EXISTS "Allow anon insert chapters" ON public.chapters;
 DROP POLICY IF EXISTS "Allow public all chapters" ON public.chapters;
 CREATE POLICY "Public Full Access Chapters" ON public.chapters FOR ALL USING (true) WITH CHECK (true);
 
--- 3. Users Policies
 DROP POLICY IF EXISTS "Public Full Access Users" ON public.users;
 DROP POLICY IF EXISTS "Allow public read users" ON public.users;
 DROP POLICY IF EXISTS "Allow anon insert users" ON public.users;
 DROP POLICY IF EXISTS "Allow public all users" ON public.users;
 CREATE POLICY "Public Full Access Users" ON public.users FOR ALL USING (true) WITH CHECK (true);
 
--- 4. Banners Policies
 DROP POLICY IF EXISTS "Public Full Access Banners" ON public.banners;
 DROP POLICY IF EXISTS "Allow public read banners" ON public.banners;
 DROP POLICY IF EXISTS "Allow anon insert banners" ON public.banners;
 DROP POLICY IF EXISTS "Allow public all banners" ON public.banners;
 CREATE POLICY "Public Full Access Banners" ON public.banners FOR ALL USING (true) WITH CHECK (true);
 
--- 5. System Settings Policies
+DROP POLICY IF EXISTS "Public Full Access Drive Accounts" ON public.drive_accounts;
+DROP POLICY IF EXISTS "Allow public read drive_accounts" ON public.drive_accounts;
+DROP POLICY IF EXISTS "Allow anon insert drive_accounts" ON public.drive_accounts;
+DROP POLICY IF EXISTS "Allow public all drive_accounts" ON public.drive_accounts;
+CREATE POLICY "Public Full Access Drive Accounts" ON public.drive_accounts FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Public Full Access Activity Logs" ON public.activity_logs;
+DROP POLICY IF EXISTS "Allow public read activity_logs" ON public.activity_logs;
+DROP POLICY IF EXISTS "Allow anon insert activity_logs" ON public.activity_logs;
+DROP POLICY IF EXISTS "Allow public all activity_logs" ON public.activity_logs;
+CREATE POLICY "Public Full Access Activity Logs" ON public.activity_logs FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Public Full Access Comments" ON public.comments;
+DROP POLICY IF EXISTS "Allow public read comments" ON public.comments;
+DROP POLICY IF EXISTS "Allow anon insert comments" ON public.comments;
+DROP POLICY IF EXISTS "Allow public all comments" ON public.comments;
+CREATE POLICY "Public Full Access Comments" ON public.comments FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Public Full Access Ads" ON public.ads;
+DROP POLICY IF EXISTS "Allow public read ads" ON public.ads;
+DROP POLICY IF EXISTS "Allow anon insert ads" ON public.ads;
+DROP POLICY IF EXISTS "Allow public all ads" ON public.ads;
+CREATE POLICY "Public Full Access Ads" ON public.ads FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Public Full Access Ad Settings" ON public.ad_settings;
+DROP POLICY IF EXISTS "Allow public read ad_settings" ON public.ad_settings;
+DROP POLICY IF EXISTS "Allow anon insert ad_settings" ON public.ad_settings;
+DROP POLICY IF EXISTS "Allow public all ad_settings" ON public.ad_settings;
+CREATE POLICY "Public Full Access Ad Settings" ON public.ad_settings FOR ALL USING (true) WITH CHECK (true);
+
 DROP POLICY IF EXISTS "Public Full Access System Settings" ON public.system_settings;
 DROP POLICY IF EXISTS "Allow public read system_settings" ON public.system_settings;
 DROP POLICY IF EXISTS "Allow anon insert system_settings" ON public.system_settings;
 DROP POLICY IF EXISTS "Allow public all system_settings" ON public.system_settings;
 CREATE POLICY "Public Full Access System Settings" ON public.system_settings FOR ALL USING (true) WITH CHECK (true);
 
--- 6. AKTIFKAN REALTIME PUBLICATION (SINKRONISASI INSTAN ANTAR PERANGKAT / HP & LAPTOP)
+-- Realtime Publication
 DO $$
 BEGIN
   BEGIN
@@ -499,7 +620,19 @@ BEGIN
   EXCEPTION WHEN others THEN NULL;
   END;
   BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.comments;
+  EXCEPTION WHEN others THEN NULL;
+  END;
+  BEGIN
     ALTER PUBLICATION supabase_realtime ADD TABLE public.system_settings;
+  EXCEPTION WHEN others THEN NULL;
+  END;
+  BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.ads;
+  EXCEPTION WHEN others THEN NULL;
+  END;
+  BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.drive_accounts;
   EXCEPTION WHEN others THEN NULL;
   END;
 END $$;`;
@@ -509,27 +642,6 @@ END $$;`;
     setTimeout(() => setCopiedSql(false), 3000);
     showAdminToast('SQL Schema Tersalin', 'Silakan tempel (paste) ke SQL Editor di Supabase Console.', 'success');
   };
-
-  const handleCleanOrphans = async () => {
-    if (!window.confirm('Bersihkan seluruh chapter, komentar, atau banner orphan (yang komiknya sudah dihapus) di Firestore?')) {
-      return;
-    }
-    setIsCleaning(true);
-    try {
-      const res = await cleanOrphanData();
-      setCleanResult(res);
-      setTimeout(() => setCleanResult(null), 8000);
-    } catch (e) {
-      console.error(e);
-      alert('Gagal membersihkan data orphan Firestore');
-    } finally {
-      setIsCleaning(false);
-    }
-  };
-
-  const projectId = firebaseConfigJson.projectId || 'gen-lang-client-0256082852';
-  const databaseId = firebaseConfigJson.firestoreDatabaseId || 'ai-studio-komikyuk-6f02fa55-fee7-4f9b-abff-67fecf326e55';
-  const consoleUrl = `https://console.firebase.google.com/project/${projectId}/firestore/databases/${databaseId}/data`;
 
   // Flatten all chapters into an array for viewing
   const allChaptersList = Object.entries(chapters).flatMap(([comicId, chList]) => 
@@ -544,13 +656,13 @@ END $$;`;
         return allChaptersList;
       case 'users':
         return users;
-      case 'driveAccounts':
+      case 'drive_accounts':
         return driveAccounts;
       case 'banners':
         return banners;
-      case 'activityLogs':
+      case 'activity_logs':
         return activityLogs;
-      case 'systemSettings':
+      case 'system_settings':
         return [{ id: 'config_global', ...systemSettings }];
       default:
         return [];
@@ -568,13 +680,13 @@ END $$;`;
   });
 
   const collectionsMeta: { id: CollectionName; label: string; icon: React.ComponentType<{ className?: string }>; count: number; desc: string }[] = [
-    { id: 'comics', label: 'comics', icon: BookOpen, count: comics.length, desc: 'Metadata judul komik, genre, status, rating' },
-    { id: 'chapters', label: 'chapters', icon: FileText, count: allChaptersList.length, desc: 'Daftar bab, halaman gambar & link Google Drive' },
-    { id: 'users', label: 'users', icon: Users, count: users.length, desc: 'Akun admin & pembaca, paket 15k/5k, password hash' },
-    { id: 'driveAccounts', label: 'driveAccounts', icon: HardDrive, count: driveAccounts.length, desc: 'Akun multi Google Drive penyimpanan komik' },
-    { id: 'banners', label: 'banners', icon: ImageIcon, count: banners.length, desc: 'Banner promo carousel antarmuka depan' },
-    { id: 'activityLogs', label: 'activityLogs', icon: Activity, count: activityLogs.length, desc: 'Audit log login, update & keamanan sistem' },
-    { id: 'systemSettings', label: 'systemSettings', icon: Settings, count: 1, desc: 'Konfigurasi identitas platform & security lockout' }
+    { id: 'comics', label: 'public.comics', icon: BookOpen, count: comics.length, desc: 'Metadata komik, genre, rating, status' },
+    { id: 'chapters', label: 'public.chapters', icon: FileText, count: allChaptersList.length, desc: 'Daftar bab, halaman gambar & link storage' },
+    { id: 'users', label: 'public.users', icon: Users, count: users.length, desc: 'Akun admin & pembaca, paket 15k/5k' },
+    { id: 'drive_accounts', label: 'public.drive_accounts', icon: HardDrive, count: driveAccounts.length, desc: 'Akun multi Google Drive penyimpanan komik' },
+    { id: 'banners', label: 'public.banners', icon: ImageIcon, count: banners.length, desc: 'Banner promo carousel antarmuka depan' },
+    { id: 'activity_logs', label: 'public.activity_logs', icon: Activity, count: activityLogs.length, desc: 'Audit log login, update & keamanan sistem' },
+    { id: 'system_settings', label: 'public.system_settings', icon: Settings, count: 1, desc: 'Konfigurasi identitas platform & security' }
   ];
 
   const handleCopyJson = (docId: string, data: any) => {
@@ -589,7 +701,7 @@ END $$;`;
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `database_${selectedCollection}_backup_${new Date().toISOString().split('T')[0]}.json`;
+    a.download = `supabase_${selectedCollection}_backup_${new Date().toISOString().split('T')[0]}.json`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -607,49 +719,23 @@ END $$;`;
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-base sm:text-lg font-black text-white tracking-tight">Database & SQL Migration Hub</h2>
+                <h2 className="text-base sm:text-lg font-black text-white tracking-tight">Supabase PostgreSQL Hub</h2>
                 {isConfigured ? (
                   <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                    Supabase SQL Aktif (Unlimited Read)
+                    Supabase SQL Single Source of Truth
                   </span>
                 ) : (
                   <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1.5">
                     <AlertTriangle className="w-3 h-3 text-amber-400" />
-                    Firestore (Limit 50k Token/Hari)
+                    Menunggu Konfigurasi Supabase
                   </span>
                 )}
               </div>
               <p className="text-xs text-slate-400 mt-0.5">
-                Kelola migrasi database SQL Supabase untuk menampung 2.000 komik & 20.000 chapter tanpa batasan kuota read token.
+                Pusat integrasi tunggal database PostgreSQL Supabase untuk menampung ribuan komik & chapter dengan performa tinggi dan Realtime Sync.
               </p>
             </div>
-          </div>
-
-          {/* Engine Selector Buttons */}
-          <div className="flex items-center bg-[#0d0d15] p-1 rounded-xl border border-[#242436]">
-            <button
-              onClick={() => setActiveSubTab('supabase')}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all ${
-                activeSubTab === 'supabase'
-                  ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md shadow-emerald-500/20'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <Zap className="w-3.5 h-3.5 text-emerald-300" />
-              <span>Supabase SQL (Unlimited)</span>
-            </button>
-            <button
-              onClick={() => setActiveSubTab('firestore')}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all ${
-                activeSubTab === 'firestore'
-                  ? 'bg-[#ff5b14] text-white shadow-md shadow-[#ff5b14]/20'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <Flame className="w-3.5 h-3.5 text-amber-300" />
-              <span>Firestore Explorer</span>
-            </button>
           </div>
         </div>
 
@@ -690,9 +776,8 @@ END $$;`;
         </div>
       </div>
 
-      {/* SUBTAB 1: SUPABASE SQL HUB */}
-      {activeSubTab === 'supabase' && (
-        <div className="space-y-6 animate-in fade-in">
+      {/* SUPABASE SQL HUB */}
+      <div className="space-y-6 animate-in fade-in">
           {/* DATABASE SYNC & ARCHITECTURE DIAGNOSTIC */}
           <div className="p-5 bg-[#0f111a] border border-[#2b2b45] rounded-2xl shadow-xl space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#1f2035] pb-3">
@@ -852,11 +937,17 @@ END $$;`;
                     <RefreshCw className="w-3 h-3 animate-spin" /> Memeriksa status tabel...
                   </span>
                 ) : liveDbStats?.isOnline ? (
-                  <div className="flex items-center gap-2">
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-bold font-mono text-[11px] border border-emerald-500/30">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-bold font-mono text-[11px] border border-emerald-500/30">
                       <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                      Live: {liveDbStats.comicsCount} Komik | {liveDbStats.chaptersCount} Chapter | {liveDbStats.usersCount} User
+                      Live: {liveDbStats.comicsCount} Komik | {liveDbStats.chaptersCount} Chapter | {liveDbStats.usersCount} User | {liveDbStats.bannersCount} Banner
                     </span>
+                    {liveDbStats.missingTables && liveDbStats.missingTables.length > 0 && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-medium text-[11px] border border-amber-500/30">
+                        <AlertTriangle className="w-3 h-3 text-amber-400" />
+                        {liveDbStats.missingTables.length} Tabel Belum Dibuat
+                      </span>
+                    )}
                   </div>
                 ) : (
                   <span className="text-amber-400 font-medium flex items-center gap-1">
@@ -875,6 +966,31 @@ END $$;`;
                 <span>Cek Ulang Jumlah Data di Supabase</span>
               </button>
             </div>
+
+            {/* Missing Tables Notice Banner if any */}
+            {liveDbStats?.missingTables && liveDbStats.missingTables.length > 0 && (
+              <div className="mt-4 p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-in fade-in">
+                <div className="flex items-start gap-2.5">
+                  <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold text-white block">Tabel Database Belum Lengkap di Supabase:</span>
+                    <span className="text-amber-300 font-mono text-[11px]">
+                      {liveDbStats.missingTables.join(', ')}
+                    </span>
+                    <p className="text-[11px] text-slate-300 mt-1">
+                      Salin SQL Schema di bawah dan jalankan di SQL Editor Supabase Dashboard untuk mengaktifkan seluruh fitur secara penuh.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={handleCopySqlSchema}
+                  className="shrink-0 px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs rounded-lg transition-colors flex items-center gap-1.5"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>{copiedSql ? '✓ Tersalin!' : 'Salin SQL Schema'}</span>
+                </button>
+              </div>
+            )}
 
             {/* Migration Progress Bar */}
             {isMigrating && (
@@ -1236,197 +1352,6 @@ END $$;`;
             </div>
           </div>
         </div>
-      )}
-
-      {/* SUBTAB 2: FIRESTORE EXPLORER */}
-      {activeSubTab === 'firestore' && (
-        <div className="space-y-6 animate-in fade-in">
-          {/* Firestore Notice & Action Bar */}
-          <div className="p-4 bg-[#12121c] rounded-2xl border border-[#242436] flex flex-col md:flex-row items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <Flame className="w-5 h-5 text-orange-500" />
-              <div>
-                <h3 className="font-bold text-sm text-white">Live Cloud Firestore Collection Explorer</h3>
-                <p className="text-xs text-slate-400">Inspeksi dokumen JSON realtime, status orphan, dan backup data Firestore.</p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <button
-                onClick={handleCleanOrphans}
-                disabled={isCleaning}
-                className="px-3 py-1.5 rounded-xl bg-[#222234] hover:bg-rose-950/40 text-rose-300 border border-rose-900/40 font-bold text-xs flex items-center gap-1.5 transition-all hover:scale-102 disabled:opacity-50"
-                title="Pindai dan bersihkan chapter/data yang komiknya sudah dihapus dari Firestore"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${isCleaning ? 'animate-spin text-rose-400' : 'text-rose-400'}`} />
-                <span>{isCleaning ? 'Membersihkan Data...' : 'Bersihkan Data Orphan'}</span>
-              </button>
-              <a
-                href={consoleUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="px-3 py-1.5 rounded-xl bg-[#ff5b14] hover:bg-[#e04e0e] text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-[#ff5b14]/20 transition-all hover:scale-102"
-              >
-                <ExternalLink className="w-3.5 h-3.5" />
-                <span>Buka Firebase Console</span>
-              </a>
-            </div>
-          </div>
-
-          {/* Clean Result Alert Banner */}
-          {cleanResult && (
-            <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-300 text-xs flex items-center justify-between animate-in fade-in">
-              <div className="flex items-center gap-2">
-                <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>
-                  <strong>Pembersihan Selesai:</strong> {cleanResult.deletedChapters} chapter sampah, {cleanResult.deletedComments} komentar tidak valid, dan {cleanResult.deletedBanners} banner orphan berhasil dihapus dari cloud Firestore.
-                </span>
-              </div>
-              <button onClick={() => setCleanResult(null)} className="text-emerald-400 hover:text-white text-xs font-bold px-2 py-0.5">
-                ✕
-              </button>
-            </div>
-          )}
-
-          {/* Collection Selection Tabs Carousel */}
-          <div className="space-y-2">
-            <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
-              <Layers className="w-4 h-4 text-[#ff5b14]" />
-              <span>Pilih Koleksi Database</span>
-            </label>
-
-            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
-              {collectionsMeta.map(col => {
-                const Icon = col.icon;
-                const isSelected = selectedCollection === col.id;
-                return (
-                  <button
-                    key={col.id}
-                    onClick={() => {
-                      setSelectedCollection(col.id);
-                      setSearchQuery('');
-                    }}
-                    className={`p-3 rounded-xl border text-left transition-all flex flex-col justify-between ${
-                      isSelected 
-                        ? 'bg-[#1e1a26] border-[#ff5b14] shadow-md shadow-[#ff5b14]/15 scale-102' 
-                        : 'bg-[#12121a] hover:bg-[#181824] border-[#222232] text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between mb-1.5">
-                      <div className={`p-1.5 rounded-lg ${isSelected ? 'bg-[#ff5b14] text-white' : 'bg-[#1a1a26] text-slate-400'}`}>
-                        <Icon className="w-3.5 h-3.5" />
-                      </div>
-                      <span className={`text-xs font-black font-mono ${isSelected ? 'text-[#ff5b14]' : 'text-slate-300'}`}>
-                        {col.count}
-                      </span>
-                    </div>
-                    <div>
-                      <span className={`text-xs font-bold block truncate ${isSelected ? 'text-white' : 'text-slate-300'}`}>
-                        /{col.label}
-                      </span>
-                      <span className="text-[10px] text-slate-500 truncate block mt-0.5">
-                        {col.desc}
-                      </span>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Documents Table & Viewer */}
-          <div className="p-5 bg-[#12121a] rounded-2xl border border-[#222232] space-y-4">
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
-                <FileCode className="w-4 h-4 text-[#ff5b14]" />
-                <h3 className="font-black text-sm text-white">
-                  Daftar Dokumen /{selectedCollection} ({filteredData.length} Dokumen)
-                </h3>
-              </div>
-
-              <div className="flex items-center gap-2 w-full sm:w-auto">
-                <div className="relative flex-1 sm:w-64">
-                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder={`Cari di /${selectedCollection}...`}
-                    className="w-full bg-[#181824] border border-[#28283a] rounded-xl pl-8 pr-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#ff5b14]"
-                  />
-                </div>
-
-                <button
-                  onClick={handleExportCollectionJson}
-                  className="px-3 py-1.5 bg-[#202030] hover:bg-[#2b2b40] text-slate-200 text-xs font-semibold rounded-xl border border-[#2e2e42] flex items-center gap-1.5 shrink-0"
-                >
-                  <Download className="w-3.5 h-3.5 text-orange-400" />
-                  <span>Download JSON</span>
-                </button>
-              </div>
-            </div>
-
-            <div className="overflow-x-auto max-h-[500px] overflow-y-auto rounded-xl border border-[#1f1f2e]">
-              <table className="w-full text-left text-xs font-mono">
-                <thead className="bg-[#181824] text-slate-400 text-[11px] uppercase tracking-wider sticky top-0 z-10 border-b border-[#242438]">
-                  <tr>
-                    <th className="py-2.5 px-3">Document ID</th>
-                    <th className="py-2.5 px-3">Ringkasan Data</th>
-                    <th className="py-2.5 px-3 text-right">Aksi</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[#1b1b28] text-slate-300">
-                  {filteredData.length > 0 ? (
-                    filteredData.map((doc, idx) => {
-                      const docId = doc.id || `doc-${idx}`;
-                      let previewTitle = doc.title || doc.username || doc.email || doc.name || doc.siteName || docId;
-                      return (
-                        <tr key={docId} className="hover:bg-[#171724] transition-colors">
-                          <td className="py-2.5 px-3 font-bold text-amber-400 truncate max-w-[200px]">
-                            {docId}
-                          </td>
-                          <td className="py-2.5 px-3 text-slate-400 truncate max-w-[350px]">
-                            <span className="text-white font-semibold mr-2">{previewTitle}</span>
-                            <span className="text-slate-500 text-[11px]">
-                              {JSON.stringify(doc).substring(0, 80)}...
-                            </span>
-                          </td>
-                          <td className="py-2.5 px-3 text-right space-x-1.5 whitespace-nowrap">
-                            <button
-                              onClick={() => setSelectedDocJson({ id: docId, data: doc })}
-                              className="px-2.5 py-1 bg-[#222234] hover:bg-[#2f2f48] text-slate-200 rounded-lg text-[11px] font-sans font-bold inline-flex items-center gap-1"
-                            >
-                              <Eye className="w-3 h-3 text-[#ff5b14]" />
-                              <span>Lihat JSON</span>
-                            </button>
-                            <button
-                              onClick={() => handleCopyJson(docId, doc)}
-                              className="p-1 text-slate-400 hover:text-white rounded-lg hover:bg-white/5"
-                              title="Salin JSON"
-                            >
-                              {copiedDocId === docId ? (
-                                <Check className="w-3.5 h-3.5 text-emerald-400" />
-                              ) : (
-                                <Copy className="w-3.5 h-3.5" />
-                              )}
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  ) : (
-                    <tr>
-                      <td colSpan={3} className="py-8 text-center text-slate-500 font-sans">
-                        Tidak ada dokumen yang cocok dengan filter pencarian di /{selectedCollection}.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* JSON Viewer Modal */}
       {selectedDocJson && (

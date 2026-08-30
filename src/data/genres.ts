@@ -83,40 +83,31 @@ export const parseAndCleanGenres = (input: string | string[]): string[] => {
   if (Array.isArray(input)) {
     rawList = input;
   } else if (typeof input === 'string') {
-    // If it contains delimiters like commas, semicolons, pipes, or newlines
-    if (/[,;|/\n]/.test(input)) {
-      rawList = input.split(/[,;|/\n]+/);
-    } else {
-      // Known multi-word tokens to extract first before camel-case splitting
-      const multiWordPatterns = [
-        'Dragon ball', 'dragon ball',
-        'One Piece', 'one piece',
-        'Shin-chan', 'shin-chan',
-        'Full color', 'full color',
-        'Big Ass', 'big ass',
-        'Big Penis', 'big penis',
-        'Hot Mom', 'hot mom',
-        'Mom & Son', 'mom & son',
-        'Mom and Son', 'mom and son',
-        'Step mother', 'step mother',
-        'Step Sister', 'step sister',
-        'Sub English', 'sub english',
-        'Sub indo', 'sub indo',
-        'Ntr (Netorare)', 'ntr (netorare)'
-      ];
+    let cleanInput = input.trim();
+    // If it starts with "Tag & Genres" or "Tags & Genres", remove that heading prefix
+    cleanInput = cleanInput.replace(/^tags?\s*&\s*genres?\s*:?/i, '').trim();
 
-      let workingStr = input;
+    // If it contains delimiters like commas, semicolons, pipes, or newlines
+    if (/[,;|/\n]/.test(cleanInput)) {
+      rawList = cleanInput.split(/[,;|/\n]+/);
+    } else {
+      // Sort presets by length descending so longer phrases ("Step Sister", "Ntr (Netorare)", "Mom & Son") match before shorter words ("Sister", "Son")
+      const sortedPresets = [...PRESET_GENRES].sort((a, b) => b.length - a.length);
+
+      let workingStr = cleanInput;
       const extracted: string[] = [];
 
-      multiWordPatterns.forEach(pattern => {
-        const regex = new RegExp(pattern.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&'), 'gi');
+      sortedPresets.forEach(preset => {
+        // Match preset with optional boundary or whitespace
+        const escaped = preset.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&');
+        const regex = new RegExp(`(${escaped})`, 'gi');
         if (regex.test(workingStr)) {
-          extracted.push(pattern);
+          extracted.push(preset);
           workingStr = workingStr.replace(regex, ' ');
         }
       });
 
-      // Split camel-cased tokens: e.g. "UncensoredVirginWife" -> ["Uncensored", "Virgin", "Wife"]
+      // Split any remaining camel-cased tokens: e.g. "UncensoredVirginWife" -> ["Uncensored", "Virgin", "Wife"]
       const camelTokens = workingStr
         .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
         .split(/\s+/)

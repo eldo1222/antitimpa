@@ -1,4 +1,5 @@
-import { getSupabaseClient, isSupabaseConfigured, getSupabaseCredentials } from '../lib/supabase';
+import { getSupabaseClient, isSupabaseConfigured, getSupabaseCredentials, isMissingTableError } from '../lib/supabase';
+import { DATABASE_TABLES, logDatabaseError } from './database/databaseContract';
 import { 
   Comic, 
   Chapter, 
@@ -88,7 +89,7 @@ export class SupabaseService {
         const { data, error } = await query.range(from, to);
 
         if (error) {
-          console.warn(`[SupabaseService] Error fetching table '${table}' page ${page}:`, error);
+          logDatabaseError({ table, operation: 'SELECT', error, details: { page, pageSize } });
           break;
         }
 
@@ -103,7 +104,7 @@ export class SupabaseService {
           hasMore = false;
         }
       } catch (err) {
-        console.warn(`[SupabaseService] Exception fetching table '${table}':`, err);
+        logDatabaseError({ table, operation: 'SELECT', error: err, details: { page } });
         break;
       }
     }
@@ -120,6 +121,11 @@ export class SupabaseService {
     chaptersCount: number;
     usersCount: number;
     bannersCount: number;
+    driveAccountsCount?: number;
+    activityLogsCount?: number;
+    commentsCount?: number;
+    adsCount?: number;
+    missingTables?: string[];
     error?: string;
   }> {
     const client = getSupabaseClient();
@@ -132,16 +138,48 @@ export class SupabaseService {
         { count: comicsCount, error: cErr },
         { count: chaptersCount, error: chErr },
         { count: usersCount, error: uErr },
-        { count: bannersCount, error: bErr }
+        { count: bannersCount, error: bErr },
+        { count: driveCount, error: dErr },
+        { count: logsCount, error: lErr },
+        { count: commentsCount, error: cmErr },
+        { count: adsCount, error: adErr },
+        { error: adSetErr },
+        { error: sysSetErr }
       ] = await Promise.all([
-        client.from('comics').select('*', { count: 'exact', head: true }),
-        client.from('chapters').select('*', { count: 'exact', head: true }),
-        client.from('readers').select('*', { count: 'exact', head: true }),
-        client.from('banners').select('*', { count: 'exact', head: true })
+        client.from(DATABASE_TABLES.COMICS).select('*', { count: 'exact', head: true }),
+        client.from(DATABASE_TABLES.CHAPTERS).select('*', { count: 'exact', head: true }),
+        client.from(DATABASE_TABLES.USERS).select('*', { count: 'exact', head: true }),
+        client.from(DATABASE_TABLES.BANNERS).select('*', { count: 'exact', head: true }),
+        client.from(DATABASE_TABLES.DRIVE_ACCOUNTS).select('*', { count: 'exact', head: true }),
+        client.from(DATABASE_TABLES.ACTIVITY_LOGS).select('*', { count: 'exact', head: true }),
+        client.from(DATABASE_TABLES.COMMENTS).select('*', { count: 'exact', head: true }),
+        client.from(DATABASE_TABLES.ADS).select('*', { count: 'exact', head: true }),
+        client.from(DATABASE_TABLES.AD_SETTINGS).select('*', { count: 'exact', head: true }),
+        client.from(DATABASE_TABLES.SYSTEM_SETTINGS).select('*', { count: 'exact', head: true })
       ]);
 
-      if (cErr && cErr.code === '42P01') {
-        return { isOnline: false, comicsCount: 0, chaptersCount: 0, usersCount: 0, bannersCount: 0, error: 'Tabel comics belum dibuat di Supabase. Jalankan SQL Schema terlebih dahulu.' };
+      const missing: string[] = [];
+      if (cErr && isMissingTableError(cErr)) missing.push(DATABASE_TABLES.COMICS);
+      if (chErr && isMissingTableError(chErr)) missing.push(DATABASE_TABLES.CHAPTERS);
+      if (uErr && isMissingTableError(uErr)) missing.push(DATABASE_TABLES.USERS);
+      if (bErr && isMissingTableError(bErr)) missing.push(DATABASE_TABLES.BANNERS);
+      if (dErr && isMissingTableError(dErr)) missing.push(DATABASE_TABLES.DRIVE_ACCOUNTS);
+      if (lErr && isMissingTableError(lErr)) missing.push(DATABASE_TABLES.ACTIVITY_LOGS);
+      if (cmErr && isMissingTableError(cmErr)) missing.push(DATABASE_TABLES.COMMENTS);
+      if (adErr && isMissingTableError(adErr)) missing.push(DATABASE_TABLES.ADS);
+      if (adSetErr && isMissingTableError(adSetErr)) missing.push(DATABASE_TABLES.AD_SETTINGS);
+      if (sysSetErr && isMissingTableError(sysSetErr)) missing.push(DATABASE_TABLES.SYSTEM_SETTINGS);
+
+      if (missing.includes(DATABASE_TABLES.COMICS)) {
+        return {
+          isOnline: false,
+          comicsCount: 0,
+          chaptersCount: 0,
+          usersCount: 0,
+          bannersCount: 0,
+          missingTables: missing,
+          error: 'Tabel comics belum dibuat di Supabase. Jalankan SQL Schema terlebih dahulu.'
+        };
       }
 
       return {
@@ -149,7 +187,12 @@ export class SupabaseService {
         comicsCount: comicsCount || 0,
         chaptersCount: chaptersCount || 0,
         usersCount: usersCount || 0,
-        bannersCount: bannersCount || 0
+        bannersCount: bannersCount || 0,
+        driveAccountsCount: driveCount || 0,
+        activityLogsCount: logsCount || 0,
+        commentsCount: commentsCount || 0,
+        adsCount: adsCount || 0,
+        missingTables: missing
       };
     } catch (e: any) {
       return { isOnline: false, comicsCount: 0, chaptersCount: 0, usersCount: 0, bannersCount: 0, error: e.message || String(e) };
@@ -224,7 +267,7 @@ export class SupabaseService {
         }
       };
     } catch (error) {
-      console.warn('[SupabaseService] fetchFullDatabase error:', error);
+      console.error('[SupabaseService] fetchFullDatabase error:', error);
       return null;
     }
   }
@@ -239,13 +282,17 @@ export class SupabaseService {
       const clean = identifier.trim();
       const isEmail = clean.includes('@');
       const { data, error } = isEmail
-        ? await client.from('readers').select('*').ilike('email', clean).maybeSingle()
-        : await client.from('readers').select('*').ilike('username', clean).maybeSingle();
+        ? await client.from(DATABASE_TABLES.USERS).select('*').ilike('email', clean).maybeSingle()
+        : await client.from(DATABASE_TABLES.USERS).select('*').ilike('username', clean).maybeSingle();
 
-      if (error || !data) return null;
+      if (error) {
+        logDatabaseError({ table: DATABASE_TABLES.USERS, operation: 'SELECT', error, details: { identifier } });
+        return null;
+      }
+      if (!data) return null;
       return mapDbToUser(data);
     } catch (err) {
-      console.warn('[SupabaseService] fetchUser error:', err);
+      logDatabaseError({ table: DATABASE_TABLES.USERS, operation: 'SELECT', error: err, details: { identifier } });
       return null;
     }
   }
@@ -384,7 +431,7 @@ export class SupabaseService {
       const channel = client.channel(channelId);
 
       channel
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'comics' }, (payload: any) => {
+        .on('postgres_changes', { event: '*', schema: 'public', table: DATABASE_TABLES.COMICS }, (payload: any) => {
           if (callbacks.onComicChange) {
             if (payload.eventType === 'DELETE') {
               callbacks.onComicChange('DELETE', { id: payload.old?.id || '' });
@@ -393,7 +440,7 @@ export class SupabaseService {
             }
           }
         })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'chapters' }, (payload: any) => {
+        .on('postgres_changes', { event: '*', schema: 'public', table: DATABASE_TABLES.CHAPTERS }, (payload: any) => {
           if (callbacks.onChapterChange) {
             if (payload.eventType === 'DELETE') {
               callbacks.onChapterChange('DELETE', { id: payload.old?.id || '', comicId: payload.old?.comic_id });
@@ -402,7 +449,7 @@ export class SupabaseService {
             }
           }
         })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'banners' }, (payload: any) => {
+        .on('postgres_changes', { event: '*', schema: 'public', table: DATABASE_TABLES.BANNERS }, (payload: any) => {
           if (callbacks.onBannerChange) {
             if (payload.eventType === 'DELETE') {
               callbacks.onBannerChange('DELETE', { id: payload.old?.id || '' });
@@ -411,7 +458,7 @@ export class SupabaseService {
             }
           }
         })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'readers' }, (payload: any) => {
+        .on('postgres_changes', { event: '*', schema: 'public', table: DATABASE_TABLES.USERS }, (payload: any) => {
           if (callbacks.onUserChange) {
             if (payload.eventType === 'DELETE') {
               callbacks.onUserChange('DELETE', { id: payload.old?.id || '' });
@@ -420,7 +467,7 @@ export class SupabaseService {
             }
           }
         })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'site_settings' }, (payload: any) => {
+        .on('postgres_changes', { event: '*', schema: 'public', table: DATABASE_TABLES.SYSTEM_SETTINGS }, (payload: any) => {
           if (callbacks.onSettingsChange && payload.new) {
             callbacks.onSettingsChange({
               siteName: payload.new.site_name,
@@ -431,7 +478,12 @@ export class SupabaseService {
             });
           }
         })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'drive_accounts' }, (payload: any) => {
+        .on('postgres_changes', { event: '*', schema: 'public', table: DATABASE_TABLES.AD_SETTINGS }, (payload: any) => {
+          if (callbacks.onAdSettingsChange && payload.new) {
+            callbacks.onAdSettingsChange(mapDbToAdSettings(payload.new));
+          }
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: DATABASE_TABLES.DRIVE_ACCOUNTS }, (payload: any) => {
           if (callbacks.onDriveChange) {
             if (payload.eventType === 'DELETE') {
               callbacks.onDriveChange('DELETE', { id: payload.old?.id || '' });
@@ -440,7 +492,7 @@ export class SupabaseService {
             }
           }
         })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'comments' }, (payload: any) => {
+        .on('postgres_changes', { event: '*', schema: 'public', table: DATABASE_TABLES.COMMENTS }, (payload: any) => {
           if (callbacks.onCommentChange) {
             if (payload.eventType === 'DELETE') {
               callbacks.onCommentChange('DELETE', { id: payload.old?.id || '' });
@@ -449,7 +501,7 @@ export class SupabaseService {
             }
           }
         })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'ads' }, (payload: any) => {
+        .on('postgres_changes', { event: '*', schema: 'public', table: DATABASE_TABLES.ADS }, (payload: any) => {
           if (callbacks.onAdChange) {
             if (payload.eventType === 'DELETE') {
               callbacks.onAdChange('DELETE', { id: payload.old?.id || '' });
@@ -472,6 +524,7 @@ export class SupabaseService {
         } catch (_) {}
       };
     } catch (e) {
+      logDatabaseError({ table: 'realtime_channel', operation: 'SUBSCRIBE', error: e });
       callbacks.onStatusChange?.('disconnected');
       return () => {};
     }

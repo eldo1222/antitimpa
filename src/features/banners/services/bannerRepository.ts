@@ -1,4 +1,5 @@
 import { getSupabaseClient, isSupabaseConfigured, parseSupabaseError } from '../../../lib/supabase';
+import { DATABASE_TABLES, logDatabaseError } from '../../../services/database/databaseContract';
 import { Banner } from '../types/banner.types';
 import { mapBannerToDb, mapDbToBanner } from './bannerMapper';
 
@@ -10,17 +11,19 @@ export class BannerRepository {
 
     try {
       const { data, error } = await client
-        .from('banners')
+        .from(DATABASE_TABLES.BANNERS)
         .select('*')
         .order('order_index', { ascending: true });
 
       if (error) {
+        logDatabaseError({ table: DATABASE_TABLES.BANNERS, operation: 'SELECT', error });
         const parsed = parseSupabaseError(error);
         return { data: [], error: parsed.userFriendlyMessage };
       }
 
       return { data: (data || []).map(mapDbToBanner) };
     } catch (err: any) {
+      logDatabaseError({ table: DATABASE_TABLES.BANNERS, operation: 'SELECT', error: err });
       return { data: [], error: err?.message || 'Gagal memuat banner' };
     }
   }
@@ -32,13 +35,15 @@ export class BannerRepository {
 
     try {
       const row = mapBannerToDb(banner);
-      const { error } = await client.from('banners').upsert(row, { onConflict: 'id' });
+      const { error } = await client.from(DATABASE_TABLES.BANNERS).upsert(row, { onConflict: 'id' });
       if (error) {
+        logDatabaseError({ table: DATABASE_TABLES.BANNERS, operation: 'UPSERT', error, details: { bannerId: banner.id } });
         const parsed = parseSupabaseError(error);
         return { success: false, isConfigured: true, error: parsed.userFriendlyMessage };
       }
       return { success: true, isConfigured: true };
     } catch (err: any) {
+      logDatabaseError({ table: DATABASE_TABLES.BANNERS, operation: 'UPSERT', error: err, details: { bannerId: banner.id } });
       return { success: false, isConfigured: true, error: err?.message || 'Network error' };
     }
   }
@@ -51,13 +56,15 @@ export class BannerRepository {
 
     try {
       const rows = banners.map(b => mapBannerToDb(b));
-      const { error } = await client.from('banners').upsert(rows, { onConflict: 'id' });
+      const { error } = await client.from(DATABASE_TABLES.BANNERS).upsert(rows, { onConflict: 'id' });
       if (error) {
+        logDatabaseError({ table: DATABASE_TABLES.BANNERS, operation: 'UPSERT', error, details: { count: banners.length } });
         const parsed = parseSupabaseError(error);
         return { success: false, count: 0, isConfigured: true, error: parsed.userFriendlyMessage };
       }
       return { success: true, count: banners.length, isConfigured: true };
     } catch (err: any) {
+      logDatabaseError({ table: DATABASE_TABLES.BANNERS, operation: 'UPSERT', error: err, details: { count: banners.length } });
       return { success: false, count: 0, isConfigured: true, error: err?.message || 'Network error' };
     }
   }
@@ -68,13 +75,15 @@ export class BannerRepository {
     if (!client) return { success: false, isConfigured: false };
 
     try {
-      const { error } = await client.from('banners').delete().eq('id', id);
+      const { error } = await client.from(DATABASE_TABLES.BANNERS).delete().eq('id', id);
       if (error) {
+        logDatabaseError({ table: DATABASE_TABLES.BANNERS, operation: 'DELETE', error, details: { id } });
         const parsed = parseSupabaseError(error);
         return { success: false, isConfigured: true, error: parsed.userFriendlyMessage };
       }
       return { success: true, isConfigured: true };
     } catch (err: any) {
+      logDatabaseError({ table: DATABASE_TABLES.BANNERS, operation: 'DELETE', error: err, details: { id } });
       return { success: false, isConfigured: true, error: err?.message || 'Network error' };
     }
   }

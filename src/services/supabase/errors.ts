@@ -8,6 +8,20 @@ export interface ParsedDbError {
   message: string;
   userFriendlyMessage: string;
   remediationHint?: string;
+  isTableMissing?: boolean;
+}
+
+export function isMissingTableError(error: any): boolean {
+  if (!error) return false;
+  const code = error?.code || '';
+  const rawMessage = error?.message || (typeof error === 'string' ? error : JSON.stringify(error));
+  return (
+    code === 'PGRST205' ||
+    code === '42P01' ||
+    rawMessage.includes('Could not find the table') ||
+    rawMessage.includes('schema cache') ||
+    (rawMessage.includes('relation') && rawMessage.includes('does not exist'))
+  );
 }
 
 export function parseSupabaseError(error: any): ParsedDbError {
@@ -22,12 +36,13 @@ export function parseSupabaseError(error: any): ParsedDbError {
   const rawMessage = error?.message || String(error);
   const code = error?.code || '';
 
-  // 1. Missing Table Error (42P01)
-  if (code === '42P01' || rawMessage.includes('relation') && rawMessage.includes('does not exist')) {
+  // 1. Missing Table Error (PGRST205 or 42P01)
+  if (isMissingTableError(error)) {
     return {
       isError: true,
-      code,
+      code: code || 'PGRST205',
       message: rawMessage,
+      isTableMissing: true,
       userFriendlyMessage: 'Tabel database belum dibuat di Supabase.',
       remediationHint: 'Buka Tab Database -> Salin SQL Schema -> Jalankan di Supabase Dashboard (SQL Editor).',
     };

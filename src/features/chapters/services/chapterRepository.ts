@@ -1,4 +1,5 @@
 import { getSupabaseClient, isSupabaseConfigured, parseSupabaseError } from '../../../lib/supabase';
+import { DATABASE_TABLES, logDatabaseError } from '../../../services/database/databaseContract';
 import { Chapter } from '../types/chapter.types';
 import { mapChapterToDb, mapDbToChapter } from './chapterMapper';
 
@@ -10,18 +11,20 @@ export class ChapterRepository {
 
     try {
       const { data, error } = await client
-        .from('chapters')
+        .from(DATABASE_TABLES.CHAPTERS)
         .select('*')
         .eq('comic_id', comicId)
         .order('chapter_number', { ascending: true });
 
       if (error) {
+        logDatabaseError({ table: DATABASE_TABLES.CHAPTERS, operation: 'SELECT', error, details: { comicId } });
         const parsed = parseSupabaseError(error);
         return { data: [], error: parsed.userFriendlyMessage };
       }
 
       return { data: (data || []).map(mapDbToChapter) };
     } catch (err: any) {
+      logDatabaseError({ table: DATABASE_TABLES.CHAPTERS, operation: 'SELECT', error: err, details: { comicId } });
       return { data: [], error: err?.message || 'Gagal memuat chapter' };
     }
   }
@@ -33,11 +36,12 @@ export class ChapterRepository {
 
     try {
       const { data, error } = await client
-        .from('chapters')
+        .from(DATABASE_TABLES.CHAPTERS)
         .select('*')
         .order('chapter_number', { ascending: true });
 
       if (error) {
+        logDatabaseError({ table: DATABASE_TABLES.CHAPTERS, operation: 'SELECT', error });
         const parsed = parseSupabaseError(error);
         return { data: {}, error: parsed.userFriendlyMessage };
       }
@@ -51,6 +55,7 @@ export class ChapterRepository {
 
       return { data: grouped };
     } catch (err: any) {
+      logDatabaseError({ table: DATABASE_TABLES.CHAPTERS, operation: 'SELECT', error: err });
       return { data: {}, error: err?.message || 'Gagal memuat semua chapter' };
     }
   }
@@ -62,13 +67,15 @@ export class ChapterRepository {
 
     try {
       const row = mapChapterToDb({ ...chapter, comicId });
-      const { error } = await client.from('chapters').upsert(row, { onConflict: 'id' });
+      const { error } = await client.from(DATABASE_TABLES.CHAPTERS).upsert(row, { onConflict: 'id' });
       if (error) {
+        logDatabaseError({ table: DATABASE_TABLES.CHAPTERS, operation: 'UPSERT', error, details: { chapterId: chapter.id, comicId } });
         const parsed = parseSupabaseError(error);
         return { success: false, isConfigured: true, error: parsed.userFriendlyMessage };
       }
       return { success: true, isConfigured: true };
     } catch (err: any) {
+      logDatabaseError({ table: DATABASE_TABLES.CHAPTERS, operation: 'UPSERT', error: err, details: { chapterId: chapter.id, comicId } });
       return { success: false, isConfigured: true, error: err?.message || 'Network error' };
     }
   }
@@ -84,14 +91,16 @@ export class ChapterRepository {
       const CHUNK_SIZE = 50;
       for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
         const chunk = rows.slice(i, i + CHUNK_SIZE);
-        const { error } = await client.from('chapters').upsert(chunk, { onConflict: 'id' });
+        const { error } = await client.from(DATABASE_TABLES.CHAPTERS).upsert(chunk, { onConflict: 'id' });
         if (error) {
+          logDatabaseError({ table: DATABASE_TABLES.CHAPTERS, operation: 'UPSERT', error, details: { chunkIndex: i, total: rows.length } });
           const parsed = parseSupabaseError(error);
           return { success: false, count: i, isConfigured: true, error: parsed.userFriendlyMessage };
         }
       }
       return { success: true, count: chapters.length, isConfigured: true };
     } catch (err: any) {
+      logDatabaseError({ table: DATABASE_TABLES.CHAPTERS, operation: 'UPSERT', error: err, details: { total: chapters.length } });
       return { success: false, count: 0, isConfigured: true, error: err?.message || 'Network error' };
     }
   }
@@ -102,13 +111,15 @@ export class ChapterRepository {
     if (!client) return { success: false, isConfigured: false };
 
     try {
-      const { error } = await client.from('chapters').delete().eq('id', id);
+      const { error } = await client.from(DATABASE_TABLES.CHAPTERS).delete().eq('id', id);
       if (error) {
+        logDatabaseError({ table: DATABASE_TABLES.CHAPTERS, operation: 'DELETE', error, details: { id } });
         const parsed = parseSupabaseError(error);
         return { success: false, isConfigured: true, error: parsed.userFriendlyMessage };
       }
       return { success: true, isConfigured: true };
     } catch (err: any) {
+      logDatabaseError({ table: DATABASE_TABLES.CHAPTERS, operation: 'DELETE', error: err, details: { id } });
       return { success: false, isConfigured: true, error: err?.message || 'Network error' };
     }
   }
@@ -120,13 +131,15 @@ export class ChapterRepository {
     if (!client) return { success: false, count: 0, isConfigured: false };
 
     try {
-      const { error } = await client.from('chapters').delete().in('id', ids);
+      const { error } = await client.from(DATABASE_TABLES.CHAPTERS).delete().in('id', ids);
       if (error) {
+        logDatabaseError({ table: DATABASE_TABLES.CHAPTERS, operation: 'DELETE', error, details: { ids } });
         const parsed = parseSupabaseError(error);
         return { success: false, count: 0, isConfigured: true, error: parsed.userFriendlyMessage };
       }
       return { success: true, count: ids.length, isConfigured: true };
     } catch (err: any) {
+      logDatabaseError({ table: DATABASE_TABLES.CHAPTERS, operation: 'DELETE', error: err, details: { ids } });
       return { success: false, count: 0, isConfigured: true, error: err?.message || 'Network error' };
     }
   }
