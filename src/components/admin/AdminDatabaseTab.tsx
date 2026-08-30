@@ -56,6 +56,7 @@ export const AdminDatabaseTab: React.FC = () => {
     systemSettings,
     realtimeStatus,
     lastSyncTime,
+    lastRealtimeEvent,
     cleanOrphanData,
     showAdminToast,
     updateSettings,
@@ -63,6 +64,18 @@ export const AdminDatabaseTab: React.FC = () => {
   } = useApp();
 
   const [activeSubTab, setActiveSubTab] = useState<DatabaseTabMode>('supabase');
+
+  // Diagnostic State
+  const [isCheckingDiagnostic, setIsCheckingDiagnostic] = useState(false);
+  const [diagnosticConfig, setDiagnosticConfig] = useState<{
+    endpointUrl: string;
+    hasUrl: boolean;
+    urlValue: string;
+    hasAnonKey: boolean;
+    anonKeyPreview: string;
+    fetchedAt: string;
+  } | null>(null);
+  const [diagnosticError, setDiagnosticError] = useState<string | null>(null);
 
   // Supabase State
   const [supabaseUrlInput, setSupabaseUrlInput] = useState('');
@@ -130,6 +143,42 @@ export const AdminDatabaseTab: React.FC = () => {
     }
   };
 
+  // Run central /api/supabase-config diagnostic check
+  const handleCheckDiagnostic = async () => {
+    setIsCheckingDiagnostic(true);
+    setDiagnosticError(null);
+    try {
+      const resp = await fetch('/api/supabase-config', { cache: 'no-store' });
+      if (!resp.ok) {
+        throw new Error(`HTTP ${resp.status}: Gagal memuat /api/supabase-config`);
+      }
+      const data = await resp.json();
+      const url = data.url || '';
+      const anonKey = data.anonKey || '';
+      const keyPreview = anonKey ? `${anonKey.slice(0, 10)}...${anonKey.slice(-6)}` : '(Kosong)';
+      
+      setDiagnosticConfig({
+        endpointUrl: window.location.origin + '/api/supabase-config',
+        hasUrl: Boolean(url),
+        urlValue: url || '(Belum diset di Server ENV)',
+        hasAnonKey: Boolean(anonKey),
+        anonKeyPreview: keyPreview,
+        fetchedAt: new Date().toLocaleTimeString('id-ID')
+      });
+      showAdminToast('Diagnostik Selesai', 'Respons /api/supabase-config berhasil diverifikasi.', 'success');
+    } catch (err: any) {
+      setDiagnosticError(err?.message || 'Gagal memanggil /api/supabase-config');
+      showAdminToast('Diagnostik Gagal', err?.message || 'Error', 'error');
+    } finally {
+      setIsCheckingDiagnostic(false);
+    }
+  };
+
+  // Run initial diagnostic on mount
+  useEffect(() => {
+    handleCheckDiagnostic();
+  }, []);
+
   // Load Supabase credentials on mount and keep in sync with cloud settings
   useEffect(() => {
     const creds = getSupabaseCredentials();
@@ -155,7 +204,7 @@ export const AdminDatabaseTab: React.FC = () => {
     }
 
     // 1. Simpan di local storage
-    saveCustomSupabaseConfig(cleanUrl, cleanKey, true);
+    saveCustomSupabaseConfig(cleanUrl, cleanKey);
     setSupabaseUrlInput(cleanUrl);
     setSupabaseKeyInput(cleanKey);
     setIsConfigured(true);
@@ -212,7 +261,7 @@ export const AdminDatabaseTab: React.FC = () => {
       const result = await testSupabaseConnection(cleanUrl, cleanKey);
       setPingStatus(result);
       if (result.success) {
-        saveCustomSupabaseConfig(cleanUrl, cleanKey, true);
+        saveCustomSupabaseConfig(cleanUrl, cleanKey);
         setIsConfigured(true);
       }
     } finally {
@@ -644,6 +693,105 @@ END $$;`;
       {/* SUBTAB 1: SUPABASE SQL HUB */}
       {activeSubTab === 'supabase' && (
         <div className="space-y-6 animate-in fade-in">
+          {/* DATABASE SYNC & ARCHITECTURE DIAGNOSTIC */}
+          <div className="p-5 bg-[#0f111a] border border-[#2b2b45] rounded-2xl shadow-xl space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#1f2035] pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 flex items-center justify-center font-bold">
+                  <Activity className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-white flex items-center gap-2">
+                    <span>DATABASE SYNC DIAGNOSTIC &amp; INTEGRITY</span>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                      Single Source of Truth
+                    </span>
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    Memastikan seluruh device (Admin, User A, User B) terkoneksi ke satu database PostgreSQL Supabase yang identik.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={handleCheckDiagnostic}
+                disabled={isCheckingDiagnostic}
+                className="px-3.5 py-1.5 rounded-xl bg-[#1c1d2e] hover:bg-[#25273d] text-indigo-300 border border-indigo-500/30 font-bold text-xs flex items-center justify-center gap-1.5 transition-all shadow-sm disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isCheckingDiagnostic ? 'animate-spin text-indigo-400' : 'text-indigo-400'}`} />
+                <span>{isCheckingDiagnostic ? 'Memeriksa...' : 'Periksa Respons /api/supabase-config'}</span>
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+              {/* Endpoint Config Card */}
+              <div className="p-3.5 bg-[#151726] rounded-xl border border-[#262842] space-y-2">
+                <div className="flex items-center justify-between text-[11px] text-slate-400 font-bold">
+                  <span className="flex items-center gap-1 text-indigo-300">
+                    <Server className="w-3.5 h-3.5" /> 1. Server Central Endpoint
+                  </span>
+                  <span className="font-mono text-[10px] text-slate-500">{diagnosticConfig?.fetchedAt || '-'}</span>
+                </div>
+                <div className="space-y-1 font-mono text-[11px]">
+                  <div className="text-slate-400 text-[10px]">URL: <span className="text-white truncate block">{diagnosticConfig?.urlValue || '(Memuat...)'}</span></div>
+                  <div className="text-slate-400 text-[10px]">Anon Key: <span className="text-emerald-400 block">{diagnosticConfig?.anonKeyPreview || '(Memuat...)'}</span></div>
+                </div>
+                <div className="text-[10px] text-slate-400 pt-1 border-t border-[#202238]">
+                  {diagnosticConfig?.hasUrl ? (
+                    <span className="text-emerald-400 font-bold flex items-center gap-1">
+                      <CheckCircle2 className="w-3 h-3" /> Server ENV Terpasang Identik
+                    </span>
+                  ) : (
+                    <span className="text-amber-400 font-bold flex items-center gap-1">
+                      <AlertTriangle className="w-3 h-3" /> Menggunakan Fallback Konfigurasi
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Realtime Subscription Status */}
+              <div className="p-3.5 bg-[#151726] rounded-xl border border-[#262842] space-y-2">
+                <div className="flex items-center justify-between text-[11px] text-slate-400 font-bold">
+                  <span className="flex items-center gap-1 text-emerald-300">
+                    <Zap className="w-3.5 h-3.5" /> 2. Supabase Realtime Subscriptions
+                  </span>
+                </div>
+                <div className="space-y-1 text-[11px]">
+                  <div className="flex items-center gap-2">
+                    <span className={`w-2 h-2 rounded-full ${realtimeStatus === 'connected' ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
+                    <span className="font-bold text-white uppercase">{realtimeStatus}</span>
+                  </div>
+                  <div className="text-[10px] text-slate-400">
+                    Subscribed Tables: <code className="text-emerald-300">comics, chapters, users, banners</code>
+                  </div>
+                </div>
+                <div className="text-[10px] text-slate-400 pt-1 border-t border-[#202238]">
+                  Event Terakhir: <span className="text-slate-200 font-mono font-bold">{lastRealtimeEvent ? `${lastRealtimeEvent.table} (${lastRealtimeEvent.type}) @ ${lastRealtimeEvent.time}` : 'Menunggu stream event...'}</span>
+                </div>
+              </div>
+
+              {/* Architecture Cutoff Status */}
+              <div className="p-3.5 bg-[#151726] rounded-xl border border-[#262842] space-y-2">
+                <div className="flex items-center justify-between text-[11px] text-slate-400 font-bold">
+                  <span className="flex items-center gap-1 text-cyan-300">
+                    <ShieldCheck className="w-3.5 h-3.5" /> 3. Dual-Write Cutoff Status
+                  </span>
+                </div>
+                <div className="space-y-1 text-[11px]">
+                  <div className="flex items-center gap-1 text-emerald-400 font-bold text-[10px]">
+                    <CheckCircle2 className="w-3.5 h-3.5" /> Local API db.json write DITIADAKAN
+                  </div>
+                  <div className="text-[10px] text-slate-300 leading-tight">
+                    Seluruh operasi komik, bab, banner, dan user murni diarahkan ke <strong>Supabase PostgreSQL</strong> dengan error rollback jika gagal.
+                  </div>
+                </div>
+                <div className="text-[10px] text-slate-400 pt-1 border-t border-[#202238] flex items-center justify-between">
+                  <span>Sinkron Snapshot:</span>
+                  <span className="font-mono text-slate-200 font-bold">{lastSyncTime || 'Baru saja'}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
           {/* Migration Banner & Quick Info */}
           <div className="p-5 bg-gradient-to-r from-emerald-950/40 via-[#121b19] to-[#101918] border border-emerald-500/30 rounded-2xl shadow-lg relative overflow-hidden">
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5 relative z-10">

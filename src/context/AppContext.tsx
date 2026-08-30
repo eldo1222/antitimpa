@@ -93,6 +93,7 @@ interface AppContextType {
   adSettings: AdSettings;
   realtimeStatus: 'connected' | 'connecting' | 'disconnected';
   lastSyncTime: string | null;
+  lastRealtimeEvent: { time: string; table: string; type: string } | null;
   
   // Navigation & UI state
   activeTab: 'home' | 'discover' | 'library' | 'profile';
@@ -476,6 +477,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [adminToasts, setAdminToasts] = useState<AdminToastItem[]>([]);
   const [realtimeStatus, setRealtimeStatus] = useState<'connected' | 'connecting' | 'disconnected'>('connecting');
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
+  const [lastRealtimeEvent, setLastRealtimeEvent] = useState<{ time: string; table: string; type: string } | null>(null);
 
   const showAdminToast = useCallback((title: string, message?: string, type: 'success' | 'info' | 'warning' | 'error' = 'success') => {
     const id = `toast-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
@@ -554,23 +556,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             setSystemSettings(prev => ({ ...prev, ...supabaseData.systemSettings }));
           }
           setLastSyncTime(new Date().toLocaleTimeString('id-ID'));
-        } else if (!supabaseData && isMounted) {
-          // Fallback to local server API if Supabase is unconfigured
-          try {
-            const serverRes = await fetch('/api/data');
-            if (serverRes.ok) {
-              const serverData = await serverRes.json();
-              if (serverData && isMounted) {
-                if (Array.isArray(serverData.comics) && serverData.comics.length > 0) {
-                  setComics(deduplicateById<Comic>(serverData.comics));
-                }
-                if (serverData.chapters && typeof serverData.chapters === 'object') {
-                  setChapters(serverData.chapters);
-                }
-                setLastSyncTime(new Date().toLocaleTimeString('id-ID'));
-              }
-            }
-          } catch (_) {}
         }
       } catch (e) {
         console.warn('[Supabase Sync] Fetch error:', e);
@@ -587,6 +572,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           if (isMounted) setRealtimeStatus(status);
         },
         onComicChange: (eventType, comic) => {
+          if (isMounted) {
+            setLastRealtimeEvent({ time: new Date().toLocaleTimeString('id-ID'), table: 'comics', type: eventType });
+          }
           if (eventType === 'DELETE') {
             setComics(prev => prev.filter(c => c.id !== comic.id));
             setChapters(prev => {
@@ -605,6 +593,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           }
         },
         onChapterChange: (eventType, chapter) => {
+          if (isMounted) {
+            setLastRealtimeEvent({ time: new Date().toLocaleTimeString('id-ID'), table: 'chapters', type: eventType });
+          }
           if (eventType === 'DELETE') {
             if (chapter.comicId) {
               setChapters(prev => {
@@ -638,6 +629,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           }
         },
         onBannerChange: (eventType, banner) => {
+          if (isMounted) {
+            setLastRealtimeEvent({ time: new Date().toLocaleTimeString('id-ID'), table: 'banners', type: eventType });
+          }
           if (eventType === 'DELETE') {
             setBanners(prev => prev.filter(b => b.id !== banner.id));
           } else if (banner && banner.id) {
@@ -651,6 +645,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           }
         },
         onUserChange: (eventType, user) => {
+          if (isMounted) {
+            setLastRealtimeEvent({ time: new Date().toLocaleTimeString('id-ID'), table: 'users', type: eventType });
+          }
           if (eventType === 'DELETE') {
             setUsers(prev => prev.filter(u => u.id !== user.id));
           } else if (user && user.id) {
@@ -664,6 +661,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           }
         },
         onDriveChange: (eventType, drive) => {
+          if (isMounted) {
+            setLastRealtimeEvent({ time: new Date().toLocaleTimeString('id-ID'), table: 'drive_accounts', type: eventType });
+          }
           if (eventType === 'DELETE') {
             setDriveAccounts(prev => prev.filter(d => d.id !== drive.id));
           } else if (drive && drive.id) {
@@ -677,6 +677,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           }
         },
         onCommentChange: (eventType, comment) => {
+          if (isMounted) {
+            setLastRealtimeEvent({ time: new Date().toLocaleTimeString('id-ID'), table: 'comments', type: eventType });
+          }
           if (eventType === 'DELETE') {
             setComments(prev => prev.filter(c => c.id !== comment.id && c.replyToId !== comment.id));
           } else if (comment && comment.id) {
@@ -690,6 +693,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           }
         },
         onAdChange: (eventType, ad) => {
+          if (isMounted) {
+            setLastRealtimeEvent({ time: new Date().toLocaleTimeString('id-ID'), table: 'ads', type: eventType });
+          }
           if (eventType === 'DELETE') {
             setAds(prev => prev.filter(a => a.id !== ad.id));
           } else if (ad && ad.id) {
@@ -703,11 +709,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           }
         },
         onAdSettingsChange: (newAdSettings) => {
+          if (isMounted) {
+            setLastRealtimeEvent({ time: new Date().toLocaleTimeString('id-ID'), table: 'ad_settings', type: 'UPDATE' });
+          }
           if (newAdSettings) {
             setAdSettings(prev => ({ ...prev, ...newAdSettings }));
           }
         },
         onSettingsChange: (settings) => {
+          if (isMounted) {
+            setLastRealtimeEvent({ time: new Date().toLocaleTimeString('id-ID'), table: 'system_settings', type: 'UPDATE' });
+          }
           if (settings) {
             setSystemSettings(prev => ({
               ...prev,
@@ -1726,7 +1738,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   // Content Management - Comics
-  const addComic = (comicData: Omit<Comic, 'id' | 'createdAt' | 'updatedAt' | 'rating' | 'ratingCount' | 'totalReaders' | 'totalChapters'> & { id?: string; createdAt?: string; updatedAt?: string; rating?: number; ratingCount?: number; totalReaders?: number; totalChapters?: number }) => {
+  const addComic = async (comicData: Omit<Comic, 'id' | 'createdAt' | 'updatedAt' | 'rating' | 'ratingCount' | 'totalReaders' | 'totalChapters'> & { id?: string; createdAt?: string; updatedAt?: string; rating?: number; ratingCount?: number; totalReaders?: number; totalChapters?: number }) => {
     const finalComicId = comicData.id || `comic-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
     const now = new Date().toISOString().split('T')[0];
     const explicitSlug = comicData.slug?.trim() || '';
@@ -1743,6 +1755,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       updatedAt: comicData.updatedAt || now
     };
 
+    const prevComics = [...comics];
     setComics(prev => {
       const normalizedNewTitle = (newComic.title || '').trim().toLowerCase();
       const filtered = prev.filter(c => c.id !== finalComicId && (c.title || '').trim().toLowerCase() !== normalizedNewTitle);
@@ -1776,46 +1789,42 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       }));
     }
 
-    // 2. Persist to Supabase sequentially (Comic first, then Chapter)
-    (async () => {
-      try {
-        const comicRes = await SupabaseService.saveComic(newComic);
-        if (!comicRes) {
-          showAdminToast('Peringatan Supabase', 'Gagal menyimpan komik ke Supabase PostgreSQL. Periksa schema / RLS.', 'error');
-        } else {
-          showAdminToast('Komik Berhasil Ditambahkan', `Komik "${newComic.title}" tersimpan di Supabase.`, 'success');
-        }
-        if (firstChapter) {
-          await SupabaseService.saveChapter(finalComicId, firstChapter);
-        }
-      } catch (err: any) {
-        console.error('[Supabase] Failed to save comic:', err);
-        showAdminToast('Database Error', `Gagal menyimpan komik ke Supabase: ${err.message || err}`, 'error');
+    // 2. Persist to Supabase
+    try {
+      const comicRes = await SupabaseService.saveComic(newComic);
+      if (!comicRes) {
+        setComics(prevComics);
+        showAdminToast('Gagal Menyimpan Komik', 'Supabase PostgreSQL menolak penyimpanan komik.', 'error');
+        return;
       }
-    })();
-
-    fetch('/api/data/comics', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newComic)
-    }).catch(() => {});
-
-    addLog(
-      currentUser?.username || 'admin',
-      `Tambah Komik: "${newComic.title}"`,
-      'comic_create',
-      'success',
-      `Komik (${(newComic.comicType || 'manga').toUpperCase()}) berhasil ditambahkan ke katalog`
-    );
+      if (firstChapter) {
+        await SupabaseService.saveChapter(finalComicId, firstChapter);
+      }
+      showAdminToast('Komik Berhasil Ditambahkan', `Komik "${newComic.title}" tersimpan di Supabase.`, 'success');
+      addLog(
+        currentUser?.username || 'admin',
+        `Tambah Komik: "${newComic.title}"`,
+        'comic_create',
+        'success',
+        `Komik (${(newComic.comicType || 'manga').toUpperCase()}) berhasil ditambahkan ke katalog`
+      );
+    } catch (err: any) {
+      console.error('[Supabase] Failed to save comic:', err);
+      setComics(prevComics);
+      showAdminToast('Database Error', `Gagal menyimpan komik ke Supabase: ${err?.message || err}`, 'error');
+    }
   };
 
   // Direct High-Reliability Injection for Scraped Comics with all their chapters
-  const injectComicWithChapters = (comic: Comic, chaptersList: Chapter[]) => {
+  const injectComicWithChapters = async (comic: Comic, chaptersList: Chapter[]) => {
     const finalComic: Comic = {
       ...comic,
       totalChapters: chaptersList.length > 0 ? chaptersList.length : (comic.totalChapters || 1),
       updatedAt: new Date().toISOString()
     };
+
+    const prevComics = [...comics];
+    const prevChapters = { ...chapters };
 
     setComics(prev => {
       const filtered = prev.filter(c => c.id !== finalComic.id && c.title.toLowerCase() !== finalComic.title.toLowerCase());
@@ -1827,44 +1836,35 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       [finalComic.id]: chaptersList
     }));
 
-    // Persist to Server API
-    fetch('/api/data/comics', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(finalComic)
-    }).catch(() => {});
-
-    fetch('/api/data/batch-inject', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ items: [{ comic: finalComic, chapters: chaptersList }] })
-    }).catch(() => {});
-
     // Persist sequentially to Supabase (Save Comic first, then Chapters, to satisfy Foreign Key)
-    (async () => {
-      try {
-        await SupabaseService.saveComic(finalComic);
-        if (chaptersList.length > 0) {
-          await SupabaseService.batchSaveChapters(chaptersList.map(ch => ({ ...ch, comicId: finalComic.id })));
-        }
-      } catch (err) {
-        console.warn('Supabase injection notice:', err);
+    try {
+      const okComic = await SupabaseService.saveComic(finalComic);
+      if (!okComic) {
+        setComics(prevComics);
+        setChapters(prevChapters);
+        showAdminToast('Gagal Menyuntikkan Komik', 'Supabase menolak komik yang di-scrape.', 'error');
+        return;
       }
-    })();
-
-    showAdminToast('Komik Berhasil Disuntikkan', `"${finalComic.title}" beserta ${chaptersList.length} chapter siap dibaca.`, 'success');
-
-    addLog(
-      currentUser?.username || 'admin',
-      `Suntik Komik API: "${finalComic.title}"`,
-      'comic_create',
-      'success',
-      `Berhasil menyuntikkan komik ${finalComic.title} (${(finalComic.comicType || 'manga').toUpperCase()}) beserta ${chaptersList.length} chapter siap baca.`
-    );
+      if (chaptersList.length > 0) {
+        await SupabaseService.batchSaveChapters(chaptersList.map(ch => ({ ...ch, comicId: finalComic.id })));
+      }
+      showAdminToast('Komik Berhasil Disuntikkan', `"${finalComic.title}" beserta ${chaptersList.length} chapter siap dibaca.`, 'success');
+      addLog(
+        currentUser?.username || 'admin',
+        `Suntik Komik API: "${finalComic.title}"`,
+        'comic_create',
+        'success',
+        `Berhasil menyuntikkan komik ${finalComic.title} (${(finalComic.comicType || 'manga').toUpperCase()}) beserta ${chaptersList.length} chapter siap baca.`
+      );
+    } catch (err: any) {
+      setComics(prevComics);
+      setChapters(prevChapters);
+      showAdminToast('Database Error', `Gagal menyimpan injeksi ke Supabase: ${err?.message || err}`, 'error');
+    }
   };
 
   // Batch inject multiple comics atomically
-  const batchInjectComicsWithChapters = (items: { comic: Comic; chapters: Chapter[] }[]) => {
+  const batchInjectComicsWithChapters = async (items: { comic: Comic; chapters: Chapter[] }[]) => {
     if (!items || items.length === 0) return;
 
     const newComics = items.map(item => ({
@@ -1872,6 +1872,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       totalChapters: item.chapters.length > 0 ? item.chapters.length : (item.comic.totalChapters || 1),
       updatedAt: new Date().toISOString()
     }));
+
+    const prevComics = [...comics];
+    const prevChapters = { ...chapters };
 
     setComics(prev => {
       const incomingIds = new Set(newComics.map(c => c.id));
@@ -1889,111 +1892,114 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       return nextChapters;
     });
 
-    // 1. Persist to Server API
-    fetch('/api/data/batch-inject', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ items })
-    }).catch(() => {});
-
-    // 2. Sequential Batch Persistence to Supabase (Comics first, then Chapters)
+    // Sequential Batch Persistence to Supabase (Comics first, then Chapters)
     const comicsToSave = items.map(item => item.comic);
     const chaptersToSave = items.flatMap(item => item.chapters.map(ch => ({ ...ch, comicId: item.comic.id })));
 
-    (async () => {
-      try {
-        await SupabaseService.batchSaveComics(comicsToSave);
-        if (chaptersToSave.length > 0) {
-          await SupabaseService.batchSaveChapters(chaptersToSave);
-        }
-      } catch (err) {
-        console.warn('Batch Supabase save notice:', err);
+    try {
+      const res = await SupabaseService.batchSaveComics(comicsToSave);
+      if (!res.success && comicsToSave.length > 0) {
+        setComics(prevComics);
+        setChapters(prevChapters);
+        showAdminToast('Gagal Batch Import', 'Supabase menolak batch penyimpanan komik.', 'error');
+        return;
       }
-    })();
-
-    showAdminToast('Batch Import Selesai', `Berhasil menyuntikkan ${items.length} komik lengkap ke katalog.`, 'success');
-
-    addLog(
-      currentUser?.username || 'admin',
-      `Batch Injection: ${items.length} Komik`,
-      'comic_create',
-      'success',
-      `Berhasil menyuntikkan ${items.length} judul komik lengkap dengan chapter siap baca ke katalog.`
-    );
+      if (chaptersToSave.length > 0) {
+        await SupabaseService.batchSaveChapters(chaptersToSave);
+      }
+      showAdminToast('Batch Import Selesai', `Berhasil menyuntikkan ${items.length} komik lengkap ke Supabase & katalog.`, 'success');
+      addLog(
+        currentUser?.username || 'admin',
+        `Batch Injection: ${items.length} Komik`,
+        'comic_create',
+        'success',
+        `Berhasil menyuntikkan ${items.length} judul komik lengkap dengan chapter siap baca ke katalog.`
+      );
+    } catch (err: any) {
+      setComics(prevComics);
+      setChapters(prevChapters);
+      showAdminToast('Database Error', `Gagal batch save ke Supabase: ${err?.message || err}`, 'error');
+    }
   };
 
-  const updateComic = (id: string, updates: Partial<Comic>) => {
+  const updateComic = async (id: string, updates: Partial<Comic>) => {
     const updatedDate = new Date().toISOString().split('T')[0];
     const existing = comics.find(c => c.id === id);
     const updatedComic: Comic = existing 
       ? { ...existing, ...updates, updatedAt: updatedDate }
       : ({ id, ...updates, updatedAt: updatedDate } as Comic);
 
-    setComics(prev => prev.map(c => c.id === id ? { ...c, ...updates, updatedAt: updatedDate } : c));
+    const prevComics = [...comics];
+    setComics(prev => prev.map(c => c.id === id ? updatedComic : c));
 
-    SupabaseService.saveComic(updatedComic).catch(() => {});
-    fetch('/api/data/comics', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updatedComic)
-    }).catch(() => {});
-
-    showAdminToast('Komik Berhasil Diperbarui', `Perubahan data komik telah disimpan.`, 'success');
-
-    addLog(
-      currentUser?.username || 'admin',
-      `Update Data Komik: "${updates.title || existing?.title || id}"`,
-      'comic_update',
-      'info',
-      `Perubahan atribut komik berhasil disimpan`
-    );
+    try {
+      const ok = await SupabaseService.saveComic(updatedComic);
+      if (!ok) {
+        setComics(prevComics);
+        showAdminToast('Gagal Update Komik', 'Supabase menolak update komik.', 'error');
+        return;
+      }
+      showAdminToast('Komik Berhasil Diperbarui', `Perubahan data komik telah disimpan ke Supabase.`, 'success');
+      addLog(
+        currentUser?.username || 'admin',
+        `Update Data Komik: "${updates.title || existing?.title || id}"`,
+        'comic_update',
+        'info',
+        `Perubahan atribut komik berhasil disimpan`
+      );
+    } catch (err: any) {
+      setComics(prevComics);
+      showAdminToast('Database Error', `Gagal update komik: ${err?.message || err}`, 'error');
+    }
   };
 
-  const deleteComic = (id: string, reason?: string) => {
+  const deleteComic = async (id: string, reason?: string) => {
     const target = comics.find(c => c.id === id);
-    setComics(prev => prev.filter(c => c.id !== id));
-    SupabaseService.deleteComic(id).catch(() => {});
-    fetch(`/api/data/comics/${id}`, { method: 'DELETE' }).catch(() => {});
+    const prevComics = [...comics];
+    const prevChapters = { ...chapters };
 
-    // Also delete chapters for this comic
+    setComics(prev => prev.filter(c => c.id !== id));
     setChapters(prev => {
       const next = { ...prev };
       delete next[id];
       return next;
     });
-
-    // Clean up banners referencing this comic
     setBanners(prev => prev.filter(b => b.targetComicId !== id));
-
-    // Clean up local bookmarks and reading history
     setBookmarks(prev => prev.filter(b => b.comicId !== id));
     setReadingHistory(prev => prev.filter(h => h.comicId !== id));
 
-    showAdminToast('Komik Berhasil Dihapus', `Komik "${target?.title || id}" telah dihapus.`, 'info');
-
-    addLog(
-      currentUser?.username || 'admin',
-      `Hapus Komik: "${target?.title || id}"`,
-      'comic_delete',
-      'warning',
-      `Komik dan seluruh chapter terkait telah dihapus permanen dari server database.${reason ? ` [Alasan Audit: ${reason}]` : ''}`
-    );
+    try {
+      const ok = await SupabaseService.deleteComic(id);
+      if (!ok) {
+        setComics(prevComics);
+        setChapters(prevChapters);
+        showAdminToast('Gagal Menghapus Komik', 'Supabase menolak penghapusan komik.', 'error');
+        return;
+      }
+      showAdminToast('Komik Berhasil Dihapus', `Komik "${target?.title || id}" telah dihapus.`, 'info');
+      addLog(
+        currentUser?.username || 'admin',
+        `Hapus Komik: "${target?.title || id}"`,
+        'comic_delete',
+        'warning',
+        `Komik dan seluruh chapter terkait telah dihapus permanen dari Supabase.${reason ? ` [Alasan Audit: ${reason}]` : ''}`
+      );
+    } catch (err: any) {
+      setComics(prevComics);
+      setChapters(prevChapters);
+      showAdminToast('Database Error', `Gagal menghapus komik: ${err?.message || err}`, 'error');
+    }
   };
 
-  const batchDeleteComics = (ids: string[], reason?: string) => {
+  const batchDeleteComics = async (ids: string[], reason?: string) => {
     if (!ids || ids.length === 0) return;
 
     const targetTitles = comics.filter(c => ids.includes(c.id)).map(c => `"${c.title}"`);
     const idSet = new Set(ids);
+    const prevComics = [...comics];
+    const prevChapters = { ...chapters };
 
     setComics(prev => prev.filter(c => !idSet.has(c.id)));
-    ids.forEach(id => SupabaseService.deleteComic(id).catch(() => {}));
-    fetch('/api/data/comics/batch-delete', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ids })
-    }).catch(() => {});
-
     setChapters(prev => {
       const next = { ...prev };
       ids.forEach(id => {
@@ -2001,25 +2007,29 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       });
       return next;
     });
-
-    // Clean up banners, bookmarks, reading history
     setBanners(prev => prev.filter(b => !idSet.has(b.targetComicId)));
     setBookmarks(prev => prev.filter(b => !idSet.has(b.comicId)));
     setReadingHistory(prev => prev.filter(h => !idSet.has(h.comicId)));
 
-    showAdminToast('Batch Hapus Berhasil', `${ids.length} komik telah dihapus dari katalog.`, 'info');
-
-    addLog(
-      currentUser?.username || 'admin',
-      `Batch Hapus Komik (${ids.length} Judul)`,
-      'comic_delete',
-      'warning',
-      `Menghapus ${ids.length} komik dari database: ${targetTitles.slice(0, 5).join(', ')}${targetTitles.length > 5 ? ` (+${targetTitles.length - 5} lainnya)` : ''}.${reason ? ` [Alasan Audit: ${reason}]` : ''}`
-    );
+    try {
+      await Promise.all(ids.map(id => SupabaseService.deleteComic(id)));
+      showAdminToast('Batch Hapus Berhasil', `${ids.length} komik telah dihapus dari katalog Supabase.`, 'info');
+      addLog(
+        currentUser?.username || 'admin',
+        `Batch Hapus Komik (${ids.length} Judul)`,
+        'comic_delete',
+        'warning',
+        `Menghapus ${ids.length} komik dari database: ${targetTitles.slice(0, 5).join(', ')}${targetTitles.length > 5 ? ` (+${targetTitles.length - 5} lainnya)` : ''}.${reason ? ` [Alasan Audit: ${reason}]` : ''}`
+      );
+    } catch (err: any) {
+      setComics(prevComics);
+      setChapters(prevChapters);
+      showAdminToast('Database Error', `Gagal batch hapus komik: ${err?.message || err}`, 'error');
+    }
   };
 
   // Content Management - Chapters
-  const addChapter = (
+  const addChapter = async (
     comicId: string, 
     chapterData: { 
       chapterNumber: number; 
@@ -2101,38 +2111,50 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
 
     const updatedList = [newChapter, ...existingChapters].sort((a, b) => b.chapterNumber - a.chapterNumber);
+    const prevChapters = { ...chapters };
+    const prevComics = [...comics];
 
     setChapters(prev => ({
       ...prev,
       [comicId]: updatedList
     }));
 
-    SupabaseService.saveChapter(comicId, newChapter).catch(() => {});
-
-    // Update totalChapters count on comic
     setComics(prev => prev.map(c => {
       if (c.id === comicId) {
-        const updated = { ...c, totalChapters: updatedList.length, updatedAt: new Date().toISOString().split('T')[0] };
-        SupabaseService.saveComic(updated).catch(() => {});
-        return updated;
+        return { ...c, totalChapters: updatedList.length, updatedAt: new Date().toISOString().split('T')[0] };
       }
       return c;
     }));
 
-    const sourceLabel = st === 'pdf' ? 'Dokumen PDF' : st === 'drive' ? 'Google Drive Reader' : `${generatedPages.length} Halaman Gambar`;
-
-    showAdminToast('Chapter Berhasil Ditambahkan', `"${targetComic?.title || 'Komik'}" Chapter ${chapterData.chapterNumber} berhasil disimpan.`, 'success');
-
-    addLog(
-      currentUser?.username || 'admin',
-      `Upload Chapter Baru (${(st || 'manual').toUpperCase()}): "${targetComic?.title || 'Komik'}" Ch. ${chapterData.chapterNumber}`,
-      'chapter_create',
-      'success',
-      `Judul: "${chapterData.title}" (${sourceLabel})`
-    );
+    try {
+      const ok = await SupabaseService.saveChapter(comicId, newChapter);
+      if (!ok) {
+        setChapters(prevChapters);
+        setComics(prevComics);
+        showAdminToast('Gagal Menyimpan Chapter', 'Supabase menolak penambahan chapter.', 'error');
+        return;
+      }
+      if (targetComic) {
+        const updatedComic = { ...targetComic, totalChapters: updatedList.length, updatedAt: new Date().toISOString().split('T')[0] };
+        await SupabaseService.saveComic(updatedComic);
+      }
+      const sourceLabel = st === 'pdf' ? 'Dokumen PDF' : st === 'drive' ? 'Google Drive Reader' : `${generatedPages.length} Halaman Gambar`;
+      showAdminToast('Chapter Berhasil Ditambahkan', `"${targetComic?.title || 'Komik'}" Chapter ${chapterData.chapterNumber} berhasil disimpan.`, 'success');
+      addLog(
+        currentUser?.username || 'admin',
+        `Upload Chapter Baru (${(st || 'manual').toUpperCase()}): "${targetComic?.title || 'Komik'}" Ch. ${chapterData.chapterNumber}`,
+        'chapter_create',
+        'success',
+        `Judul: "${chapterData.title}" (${sourceLabel})`
+      );
+    } catch (err: any) {
+      setChapters(prevChapters);
+      setComics(prevComics);
+      showAdminToast('Database Error', `Gagal simpan chapter: ${err?.message || err}`, 'error');
+    }
   };
 
-  const updateChapter = (comicId: string, chapterId: string, updates: Partial<Chapter>) => {
+  const updateChapter = async (comicId: string, chapterId: string, updates: Partial<Chapter>) => {
     let enrichedUpdates = { ...updates };
     if (updates.driveUrl) {
       enrichedUpdates.driveEmbedUrl = formatGoogleDriveEmbedUrl(updates.driveUrl);
@@ -2140,41 +2162,46 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     const currentList = chapters[comicId] || [];
     const existingChapter = currentList.find(ch => ch.id === chapterId);
-    if (existingChapter) {
-      const updated = { ...existingChapter, ...enrichedUpdates };
-      SupabaseService.saveChapter(comicId, updated).catch(() => {});
-    }
+    if (!existingChapter) return;
+
+    const updated = { ...existingChapter, ...enrichedUpdates };
+    const prevChapters = { ...chapters };
 
     setChapters(prev => {
       const list = prev[comicId] || [];
-      const updatedList = list.map(ch => {
-        if (ch.id === chapterId) {
-          return { ...ch, ...enrichedUpdates };
-        }
-        return ch;
-      });
+      const updatedList = list.map(ch => ch.id === chapterId ? updated : ch);
       return {
         ...prev,
         [comicId]: updatedList
       };
     });
 
-    showAdminToast('Chapter Diperbarui', 'Perubahan chapter berhasil disimpan.', 'success');
-
-    addLog(
-      currentUser?.username || 'admin',
-      `Update Chapter ID ${chapterId}`,
-      'chapter_create',
-      'info',
-      `Perubahan data chapter pada komik ID ${comicId}`
-    );
+    try {
+      const ok = await SupabaseService.saveChapter(comicId, updated);
+      if (!ok) {
+        setChapters(prevChapters);
+        showAdminToast('Gagal Update Chapter', 'Supabase menolak update chapter.', 'error');
+        return;
+      }
+      showAdminToast('Chapter Diperbarui', 'Perubahan chapter berhasil disimpan.', 'success');
+      addLog(
+        currentUser?.username || 'admin',
+        `Update Chapter ID ${chapterId}`,
+        'chapter_create',
+        'info',
+        `Perubahan data chapter pada komik ID ${comicId}`
+      );
+    } catch (err: any) {
+      setChapters(prevChapters);
+      showAdminToast('Database Error', `Gagal update chapter: ${err?.message || err}`, 'error');
+    }
   };
 
-  const deleteChapter = (comicId: string, chapterId: string, reason?: string) => {
-    SupabaseService.deleteChapter(chapterId).catch(() => {});
-
+  const deleteChapter = async (comicId: string, chapterId: string, reason?: string) => {
     const targetChapter = (chapters[comicId] || []).find(ch => ch.id === chapterId);
     const remainingList = (chapters[comicId] || []).filter(ch => ch.id !== chapterId);
+    const prevChapters = { ...chapters };
+    const prevComics = [...comics];
 
     setChapters(prev => ({
       ...prev,
@@ -2183,37 +2210,48 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     setComics(prev => prev.map(c => {
       if (c.id === comicId) {
-        const updated = { ...c, totalChapters: remainingList.length, updatedAt: new Date().toISOString().split('T')[0] };
-        SupabaseService.saveComic(updated).catch(() => {});
-        return updated;
+        return { ...c, totalChapters: remainingList.length, updatedAt: new Date().toISOString().split('T')[0] };
       }
       return c;
     }));
 
-    showAdminToast('Chapter Dihapus', `Chapter ${targetChapter?.chapterNumber || ''} telah dihapus.`, 'info');
-
-    // Clean up reading history referencing this chapter
     setReadingHistory(prev => prev.filter(h => !(h.comicId === comicId && h.chapterId === chapterId)));
 
-    const targetComic = comics.find(c => c.id === comicId);
-    addLog(
-      currentUser?.username || 'admin',
-      `Hapus Chapter: "${targetComic?.title || comicId}" Ch. ${targetChapter?.chapterNumber || chapterId}`,
-      'chapter_delete',
-      'warning',
-      `Chapter pada komik ${targetComic?.title || comicId} berhasil dihapus dari server database.${reason ? ` [Alasan Audit: ${reason}]` : ''}`
-    );
+    try {
+      const ok = await SupabaseService.deleteChapter(chapterId);
+      if (!ok) {
+        setChapters(prevChapters);
+        setComics(prevComics);
+        showAdminToast('Gagal Menghapus Chapter', 'Supabase menolak penghapusan chapter.', 'error');
+        return;
+      }
+      const targetComic = comics.find(c => c.id === comicId);
+      if (targetComic) {
+        const updatedComic = { ...targetComic, totalChapters: remainingList.length, updatedAt: new Date().toISOString().split('T')[0] };
+        await SupabaseService.saveComic(updatedComic);
+      }
+      showAdminToast('Chapter Dihapus', `Chapter ${targetChapter?.chapterNumber || ''} telah dihapus.`, 'info');
+      addLog(
+        currentUser?.username || 'admin',
+        `Hapus Chapter: "${targetComic?.title || comicId}" Ch. ${targetChapter?.chapterNumber || chapterId}`,
+        'chapter_delete',
+        'warning',
+        `Chapter pada komik ${targetComic?.title || comicId} berhasil dihapus dari Supabase.${reason ? ` [Alasan Audit: ${reason}]` : ''}`
+      );
+    } catch (err: any) {
+      setChapters(prevChapters);
+      setComics(prevComics);
+      showAdminToast('Database Error', `Gagal menghapus chapter: ${err?.message || err}`, 'error');
+    }
   };
 
-  const batchDeleteChapters = (comicId: string, chapterIds: string[], reason?: string) => {
+  const batchDeleteChapters = async (comicId: string, chapterIds: string[], reason?: string) => {
     if (!chapterIds || chapterIds.length === 0) return;
 
     const idSet = new Set(chapterIds);
-    chapterIds.forEach(chId => {
-      SupabaseService.deleteChapter(chId).catch(() => {});
-    });
-
     const remainingList = (chapters[comicId] || []).filter(ch => !idSet.has(ch.id));
+    const prevChapters = { ...chapters };
+    const prevComics = [...comics];
 
     setChapters(prev => ({
       ...prev,
@@ -2222,24 +2260,33 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     setComics(prev => prev.map(c => {
       if (c.id === comicId) {
-        const updated = { ...c, totalChapters: remainingList.length, updatedAt: new Date().toISOString().split('T')[0] };
-        SupabaseService.saveComic(updated).catch(() => {});
-        return updated;
+        return { ...c, totalChapters: remainingList.length, updatedAt: new Date().toISOString().split('T')[0] };
       }
       return c;
     }));
 
-    // Clean up reading history
     setReadingHistory(prev => prev.filter(h => !(h.comicId === comicId && idSet.has(h.chapterId))));
 
-    const targetComic = comics.find(c => c.id === comicId);
-    addLog(
-      currentUser?.username || 'admin',
-      `Batch Hapus Chapter (${chapterIds.length} Chapter): "${targetComic?.title || comicId}"`,
-      'chapter_delete',
-      'warning',
-      `${chapterIds.length} chapter pada komik "${targetComic?.title || comicId}" berhasil dihapus dari database.${reason ? ` [Alasan Audit: ${reason}]` : ''}`
-    );
+    try {
+      await Promise.all(chapterIds.map(chId => SupabaseService.deleteChapter(chId)));
+      const targetComic = comics.find(c => c.id === comicId);
+      if (targetComic) {
+        const updatedComic = { ...targetComic, totalChapters: remainingList.length, updatedAt: new Date().toISOString().split('T')[0] };
+        await SupabaseService.saveComic(updatedComic);
+      }
+      showAdminToast('Batch Hapus Chapter Berhasil', `${chapterIds.length} chapter telah dihapus.`, 'info');
+      addLog(
+        currentUser?.username || 'admin',
+        `Batch Hapus Chapter (${chapterIds.length} Chapter): "${targetComic?.title || comicId}"`,
+        'chapter_delete',
+        'warning',
+        `${chapterIds.length} chapter pada komik "${targetComic?.title || comicId}" berhasil dihapus dari Supabase.${reason ? ` [Alasan Audit: ${reason}]` : ''}`
+      );
+    } catch (err: any) {
+      setChapters(prevChapters);
+      setComics(prevComics);
+      showAdminToast('Database Error', `Gagal batch hapus chapter: ${err?.message || err}`, 'error');
+    }
   };
 
   const cleanOrphanData = async () => {
@@ -3125,6 +3172,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         adSettings,
         realtimeStatus,
         lastSyncTime,
+        lastRealtimeEvent,
         activeTab,
         selectedComicId,
         readingChapterId,

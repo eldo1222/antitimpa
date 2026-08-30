@@ -66,6 +66,14 @@ export async function fetchUniversalSupabaseConfig(): Promise<{ url: string; ano
     } catch (e) {
       console.warn('[Supabase Config] Unable to fetch /api/supabase-config:', e);
     }
+    
+    // If not found from server endpoint, reset promise cache after 3 seconds to allow retry
+    setTimeout(() => {
+      if (!runtimeSupabaseUrl || !runtimeSupabaseKey) {
+        configFetchPromise = null;
+      }
+    }, 3000);
+
     return getSupabaseCredentials();
   })();
 
@@ -154,44 +162,18 @@ export function isSupabaseConfigured(): boolean {
   return Boolean(url && anonKey && url.startsWith('http'));
 }
 
-export function saveCustomSupabaseConfig(rawUrl: string, rawKey: string, persistToStorage = true) {
+export function saveCustomSupabaseConfig(rawUrl: string, rawKey: string) {
   const url = formatSupabaseUrl(rawUrl);
   const anonKey = formatSupabaseKey(rawKey);
 
   runtimeSupabaseUrl = url;
   runtimeSupabaseKey = anonKey;
-
-  if (persistToStorage && typeof window !== 'undefined') {
-    try {
-      localStorage.setItem('antitimpa_custom_supabase_config', JSON.stringify({ url, anonKey }));
-    } catch (_) {}
-    // Broadcast / persist to server so other devices get it
-    try {
-      fetch('/api/supabase-config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, anonKey })
-      }).catch(() => {});
-    } catch (_) {}
-  }
   supabaseInstance = null; // force re-creation
 }
 
 export function clearCustomSupabaseConfig() {
   runtimeSupabaseUrl = '';
   runtimeSupabaseKey = '';
-  if (typeof window !== 'undefined') {
-    try {
-      localStorage.removeItem('antitimpa_custom_supabase_config');
-    } catch (_) {}
-    try {
-      fetch('/api/supabase-config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: '', anonKey: '' })
-      }).catch(() => {});
-    } catch (_) {}
-  }
   supabaseInstance = null;
 }
 
