@@ -13,9 +13,11 @@ import {
   Terminal, 
   ShieldAlert,
   Sparkles,
-  Layers
+  Layers,
+  Table,
+  CheckCheck
 } from 'lucide-react';
-import { runSupabaseSingleItemDiagnostic, DiagnosticTestResult } from '../../services/supabase/diagnosticRunner';
+import { runSupabaseSingleItemDiagnostic, checkSupabaseSchemaHealth, DiagnosticTestResult, SchemaHealthReport } from '../../services/supabase/diagnosticRunner';
 import { isSupabaseConfigured } from '../../lib/supabase';
 
 interface AdminDiagnosticModalProps {
@@ -52,7 +54,7 @@ export const AdminDiagnosticModal: React.FC<AdminDiagnosticModalProps> = ({ isOp
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
-      <div className="bg-[#0f0f18] border border-[#252538] rounded-2xl w-full max-w-3xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
+      <div className="bg-[#0f0f18] border border-[#252538] rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
         {/* Header */}
         <div className="p-4 sm:p-5 border-b border-[#1c1c2b] flex items-center justify-between bg-[#141422]">
           <div className="flex items-center gap-3">
@@ -61,10 +63,10 @@ export const AdminDiagnosticModal: React.FC<AdminDiagnosticModalProps> = ({ isOp
             </div>
             <div>
               <h3 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
-                Supabase Write Diagnostic Engine (1-Item Test)
+                Supabase Schema Health &amp; Write Diagnostic Engine
               </h3>
               <p className="text-xs text-slate-400">
-                Uji langsung penulisan 1 Komik &amp; 1 Chapter ke database PostgreSQL Supabase tanpa batch
+                Uji kesehatan 10 tabel PostgreSQL &amp; verifikasi tulis + baca-ulang 1 Komik ke database Supabase
               </p>
             </div>
           </div>
@@ -82,10 +84,10 @@ export const AdminDiagnosticModal: React.FC<AdminDiagnosticModalProps> = ({ isOp
           <div className="p-3.5 bg-indigo-950/40 border border-indigo-500/30 rounded-xl text-xs text-indigo-200 space-y-1">
             <div className="font-bold flex items-center gap-1.5 text-indigo-300">
               <Terminal className="w-4 h-4 text-indigo-400" />
-              <span>Protokol Diagnostik Ketat PostgREST / PostgreSQL:</span>
+              <span>Protokol Single Source of Truth &amp; PostgREST Verifier:</span>
             </div>
             <p className="text-slate-300">
-              Alat ini mengeksekusi <strong>1 komik tunggal</strong> dan <strong>1 chapter tunggal</strong> secara langsung ke Supabase client untuk menangkap error mentah (PostgreSQL Error Code, PostgREST Message, Details, Hint, &amp; RLS) tanpa ditutup-tutupi oleh fallback lokal.
+              Alat ini mengevaluasi status keberadaan <strong>10 tabel resmi</strong> dan mengeksekusi <strong>1 komik &amp; 1 chapter tunggal</strong> langsung ke Supabase client dengan pembacaan ulang (read-back verification) untuk memastikan integritas data tanpa ditutup-tutupi oleh cache lokal.
             </p>
           </div>
 
@@ -106,7 +108,7 @@ export const AdminDiagnosticModal: React.FC<AdminDiagnosticModalProps> = ({ isOp
                   onChange={e => setKeepTestRow(e.target.checked)}
                   className="rounded border-slate-700 bg-slate-800 text-amber-500 focus:ring-0"
                 />
-                <span>Simpan data uji di database (Jangan hapus setelah pengujian)</span>
+                <span>Simpan data uji di database (Jangan hapus otomatis setelah pengujian)</span>
               </label>
             </div>
 
@@ -118,12 +120,12 @@ export const AdminDiagnosticModal: React.FC<AdminDiagnosticModalProps> = ({ isOp
               {isRunning ? (
                 <>
                   <RefreshCw className="w-4 h-4 animate-spin text-white" />
-                  <span>Sedang Menguji Write...</span>
+                  <span>Sedang Menguji Schema &amp; Write...</span>
                 </>
               ) : (
                 <>
                   <Play className="w-4 h-4 fill-white" />
-                  <span>Jalankan Uji 1 Komik ke Supabase</span>
+                  <span>Jalankan Uji Diagnostik Lengkap</span>
                 </>
               )}
             </button>
@@ -151,6 +153,52 @@ export const AdminDiagnosticModal: React.FC<AdminDiagnosticModalProps> = ({ isOp
                 </div>
               </div>
 
+              {/* Schema Health Check (10 Tables Grid) */}
+              {result.schemaHealth && (
+                <div className="p-4 bg-[#12121e] rounded-xl border border-[#1f1f30] space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                      <Table className="w-4 h-4 text-cyan-400" />
+                      <span>Status 10 Tabel Database Supabase</span>
+                    </span>
+                    <span className={`text-[11px] font-bold px-2 py-0.5 rounded ${
+                      result.schemaHealth.allHealthy ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'
+                    }`}>
+                      {result.schemaHealth.allHealthy ? 'Semua Tabel Ditemukan (10/10 OK)' : `${result.schemaHealth.missingTables.length} Tabel Belum Dibuat`}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                    {Object.entries(result.schemaHealth.tables).map(([tableName, info]) => {
+                      const isOk = info.status === 'OK';
+                      const isMissing = info.status === 'MISSING';
+                      return (
+                        <div
+                          key={tableName}
+                          className={`p-2.5 rounded-lg border text-xs flex flex-col justify-between ${
+                            isOk
+                              ? 'bg-emerald-950/20 border-emerald-500/30 text-emerald-300'
+                              : isMissing
+                              ? 'bg-red-950/30 border-red-500/30 text-red-300'
+                              : 'bg-amber-950/20 border-amber-500/30 text-amber-300'
+                          }`}
+                        >
+                          <div className="font-mono font-bold truncate text-[11px]">{tableName}</div>
+                          <div className="flex items-center justify-between mt-1 text-[10px]">
+                            <span className={`font-black ${isOk ? 'text-emerald-400' : isMissing ? 'text-red-400' : 'text-amber-400'}`}>
+                              {isOk ? 'OK' : isMissing ? 'MISSING' : 'ERR'}
+                            </span>
+                            <span className="text-slate-400">
+                              {isOk ? `${info.rowCount ?? 0} rows` : info.code || 'PGRST205'}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               {/* Step by Step Breakdown */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 {/* Step 1: Comics Table */}
@@ -158,7 +206,7 @@ export const AdminDiagnosticModal: React.FC<AdminDiagnosticModalProps> = ({ isOp
                   <div className="flex items-center justify-between text-xs font-bold">
                     <span className="text-slate-300 flex items-center gap-1.5">
                       <Database className="w-3.5 h-3.5 text-indigo-400" />
-                      <span>1. Tabel public.comics</span>
+                      <span>Uji Tulis public.comics</span>
                     </span>
                     <span className={`px-2 py-0.5 rounded text-[10px] font-black ${
                       result.steps.comicWrite.status === 'PASS' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
@@ -168,6 +216,7 @@ export const AdminDiagnosticModal: React.FC<AdminDiagnosticModalProps> = ({ isOp
                   </div>
                   <div className="text-xs text-slate-300 space-y-1 bg-black/30 p-2.5 rounded-lg border border-white/5 font-mono">
                     <div><span className="text-slate-500">Code:</span> <strong className="text-amber-400">{result.steps.comicWrite.code || 'None'}</strong></div>
+                    <div><span className="text-slate-500">Read-Back:</span> <strong className={result.steps.comicWrite.readBackVerified ? 'text-emerald-400' : 'text-red-400'}>{result.steps.comicWrite.readBackVerified ? 'TERVERIFIKASI (Row Ditemukan)' : 'BELUM'}</strong></div>
                     <div className="text-slate-400 truncate"><span className="text-slate-500">Message:</span> {result.steps.comicWrite.message}</div>
                     {result.steps.comicWrite.hint && (
                       <div className="text-cyan-400"><span className="text-slate-500">Hint:</span> {result.steps.comicWrite.hint}</div>
@@ -183,7 +232,7 @@ export const AdminDiagnosticModal: React.FC<AdminDiagnosticModalProps> = ({ isOp
                   <div className="flex items-center justify-between text-xs font-bold">
                     <span className="text-slate-300 flex items-center gap-1.5">
                       <Layers className="w-3.5 h-3.5 text-amber-400" />
-                      <span>2. Tabel public.chapters</span>
+                      <span>Uji Tulis public.chapters</span>
                     </span>
                     <span className={`px-2 py-0.5 rounded text-[10px] font-black ${
                       result.steps.chapterWrite.status === 'PASS' ? 'bg-emerald-500/20 text-emerald-400' : 
@@ -194,6 +243,7 @@ export const AdminDiagnosticModal: React.FC<AdminDiagnosticModalProps> = ({ isOp
                   </div>
                   <div className="text-xs text-slate-300 space-y-1 bg-black/30 p-2.5 rounded-lg border border-white/5 font-mono">
                     <div><span className="text-slate-500">Code:</span> <strong className="text-amber-400">{result.steps.chapterWrite.code || 'None'}</strong></div>
+                    <div><span className="text-slate-500">Read-Back:</span> <strong className={result.steps.chapterWrite.readBackVerified ? 'text-emerald-400' : 'text-red-400'}>{result.steps.chapterWrite.readBackVerified ? 'TERVERIFIKASI (Row Ditemukan)' : 'BELUM'}</strong></div>
                     <div className="text-slate-400 truncate"><span className="text-slate-500">Message:</span> {result.steps.chapterWrite.message}</div>
                     {result.steps.chapterWrite.hint && (
                       <div className="text-cyan-400"><span className="text-slate-500">Hint:</span> {result.steps.chapterWrite.hint}</div>
@@ -238,7 +288,7 @@ export const AdminDiagnosticModal: React.FC<AdminDiagnosticModalProps> = ({ isOp
         {/* Footer */}
         <div className="p-4 border-t border-[#1c1c2b] bg-[#141422] flex items-center justify-between">
           <span className="text-xs text-slate-500">
-            Engine Versi: Supabase Diagnostic Runner v2.4 (Strict Isolation)
+            Engine Versi: Supabase Diagnostic Runner v2.5 (Health Check &amp; Read-Back Verifier)
           </span>
           <button
             onClick={onClose}

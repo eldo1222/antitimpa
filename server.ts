@@ -89,11 +89,19 @@ function loadDatabase(): CentralDB {
         };
       }
     } catch (e) {
-      console.warn("Failed to parse db.json, re-initializing from default dataset:", e);
+      console.error("[SERVER DB ERROR] Gagal mem-parse db.json. Membuat backup file korup:", e);
+      try {
+        const backupFile = `${DB_FILE}.corrupt.${Date.now()}`;
+        fs.copyFileSync(DB_FILE, backupFile);
+        console.error(`[SERVER DB BACKUP] File db.json yang rusak telah dibackup ke: ${backupFile}`);
+      } catch (backupErr) {
+        console.error("[SERVER DB BACKUP FAILED]", backupErr);
+      }
     }
   }
 
-  // Initial seed if db.json does not exist
+  // Initial seed if db.json does not exist (DEVELOPMENT ONLY)
+  console.log("[SERVER DB] Menginisialisasi dataset fallback lokal (DEVELOPMENT ONLY)...");
   const initialData: CentralDB = {
     comics: initialComics,
     chapters: sanitizeChaptersMap(initialChapters),
@@ -1775,7 +1783,7 @@ async function startServer() {
     }
   }
 
-  // Auto-Scraper REST endpoints
+  // Auto-Scraper REST endpoints (Directs traffic to authoritative Client Turbo Scraper / Supabase pipeline)
   app.get("/api/scraper/auto-status", (_req, res) => {
     autoScraperState.totalComicsInDB = dbState.comics.length;
     autoScraperState.totalChaptersInDB = Object.values(dbState.chapters).reduce((acc, c) => acc + (c?.length || 0), 0);
@@ -1784,21 +1792,12 @@ async function startServer() {
   });
 
   app.post("/api/scraper/auto-sync", async (req, res) => {
-    if (autoScraperState.isRunning) {
-      return res.json({ message: "Auto-scraper sedang berjalan", state: autoScraperState });
-    }
-    const targetCount = req.body?.targetCount ? parseInt(req.body.targetCount) : 500;
-    const categoryFilter = req.body?.categoryFilter || "all";
-    const preFetchChapters = req.body?.preFetchChapters ?? true;
-
-    // Launch non-blocking background scraper
-    runBackgroundAutoScraper({ 
-      force: true, 
-      targetCount, 
-      categoryFilter, 
-      preFetchChapters 
+    // Return explicit response to use Client-Side Turbo Scraper which writes directly to Supabase Single Source of Truth
+    res.json({ 
+      success: false, 
+      mode: "client_turbo", 
+      message: "Scraping master data dialihkan ke Universal Turbo Scraper yang menulis langsung ke Supabase PostgreSQL." 
     });
-    res.json({ message: "Auto-scraper dimulai di background", targetCount, state: autoScraperState });
   });
 
   app.post("/api/scraper/auto-stop", (_req, res) => {
@@ -1814,11 +1813,6 @@ async function startServer() {
     addScraperLog("🔄 Seluruh offset cursor scraper telah direset ke 0 (Mulai dari awal).");
     res.json({ message: "Offset cursor berhasil direset", state: autoScraperState });
   });
-
-  // Launch initial background auto-scraper 2.5 seconds after server boots
-  setTimeout(() => {
-    runBackgroundAutoScraper({ targetCount: 150 });
-  }, 2500);
 
   // Universal Proxy image helper for external images
   app.get("/api/proxy-image", async (req, res) => {

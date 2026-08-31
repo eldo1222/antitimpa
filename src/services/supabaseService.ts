@@ -31,6 +31,15 @@ import { CommentRepository } from '../features/comments/services/commentReposito
 import { SettingsRepository } from '../features/settings/services/settingsRepository';
 import { DriveRepository } from '../features/drive/services/driveRepository';
 import { generateSlug } from '../utils/slug';
+import { checkSupabaseSchemaHealth, runSupabaseSingleItemDiagnostic, SchemaHealthReport, DiagnosticTestResult } from './supabase/diagnosticRunner';
+
+// Re-export diagnostic utilities
+export {
+  checkSupabaseSchemaHealth,
+  runSupabaseSingleItemDiagnostic,
+  type SchemaHealthReport,
+  type DiagnosticTestResult
+};
 
 // Re-export mappers for backward compatibility
 export {

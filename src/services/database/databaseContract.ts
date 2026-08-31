@@ -136,8 +136,12 @@ import { isMissingTableError } from '../supabase/errors';
 
 export { isMissingTableError };
 
+// Error logging deduplication to prevent console flooding on polling loops
+const logTimestamps = new Map<string, number>();
+const ERROR_LOG_THROTTLE_MS = 60000; // Log identical errors at most once per 60 seconds
+
 /**
- * Diagnostic logger for Supabase Database operations
+ * Diagnostic logger for Supabase Database operations with deduplication
  */
 export function logDatabaseError(context: {
   table: DatabaseTableName | string;
@@ -147,10 +151,18 @@ export function logDatabaseError(context: {
 }) {
   const code = context.error?.code || 'UNKNOWN_CODE';
   const msg = context.error?.message || String(context.error);
+  const dedupeKey = `${context.table}:${context.operation}:${code}`;
+  const now = Date.now();
+  const lastLogged = logTimestamps.get(dedupeKey) || 0;
 
-  // If table is simply not yet created in Supabase SQL schema, log as a descriptive notice
+  if (now - lastLogged < ERROR_LOG_THROTTLE_MS) {
+    return; // Silently throttled to stop warning loops
+  }
+  logTimestamps.set(dedupeKey, now);
+
+  // If table is simply not yet created in Supabase SQL schema, log as a descriptive notice once
   if (isMissingTableError(context.error)) {
-    console.warn(`[DATABASE NOTICE] [${context.operation} ${context.table}] Tabel belum dibuat di database Supabase (Code: ${code}). Buka Tab Database Admin untuk mengeksekusi SQL Schema.`);
+    console.warn(`[DATABASE NOTICE] [${context.operation} ${context.table}] Tabel belum dibuat di database Supabase (Code: ${code}). Salin SQL Migration di Tab Database Admin untuk mengeksekusi schema.`);
     return;
   }
 

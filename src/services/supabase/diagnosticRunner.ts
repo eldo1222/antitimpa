@@ -1,15 +1,128 @@
-import { getSupabaseClient, isSupabaseConfigured, formatSupabaseDiagnosticError, SupabaseDiagnosticReport } from '../../lib/supabase';
-import { DATABASE_TABLES } from '../database/databaseContract';
+import { getSupabaseClient, isSupabaseConfigured, formatSupabaseDiagnosticError, isMissingTableError } from '../../lib/supabase';
+import { DATABASE_TABLES, DatabaseTableName } from '../database/databaseContract';
 import { KNOWN_COMIC_DB_COLUMNS, KNOWN_CHAPTER_DB_COLUMNS, validateComicData, validateChapterData } from '../../features/comics/services/comicValidation';
 import { mapComicToDb } from '../../features/comics/services/comicMapper';
 import { mapChapterToDb } from '../../features/chapters/services/chapterMapper';
 import { Comic, Chapter } from '../../types';
+
+export interface TableHealthStatus {
+  table: string;
+  status: 'OK' | 'MISSING' | 'ERROR';
+  code?: string;
+  message?: string;
+  rowCount?: number;
+}
+
+export interface SchemaHealthReport {
+  timestamp: string;
+  tables: Record<string, TableHealthStatus>;
+  allHealthy: boolean;
+  missingTables: string[];
+  formattedOutput: string;
+}
+
+/**
+ * Health check for all 10 official Supabase tables
+ */
+export async function checkSupabaseSchemaHealth(): Promise<SchemaHealthReport> {
+  const timestamp = new Date().toISOString();
+  const client = getSupabaseClient();
+  const tables = Object.values(DATABASE_TABLES);
+  const results: Record<string, TableHealthStatus> = {};
+  const missingTables: string[] = [];
+
+  if (!client) {
+    tables.forEach(t => {
+      results[t] = { table: t, status: 'ERROR', message: 'Client Supabase belum dikonfigurasi' };
+    });
+    return {
+      timestamp,
+      tables: results,
+      allHealthy: false,
+      missingTables: tables,
+      formattedOutput: 'Koneksi Supabase belum aktif.'
+    };
+  }
+
+  await Promise.all(
+    tables.map(async (tableName) => {
+      try {
+        const { count, error } = await client
+          .from(tableName)
+          .select('*', { count: 'exact', head: true });
+
+        if (error) {
+          if (isMissingTableError(error)) {
+            results[tableName] = {
+              table: tableName,
+              status: 'MISSING',
+              code: error.code || 'PGRST205',
+              message: error.message
+            };
+            missingTables.push(tableName);
+          } else {
+            results[tableName] = {
+              table: tableName,
+              status: 'ERROR',
+              code: error.code,
+              message: error.message
+            };
+          }
+        } else {
+          results[tableName] = {
+            table: tableName,
+            status: 'OK',
+            rowCount: count ?? 0
+          };
+        }
+      } catch (err: any) {
+        results[tableName] = {
+          table: tableName,
+          status: 'ERROR',
+          message: err?.message || String(err)
+        };
+      }
+    })
+  );
+
+  const allHealthy = missingTables.length === 0 && Object.values(results).every(r => r.status === 'OK');
+  
+  const lines = [
+    '==================================================',
+    '📊 SUPABASE SCHEMA HEALTH CHECK',
+    '==================================================',
+    `Timestamp: ${timestamp}`,
+    `Overall  : ${allHealthy ? 'ALL TABLES OK' : `${missingTables.length} TABLES MISSING / NEED MIGRATION`}`,
+    '--------------------------------------------------',
+    ...tables.map(t => {
+      const res = results[t];
+      const namePad = t.toUpperCase().padEnd(18, ' ');
+      if (res?.status === 'OK') {
+        return `${namePad} OK (Rows: ${res.rowCount ?? 0})`;
+      } else if (res?.status === 'MISSING') {
+        return `${namePad} MISSING [${res.code || 'PGRST205'}]`;
+      } else {
+        return `${namePad} ERROR [${res?.code || 'ERR'}]: ${res?.message || ''}`;
+      }
+    }),
+    '=================================================='
+  ];
+
+  return {
+    timestamp,
+    tables: results,
+    allHealthy,
+    missingTables,
+    formattedOutput: lines.join('\n')
+  };
+}
 
 export interface DiagnosticTestResult {
   timestamp: string;
   isConfigured: boolean;
   overallStatus: 'PASS' | 'FAIL' | 'WARNING';
   summary: string;
+  schemaHealth?: SchemaHealthReport;
   steps: {
     connection: { status: 'PASS' | 'FAIL' | 'SKIPPED'; message: string; latencyMs?: number };
     comicSchema: { status: 'PASS' | 'FAIL' | 'SKIPPED'; columnsFound: string[]; missingColumns: string[]; extraColumns: string[]; error?: string };
@@ -21,6 +134,7 @@ export interface DiagnosticTestResult {
       details?: string | null; 
       hint?: string | null; 
       payloadColumns: string[];
+      readBackVerified?: boolean;
       rawError?: any;
     };
     chapterWrite: { 
@@ -30,6 +144,7 @@ export interface DiagnosticTestResult {
       details?: string | null; 
       hint?: string | null; 
       payloadColumns: string[];
+      readBackVerified?: boolean;
       rawError?: any;
     };
     rlsCheck: { status: 'PASS' | 'FAIL' | 'WARNING'; message: string };
@@ -78,9 +193,11 @@ export async function runSupabaseSingleItemDiagnostic(options?: { cleanupAfterTe
   // STEP 1: Connection Test
   try {
     const connStart = Date.now();
-    const { error: pingErr } = await client.from(DATABASE_TABLES.SYSTEM_SETTINGS).select('id').limit(1);
+    const { error: pingErr } = await client.from(DATABASE_TABLES.COMICS).select('id').limit(1);
     const latency = Date.now() - connStart;
-    if (pingErr && pingErr.code !== 'PGRST116') {
+    if (pingErr && isMissingTableError(pingErr)) {
+      result.steps.connection = { status: 'FAIL', message: `Tabel comics belum dibuat di Supabase [${pingErr.code}]`, latencyMs: latency };
+    } else if (pingErr && pingErr.code !== 'PGRST116') {
       result.steps.connection = { status: 'FAIL', message: `Connection failed: [${pingErr.code}] ${pingErr.message}`, latencyMs: latency };
     } else {
       result.steps.connection = { status: 'PASS', message: `Terhubung ke Supabase (${latency}ms)`, latencyMs: latency };
@@ -89,7 +206,11 @@ export async function runSupabaseSingleItemDiagnostic(options?: { cleanupAfterTe
     result.steps.connection = { status: 'FAIL', message: `Network error: ${e?.message || e}` };
   }
 
-  // STEP 2: Comic Schema Inspection
+  // STEP 2: Schema Health Check on all 10 tables
+  const schemaHealth = await checkSupabaseSchemaHealth();
+  result.schemaHealth = schemaHealth;
+
+  // STEP 3: Comic Schema Column Inspection
   try {
     const { data: sampleComics, error: schemaErr } = await client.from(DATABASE_TABLES.COMICS).select('*').limit(1);
     if (schemaErr) {
@@ -122,7 +243,7 @@ export async function runSupabaseSingleItemDiagnostic(options?: { cleanupAfterTe
     };
   }
 
-  // STEP 3: Chapter Schema Inspection
+  // STEP 4: Chapter Schema Column Inspection
   try {
     const { data: sampleChaps, error: chapSchemaErr } = await client.from(DATABASE_TABLES.CHAPTERS).select('*').limit(1);
     if (chapSchemaErr) {
@@ -155,7 +276,7 @@ export async function runSupabaseSingleItemDiagnostic(options?: { cleanupAfterTe
     };
   }
 
-  // STEP 4: Write Test for EXACTLY 1 Comic
+  // STEP 5: Write Test for EXACTLY 1 Comic + Read-Back Verification
   const testComicId = `diag-comic-${Date.now()}`;
   const testComic: Comic = {
     id: testComicId,
@@ -191,7 +312,8 @@ export async function runSupabaseSingleItemDiagnostic(options?: { cleanupAfterTe
       status: 'FAIL',
       code: 'CLIENT_VALIDATION_ERROR',
       message: `Payload validasi lokal gagal: ${comicValidation.errors.join(', ')}`,
-      payloadColumns: comicCols
+      payloadColumns: comicCols,
+      readBackVerified: false
     };
     result.overallStatus = 'FAIL';
   } else {
@@ -217,6 +339,7 @@ export async function runSupabaseSingleItemDiagnostic(options?: { cleanupAfterTe
           details: diagErr.details,
           hint: diagErr.hint,
           payloadColumns: comicCols,
+          readBackVerified: false,
           rawError: writeComicErr
         };
         result.overallStatus = 'FAIL';
@@ -228,12 +351,31 @@ export async function runSupabaseSingleItemDiagnostic(options?: { cleanupAfterTe
           };
         }
       } else {
-        result.steps.comicWrite = {
-          status: 'PASS',
-          code: '200_OK',
-          message: `Berhasil UPSERT 1 komik ke tabel public.comics (ID: ${testComicId})`,
-          payloadColumns: comicCols
-        };
+        // Read-back check: SELECT comic by ID to verify it actually persists in PostgreSQL
+        const { data: readBackComic, error: readComicErr } = await client
+          .from(DATABASE_TABLES.COMICS)
+          .select('id, title')
+          .eq('id', testComicId)
+          .maybeSingle();
+
+        if (readComicErr || !readBackComic) {
+          result.steps.comicWrite = {
+            status: 'FAIL',
+            code: 'READ_BACK_FAILED',
+            message: `UPSERT berhasil dikirim, tetapi pembacaan ulang (SELECT) gagal menemukan baris: ${readComicErr?.message || 'Row not found'}`,
+            payloadColumns: comicCols,
+            readBackVerified: false
+          };
+          result.overallStatus = 'FAIL';
+        } else {
+          result.steps.comicWrite = {
+            status: 'PASS',
+            code: '200_OK',
+            message: `Berhasil UPSERT & TERVERIFIKASI BISA DIBACA ULANG dari public.comics (ID: ${testComicId})`,
+            payloadColumns: comicCols,
+            readBackVerified: true
+          };
+        }
       }
     } catch (e: any) {
       result.steps.comicWrite = {
@@ -241,13 +383,14 @@ export async function runSupabaseSingleItemDiagnostic(options?: { cleanupAfterTe
         code: 'NETWORK_EXCEPTION',
         message: e?.message || String(e),
         payloadColumns: comicCols,
+        readBackVerified: false,
         rawError: e
       };
       result.overallStatus = 'FAIL';
     }
   }
 
-  // STEP 5: Write Test for EXACTLY 1 Chapter (Only if comic write succeeded)
+  // STEP 6: Write Test for EXACTLY 1 Chapter + Read-Back Verification (Only if comic write succeeded)
   const testChapId = `diag-chap-${Date.now()}`;
   if (result.steps.comicWrite.status === 'PASS') {
     const testChapter: Chapter = {
@@ -272,7 +415,8 @@ export async function runSupabaseSingleItemDiagnostic(options?: { cleanupAfterTe
         status: 'FAIL',
         code: 'CLIENT_VALIDATION_ERROR',
         message: `Payload validasi chapter lokal gagal: ${chapValidation.errors.join(', ')}`,
-        payloadColumns: chapCols
+        payloadColumns: chapCols,
+        readBackVerified: false
       };
       result.overallStatus = 'FAIL';
     } else {
@@ -298,16 +442,36 @@ export async function runSupabaseSingleItemDiagnostic(options?: { cleanupAfterTe
             details: diagErr.details,
             hint: diagErr.hint,
             payloadColumns: chapCols,
+            readBackVerified: false,
             rawError: writeChapErr
           };
           result.overallStatus = 'FAIL';
         } else {
-          result.steps.chapterWrite = {
-            status: 'PASS',
-            code: '200_OK',
-            message: `Berhasil UPSERT 1 chapter ke tabel public.chapters (ID: ${testChapId})`,
-            payloadColumns: chapCols
-          };
+          // Read-back check for chapter
+          const { data: readBackChap, error: readChapErr } = await client
+            .from(DATABASE_TABLES.CHAPTERS)
+            .select('id, comic_id, chapter_number')
+            .eq('id', testChapId)
+            .maybeSingle();
+
+          if (readChapErr || !readBackChap) {
+            result.steps.chapterWrite = {
+              status: 'FAIL',
+              code: 'READ_BACK_FAILED',
+              message: `UPSERT chapter berhasil dikirim, tetapi pembacaan ulang (SELECT) gagal menemukan baris: ${readChapErr?.message || 'Row not found'}`,
+              payloadColumns: chapCols,
+              readBackVerified: false
+            };
+            result.overallStatus = 'FAIL';
+          } else {
+            result.steps.chapterWrite = {
+              status: 'PASS',
+              code: '200_OK',
+              message: `Berhasil UPSERT & TERVERIFIKASI BISA DIBACA ULANG dari public.chapters (ID: ${testChapId})`,
+              payloadColumns: chapCols,
+              readBackVerified: true
+            };
+          }
         }
       } catch (e: any) {
         result.steps.chapterWrite = {
@@ -315,6 +479,7 @@ export async function runSupabaseSingleItemDiagnostic(options?: { cleanupAfterTe
           code: 'NETWORK_EXCEPTION',
           message: e?.message || String(e),
           payloadColumns: chapCols,
+          readBackVerified: false,
           rawError: e
         };
         result.overallStatus = 'FAIL';
@@ -328,7 +493,7 @@ export async function runSupabaseSingleItemDiagnostic(options?: { cleanupAfterTe
     };
   }
 
-  // STEP 6: RLS Evaluation
+  // STEP 7: RLS Evaluation
   if (result.steps.comicWrite.status === 'PASS' && result.steps.chapterWrite.status === 'PASS') {
     result.steps.rlsCheck = {
       status: 'PASS',
@@ -341,7 +506,7 @@ export async function runSupabaseSingleItemDiagnostic(options?: { cleanupAfterTe
     };
   }
 
-  // STEP 7: Cleanup test rows if required
+  // STEP 8: Cleanup test rows if required
   if (cleanup && result.steps.comicWrite.status === 'PASS') {
     try {
       await client.from(DATABASE_TABLES.CHAPTERS).delete().eq('comic_id', testComicId);
@@ -354,7 +519,7 @@ export async function runSupabaseSingleItemDiagnostic(options?: { cleanupAfterTe
 
   // Construct Clean Summary
   if (result.steps.comicWrite.status === 'PASS' && result.steps.chapterWrite.status === 'PASS') {
-    result.summary = 'SEMUA UJI PENULISAN BERHASIL (PASS). Supabase menerima 1 komik & 1 chapter tanpa error PostgREST/RLS.';
+    result.summary = 'SEMUA UJI PENULISAN BERHASIL (PASS). Supabase menerima 1 komik & 1 chapter, dan verifikasi read-back lolos 100%.';
   } else {
     const failedStep = result.steps.comicWrite.status === 'FAIL' 
       ? `Tabel comics: [${result.steps.comicWrite.code || 'ERR'}] ${result.steps.comicWrite.message}`
@@ -365,7 +530,7 @@ export async function runSupabaseSingleItemDiagnostic(options?: { cleanupAfterTe
   // Build Full Formatted Raw Diagnostic Report Text
   result.rawReport = `
 ================================================================================
-🚨 SUPABASE WRITE DIAGNOSTIC REPORT (1-ITEM TEST)
+🚨 SUPABASE WRITE & READ-BACK DIAGNOSTIC REPORT (1-ITEM TEST)
 ================================================================================
 Timestamp   : ${result.timestamp}
 Duration    : ${Date.now() - startTime}ms
@@ -373,31 +538,31 @@ Status      : ${result.overallStatus}
 Summary     : ${result.summary}
 
 --------------------------------------------------------------------------------
-1. CONNECTION & LATENCY
+1. SCHEMA HEALTH CHECK (10 TABLES)
 --------------------------------------------------------------------------------
-Status  : ${result.steps.connection.status}
-Message : ${result.steps.connection.message}
-Latency : ${result.steps.connection.latencyMs ?? 'N/A'} ms
+${schemaHealth.formattedOutput}
 
 --------------------------------------------------------------------------------
-2. PUBLIC.COMICS WRITE TEST
+2. PUBLIC.COMICS WRITE & READ-BACK TEST
 --------------------------------------------------------------------------------
-Status          : ${result.steps.comicWrite.status}
-PostgREST Code  : ${result.steps.comicWrite.code || 'N/A'}
-Message         : ${result.steps.comicWrite.message}
-Details         : ${result.steps.comicWrite.details || 'None'}
-Hint            : ${result.steps.comicWrite.hint || 'None'}
-Payload Columns : [${result.steps.comicWrite.payloadColumns.join(', ')}]
+Status             : ${result.steps.comicWrite.status}
+Read-back Verified : ${result.steps.comicWrite.readBackVerified ? 'YES (Row found in PostgreSQL)' : 'NO'}
+PostgREST Code     : ${result.steps.comicWrite.code || 'N/A'}
+Message            : ${result.steps.comicWrite.message}
+Details            : ${result.steps.comicWrite.details || 'None'}
+Hint               : ${result.steps.comicWrite.hint || 'None'}
+Payload Columns    : [${result.steps.comicWrite.payloadColumns.join(', ')}]
 
 --------------------------------------------------------------------------------
-3. PUBLIC.CHAPTERS WRITE TEST
+3. PUBLIC.CHAPTERS WRITE & READ-BACK TEST
 --------------------------------------------------------------------------------
-Status          : ${result.steps.chapterWrite.status}
-PostgREST Code  : ${result.steps.chapterWrite.code || 'N/A'}
-Message         : ${result.steps.chapterWrite.message}
-Details         : ${result.steps.chapterWrite.details || 'None'}
-Hint            : ${result.steps.chapterWrite.hint || 'None'}
-Payload Columns : [${result.steps.chapterWrite.payloadColumns.join(', ')}]
+Status             : ${result.steps.chapterWrite.status}
+Read-back Verified : ${result.steps.chapterWrite.readBackVerified ? 'YES (Row found in PostgreSQL)' : 'NO'}
+PostgREST Code     : ${result.steps.chapterWrite.code || 'N/A'}
+Message            : ${result.steps.chapterWrite.message}
+Details            : ${result.steps.chapterWrite.details || 'None'}
+Hint               : ${result.steps.chapterWrite.hint || 'None'}
+Payload Columns    : [${result.steps.chapterWrite.payloadColumns.join(', ')}]
 
 --------------------------------------------------------------------------------
 4. ROW LEVEL SECURITY (RLS) AUDIT
