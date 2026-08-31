@@ -5,14 +5,14 @@
 -- 1. Buka Supabase Dashboard (https://app.supabase.com) -> Masuk ke Project Anda.
 -- 2. Buka menu "SQL Editor" di bilah kiri.
 -- 3. Paste seluruh kode SQL di bawah ini dan klik tombol "Run" (ikon play hijau).
--- 4. Semua tabel, kolom, index, dan izin RLS akan otomatis terbuat!
+-- 4. Semua tabel, kolom, index, dan izin RLS akan otomatis terbuat / tersinkronisasi!
 -- ==============================================================================
 
 -- 1. TABEL COMICS (Daftar Judul Komik)
 CREATE TABLE IF NOT EXISTS public.comics (
     id TEXT PRIMARY KEY,
-    title TEXT NOT NULL,
-    slug TEXT NOT NULL,
+    title TEXT NOT NULL DEFAULT 'Untitled',
+    slug TEXT NOT NULL DEFAULT '',
     cover_image TEXT,
     banner_image TEXT,
     synopsis TEXT,
@@ -37,6 +37,35 @@ CREATE TABLE IF NOT EXISTS public.comics (
     source_api TEXT DEFAULT 'manual'
 );
 
+-- Ensure all columns exist on comics table (Idempotent for pre-existing tables)
+DO $$
+BEGIN
+    ALTER TABLE public.comics ADD COLUMN IF NOT EXISTS title TEXT DEFAULT 'Untitled';
+    ALTER TABLE public.comics ADD COLUMN IF NOT EXISTS slug TEXT DEFAULT '';
+    ALTER TABLE public.comics ADD COLUMN IF NOT EXISTS cover_image TEXT;
+    ALTER TABLE public.comics ADD COLUMN IF NOT EXISTS banner_image TEXT;
+    ALTER TABLE public.comics ADD COLUMN IF NOT EXISTS synopsis TEXT;
+    ALTER TABLE public.comics ADD COLUMN IF NOT EXISTS genres JSONB DEFAULT '[]'::jsonb;
+    ALTER TABLE public.comics ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'ongoing';
+    ALTER TABLE public.comics ADD COLUMN IF NOT EXISTS comic_type TEXT DEFAULT 'manga';
+    ALTER TABLE public.comics ADD COLUMN IF NOT EXISTS content_type TEXT DEFAULT 'normal';
+    ALTER TABLE public.comics ADD COLUMN IF NOT EXISTS story_writer TEXT DEFAULT '';
+    ALTER TABLE public.comics ADD COLUMN IF NOT EXISTS artist TEXT DEFAULT '';
+    ALTER TABLE public.comics ADD COLUMN IF NOT EXISTS rating NUMERIC(4, 2) DEFAULT 0.00;
+    ALTER TABLE public.comics ADD COLUMN IF NOT EXISTS rating_count INT DEFAULT 0;
+    ALTER TABLE public.comics ADD COLUMN IF NOT EXISTS total_chapters INT DEFAULT 0;
+    ALTER TABLE public.comics ADD COLUMN IF NOT EXISTS total_readers INT DEFAULT 0;
+    ALTER TABLE public.comics ADD COLUMN IF NOT EXISTS is_free BOOLEAN DEFAULT TRUE;
+    ALTER TABLE public.comics ADD COLUMN IF NOT EXISTS is_vip BOOLEAN DEFAULT FALSE;
+    ALTER TABLE public.comics ADD COLUMN IF NOT EXISTS is_featured BOOLEAN DEFAULT FALSE;
+    ALTER TABLE public.comics ADD COLUMN IF NOT EXISTS is_slider BOOLEAN DEFAULT FALSE;
+    ALTER TABLE public.comics ADD COLUMN IF NOT EXISTS is_published BOOLEAN DEFAULT TRUE;
+    ALTER TABLE public.comics ADD COLUMN IF NOT EXISTS is_visible_on_home BOOLEAN DEFAULT TRUE;
+    ALTER TABLE public.comics ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
+    ALTER TABLE public.comics ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+    ALTER TABLE public.comics ADD COLUMN IF NOT EXISTS source_api TEXT DEFAULT 'manual';
+END $$;
+
 CREATE INDEX IF NOT EXISTS idx_comics_slug ON public.comics(slug);
 CREATE INDEX IF NOT EXISTS idx_comics_status ON public.comics(status);
 CREATE INDEX IF NOT EXISTS idx_comics_content_type ON public.comics(content_type);
@@ -46,8 +75,8 @@ CREATE INDEX IF NOT EXISTS idx_comics_updated_at ON public.comics(updated_at DES
 CREATE TABLE IF NOT EXISTS public.chapters (
     id TEXT PRIMARY KEY,
     comic_id TEXT NOT NULL,
-    chapter_number NUMERIC(8, 2) NOT NULL,
-    title TEXT NOT NULL,
+    chapter_number NUMERIC(8, 2) NOT NULL DEFAULT 1,
+    title TEXT NOT NULL DEFAULT '',
     slug TEXT,
     release_date TEXT,
     price INT DEFAULT 0,
@@ -63,6 +92,28 @@ CREATE TABLE IF NOT EXISTS public.chapters (
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Ensure all columns exist on chapters table
+DO $$
+BEGIN
+    ALTER TABLE public.chapters ADD COLUMN IF NOT EXISTS comic_id TEXT;
+    ALTER TABLE public.chapters ADD COLUMN IF NOT EXISTS chapter_number NUMERIC(8, 2) DEFAULT 1;
+    ALTER TABLE public.chapters ADD COLUMN IF NOT EXISTS title TEXT DEFAULT '';
+    ALTER TABLE public.chapters ADD COLUMN IF NOT EXISTS slug TEXT;
+    ALTER TABLE public.chapters ADD COLUMN IF NOT EXISTS release_date TEXT;
+    ALTER TABLE public.chapters ADD COLUMN IF NOT EXISTS price INT DEFAULT 0;
+    ALTER TABLE public.chapters ADD COLUMN IF NOT EXISTS is_free BOOLEAN DEFAULT TRUE;
+    ALTER TABLE public.chapters ADD COLUMN IF NOT EXISTS is_locked BOOLEAN DEFAULT FALSE;
+    ALTER TABLE public.chapters ADD COLUMN IF NOT EXISTS is_vip BOOLEAN DEFAULT FALSE;
+    ALTER TABLE public.chapters ADD COLUMN IF NOT EXISTS source_type TEXT DEFAULT 'pages';
+    ALTER TABLE public.chapters ADD COLUMN IF NOT EXISTS pages JSONB DEFAULT '[]'::jsonb;
+    ALTER TABLE public.chapters ADD COLUMN IF NOT EXISTS drive_file_id TEXT;
+    ALTER TABLE public.chapters ADD COLUMN IF NOT EXISTS drive_embed_url TEXT;
+    ALTER TABLE public.chapters ADD COLUMN IF NOT EXISTS drive_account_id TEXT;
+    ALTER TABLE public.chapters ADD COLUMN IF NOT EXISTS views_count INT DEFAULT 0;
+    ALTER TABLE public.chapters ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
+    ALTER TABLE public.chapters ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_chapters_comic_id ON public.chapters(comic_id);
 CREATE INDEX IF NOT EXISTS idx_chapters_number ON public.chapters(chapter_number ASC);
@@ -85,6 +136,23 @@ CREATE TABLE IF NOT EXISTS public.users (
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+DO $$
+BEGIN
+    ALTER TABLE public.users ADD COLUMN IF NOT EXISTS username TEXT;
+    ALTER TABLE public.users ADD COLUMN IF NOT EXISTS email TEXT;
+    ALTER TABLE public.users ADD COLUMN IF NOT EXISTS password_hash TEXT;
+    ALTER TABLE public.users ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'user';
+    ALTER TABLE public.users ADD COLUMN IF NOT EXISTS package_type TEXT DEFAULT 'free';
+    ALTER TABLE public.users ADD COLUMN IF NOT EXISTS package_expiry TIMESTAMPTZ;
+    ALTER TABLE public.users ADD COLUMN IF NOT EXISTS coins INT DEFAULT 0;
+    ALTER TABLE public.users ADD COLUMN IF NOT EXISTS avatar TEXT;
+    ALTER TABLE public.users ADD COLUMN IF NOT EXISTS bookmarks JSONB DEFAULT '[]'::jsonb;
+    ALTER TABLE public.users ADD COLUMN IF NOT EXISTS history JSONB DEFAULT '[]'::jsonb;
+    ALTER TABLE public.users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;
+    ALTER TABLE public.users ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
+    ALTER TABLE public.users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_users_email ON public.users(email);
 CREATE INDEX IF NOT EXISTS idx_users_username ON public.users(username);
@@ -149,6 +217,8 @@ CREATE TABLE IF NOT EXISTS public.comments (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE INDEX IF NOT EXISTS idx_comments_comic_id ON public.comments(comic_id);
+
 -- 8. TABEL ADS (Iklan Banner, Mitra & Direct Link)
 CREATE TABLE IF NOT EXISTS public.ads (
     id TEXT PRIMARY KEY,
@@ -192,6 +262,11 @@ CREATE TABLE IF NOT EXISTS public.ad_settings (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Seed default ad settings singleton if empty
+INSERT INTO public.ad_settings (id, ads_enabled, hide_ads_for_vip, popunder_enabled, popunder_cooldown_minutes, updated_at)
+VALUES ('global_ad_config', TRUE, TRUE, TRUE, 15, NOW())
+ON CONFLICT (id) DO NOTHING;
+
 -- 10. TABEL SYSTEM_SETTINGS (Pengaturan Identitas & Fitur)
 CREATE TABLE IF NOT EXISTS public.system_settings (
     id TEXT PRIMARY KEY DEFAULT 'global_config',
@@ -206,6 +281,11 @@ CREATE TABLE IF NOT EXISTS public.system_settings (
     maintenance_mode BOOLEAN DEFAULT FALSE,
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Seed default system settings singleton if empty
+INSERT INTO public.system_settings (id, site_name, site_tagline, enable_comments, enable_18plus, updated_at)
+VALUES ('global_config', 'AntiTimpa', 'Portal Komik & Manga Terlengkap', TRUE, TRUE, NOW())
+ON CONFLICT (id) DO NOTHING;
 
 -- ==============================================================================
 -- KEBIJAKAN ROW LEVEL SECURITY (RLS) - PUBLIC READ & WRITE
@@ -329,3 +409,6 @@ BEGIN
   EXCEPTION WHEN others THEN NULL;
   END;
 END $$;
+
+-- Notify PostgREST to reload schema cache
+NOTIFY pgrst, 'reload schema';
