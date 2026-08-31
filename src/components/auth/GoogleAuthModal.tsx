@@ -332,7 +332,7 @@ export const GoogleAuthModal: React.FC = () => {
         <div className="px-6 py-3.5 bg-[#0d0d12] border-t border-[#20202c] flex items-center justify-between text-[11px] text-slate-400">
           <span className="flex items-center gap-1.5 text-slate-400">
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Layanan Akun Resmi KomikYuk</span>
+            <span>Layanan Akun Resmi AntiTimpa</span>
           </span>
           <button
             onClick={closeGoogleAuthModal}

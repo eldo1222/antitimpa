@@ -199,7 +199,7 @@ export default async function handler(req: any, res: any) {
     const targetUrl = `https://api.mangadex.org/manga?${buildParams(safeLimit, safeOffset).toString()}`;
     const mdRes = await fetch(targetUrl, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 KomikYuk/1.0',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 AntiTimpa/1.0',
         'Accept': 'application/json'
       }
     });

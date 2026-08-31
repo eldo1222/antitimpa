@@ -69,7 +69,7 @@ class SupabaseRealtimeManager {
   private diagnosticState: RealtimeDiagnosticState = {
     status: 'disconnected',
     lifecycleStatus: 'DISCONNECTED',
-    channelName: 'komikyuk-realtime-hub',
+    channelName: 'antitimpa-realtime-hub',
     subscribedTables: [...SUBSCRIBED_TABLES_LIST],
     lastConnectionAttempt: null,
     lastSuccessfulSubscription: null,
@@ -154,7 +154,7 @@ class SupabaseRealtimeManager {
     }
 
     this.activeClient = client;
-    const channelId = `komikyuk-realtime-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
+    const channelId = `antitimpa-realtime-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
     this.diagnosticState.channelName = channelId;
     this.diagnosticState.lastConnectionAttempt = new Date().toLocaleTimeString('id-ID');
     this.setStatus('connecting', 'CONNECTING');
@@ -301,25 +301,30 @@ class SupabaseRealtimeManager {
 
       // 3. Subscribe with lifecycle observation
       channel.subscribe((status, err) => {
-        console.log(`[RealtimeManager] 📡 Lifecycle event received: "${status}"`, err ? { error: err } : '');
-
         if (status === 'SUBSCRIBED') {
-          // CRITICAL: UI only displays CONNECTED when status is strictly SUBSCRIBED
           this.setStatus('connected', 'SUBSCRIBED');
           console.log(`[RealtimeManager] ✅ Successfully SUBSCRIBED to Supabase Realtime channel "${channelId}"!`);
         } else if (status === 'CHANNEL_ERROR') {
-          const errDetail = err?.message || (err ? String(err) : 'Supabase Realtime socket error (periksa koneksi jaringan atau publikasi tabel)');
-          console.error(`[RealtimeManager] ❌ CHANNEL_ERROR:`, errDetail);
+          const rawErr = err?.message || (err ? String(err) : '');
+          const isNormalClosure = rawErr.includes('1000') || rawErr.includes('transport failure') || rawErr.includes('closed');
+          const errDetail = rawErr || 'Supabase Realtime socket reconnection in progress';
+          
+          if (isNormalClosure) {
+            console.log(`[RealtimeManager] ℹ️ Socket status: ${errDetail}. Scheduling reconnect...`);
+          } else {
+            console.warn(`[RealtimeManager] ⚠️ Channel notification:`, errDetail);
+          }
+          
           this.setStatus('disconnected', 'CHANNEL_ERROR', errDetail);
           this.scheduleReconnect();
         } else if (status === 'TIMED_OUT') {
-          const errDetail = 'Koneksi subscription timeout (Supabase Realtime server tidak merespons handshake)';
-          console.warn(`[RealtimeManager] ⏱️ TIMED_OUT:`, errDetail);
+          const errDetail = 'Koneksi subscription timeout (handshake sedang diulang)';
+          console.log(`[RealtimeManager] ⏱️ TIMED_OUT:`, errDetail);
           this.setStatus('disconnected', 'TIMED_OUT', errDetail);
           this.scheduleReconnect();
         } else if (status === 'CLOSED') {
           const errDetail = this.diagnosticState.lastError || 'Channel realtime ditutup (CLOSED)';
-          console.warn(`[RealtimeManager] 🔒 CLOSED:`, errDetail);
+          console.log(`[RealtimeManager] 🔒 CLOSED:`, errDetail);
           this.setStatus('disconnected', 'CLOSED', errDetail);
           this.scheduleReconnect();
         }

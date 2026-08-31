@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useApp } from '../../context/AppContext';
 import { ShieldAlert, MessageCircle, Heart, Share2, FileText, ShieldCheck } from 'lucide-react';
 import { LegalModal } from './LegalModal';
@@ -92,22 +93,22 @@ export const Footer: React.FC = () => {
         </p>
       </div>
 
-      {/* Legal & Policy Quick Navigation Buttons */}
-      <div className="flex items-center justify-center gap-4 text-xs font-medium text-slate-400 pt-1">
-        <button
-          onClick={() => setLegalModalType('privacy')}
-          className="hover:text-[#ff5b14] flex items-center gap-1.5 transition-colors cursor-pointer py-1 px-2.5 rounded-lg bg-[#14141e] border border-[#222234]"
+      {/* Legal & Policy Quick Navigation Links (Public Pages for Google OAuth Compliance) */}
+      <div className="flex flex-wrap items-center justify-center gap-3 text-xs font-medium text-slate-400 pt-1">
+        <Link
+          to="/privacy"
+          className="hover:text-[#ff5b14] flex items-center gap-1.5 transition-colors py-1.5 px-3 rounded-lg bg-[#14141e] border border-[#222234] hover:border-[#ff5b14]/40 text-slate-300"
         >
           <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-          <span>Kebijakan Privasi</span>
-        </button>
-        <button
-          onClick={() => setLegalModalType('disclaimer')}
-          className="hover:text-[#ff5b14] flex items-center gap-1.5 transition-colors cursor-pointer py-1 px-2.5 rounded-lg bg-[#14141e] border border-[#222234]"
+          <span>Kebijakan Privasi (Privacy Policy)</span>
+        </Link>
+        <Link
+          to="/terms"
+          className="hover:text-[#ff5b14] flex items-center gap-1.5 transition-colors py-1.5 px-3 rounded-lg bg-[#14141e] border border-[#222234] hover:border-[#ff5b14]/40 text-slate-300"
         >
           <FileText className="w-3.5 h-3.5 text-amber-400" />
-          <span>Disclaimer &amp; Hak Cipta</span>
-        </button>
+          <span>Syarat &amp; Ketentuan (Terms of Service)</span>
+        </Link>
       </div>
 
       {/* Copyright */}

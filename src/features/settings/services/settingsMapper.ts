@@ -15,7 +15,7 @@ export function mapSettingsToDb(s: Partial<SystemSettings>): Record<string, any>
 
 export function mapDbToSettings(s: Record<string, any>): SystemSettings {
   return {
-    siteName: s.site_name || 'KomikYuk',
+    siteName: s.site_name || 'AntiTimpa',
     siteAnnouncement: s.announcement || '',
     maintenanceMode: Boolean(s.maintenance_mode),
     siteLogo: s.site_logo || undefined,

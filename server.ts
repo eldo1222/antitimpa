@@ -68,12 +68,19 @@ function sanitizeChaptersMap(rawChapters: Record<string, Chapter[]> | undefined)
   return result;
 }
 
+const GOOD_BACKUP_FILE = path.join(DATA_DIR, "db.good.json");
+
 function loadDatabase(): CentralDB {
   if (fs.existsSync(DB_FILE)) {
     try {
       const content = fs.readFileSync(DB_FILE, "utf-8");
       const parsed = JSON.parse(content);
       if (parsed && Array.isArray(parsed.comics)) {
+        // Save known good copy
+        try {
+          fs.writeFileSync(GOOD_BACKUP_FILE, content, "utf-8");
+        } catch (_) {}
+
         return {
           comics: parsed.comics || [],
           chapters: sanitizeChaptersMap(parsed.chapters),
@@ -89,7 +96,7 @@ function loadDatabase(): CentralDB {
         };
       }
     } catch (e) {
-      console.error("[SERVER DB ERROR] Gagal mem-parse db.json. Membuat backup file korup:", e);
+      console.error("[SERVER DB ERROR] Gagal mem-parse db.json. Mencoba pulihkan dari backup:", e);
       try {
         const backupFile = `${DB_FILE}.corrupt.${Date.now()}`;
         fs.copyFileSync(DB_FILE, backupFile);
@@ -97,10 +104,36 @@ function loadDatabase(): CentralDB {
       } catch (backupErr) {
         console.error("[SERVER DB BACKUP FAILED]", backupErr);
       }
+
+      // Try fallback to known good backup if available
+      if (fs.existsSync(GOOD_BACKUP_FILE)) {
+        try {
+          const goodContent = fs.readFileSync(GOOD_BACKUP_FILE, "utf-8");
+          const goodParsed = JSON.parse(goodContent);
+          if (goodParsed && Array.isArray(goodParsed.comics)) {
+            console.log("[SERVER DB] Berhasil memulihkan database dari db.good.json!");
+            return {
+              comics: goodParsed.comics || [],
+              chapters: sanitizeChaptersMap(goodParsed.chapters),
+              users: goodParsed.users || initialUsers,
+              banners: goodParsed.banners || [],
+              driveAccounts: goodParsed.driveAccounts || initialDriveAccounts,
+              activityLogs: goodParsed.activityLogs || initialActivityLogs,
+              systemSettings: goodParsed.systemSettings || initialSystemSettings,
+              comments: goodParsed.comments || initialComments,
+              ads: goodParsed.ads || initialAds,
+              adSettings: goodParsed.adSettings || initialAdSettings,
+              version: goodParsed.version || Date.now(),
+            };
+          }
+        } catch (goodErr) {
+          console.error("[SERVER DB] Gagal membaca db.good.json:", goodErr);
+        }
+      }
     }
   }
 
-  // Initial seed if db.json does not exist (DEVELOPMENT ONLY)
+  // Initial seed if db.json does not exist or cannot be recovered
   console.log("[SERVER DB] Menginisialisasi dataset fallback lokal (DEVELOPMENT ONLY)...");
   const initialData: CentralDB = {
     comics: initialComics,
@@ -120,15 +153,42 @@ function loadDatabase(): CentralDB {
   return initialData;
 }
 
+let isSavingDb = false;
+let pendingSaveDbData: CentralDB | null = null;
+
 function saveDatabase(data: CentralDB): void {
-  try {
-    data.version = Date.now();
-    const tempFile = `${DB_FILE}.tmp`;
-    fs.writeFileSync(tempFile, JSON.stringify(data, null, 2), "utf-8");
-    fs.renameSync(tempFile, DB_FILE);
-  } catch (e) {
-    console.error("Failed to save central database to disk:", e);
+  data.version = Date.now();
+  pendingSaveDbData = data;
+
+  if (isSavingDb) {
+    return;
   }
+
+  isSavingDb = true;
+  setImmediate(() => {
+    while (pendingSaveDbData) {
+      const currentData = pendingSaveDbData;
+      pendingSaveDbData = null;
+
+      try {
+        const jsonContent = JSON.stringify(currentData, null, 2);
+        // Verify that JSON string is valid before writing to disk
+        JSON.parse(jsonContent);
+
+        const tempFile = `${DB_FILE}.${Date.now()}.${Math.random().toString(36).slice(2, 7)}.tmp`;
+        fs.writeFileSync(tempFile, jsonContent, "utf-8");
+        fs.renameSync(tempFile, DB_FILE);
+
+        // Keep good backup updated
+        try {
+          fs.writeFileSync(GOOD_BACKUP_FILE, jsonContent, "utf-8");
+        } catch (_) {}
+      } catch (e) {
+        console.error("Failed to save central database to disk safely:", e);
+      }
+    }
+    isSavingDb = false;
+  });
 }
 
 // Initialize database in memory

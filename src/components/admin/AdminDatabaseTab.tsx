@@ -323,7 +323,7 @@ export const AdminDatabaseTab: React.FC = () => {
 
   const handleCopySqlSchema = () => {
     const fullSql = `-- ==============================================================================
--- KOMIKYUK / ANTITIMPA - SUPABASE (POSTGRESQL) SCHEMA
+-- ANTITIMPA - SUPABASE (POSTGRESQL) SCHEMA
 -- ==============================================================================
 -- Petunjuk:
 -- 1. Buka Supabase Dashboard (https://app.supabase.com) -> Masuk ke Project Anda.

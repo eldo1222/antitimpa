@@ -1,11 +1,19 @@
 import { ReadingHistory } from '../../features/bookmarks/types/bookmark.types';
 import { LocalStorageWrapper } from './localStorageWrapper';
 
-const HISTORY_KEY = 'komikyuk_reading_history';
+const HISTORY_KEY = 'antitimpa_reading_history';
+const LEGACY_HISTORY_KEY = 'komikyuk_reading_history';
 
 export class HistoryStorage {
   public static getHistory(): ReadingHistory[] {
-    return LocalStorageWrapper.getItem<ReadingHistory[]>(HISTORY_KEY, []);
+    const modern = LocalStorageWrapper.getItem<ReadingHistory[] | null>(HISTORY_KEY, null);
+    if (modern) return modern;
+    const legacy = LocalStorageWrapper.getItem<ReadingHistory[]>(LEGACY_HISTORY_KEY, []);
+    if (legacy && legacy.length > 0) {
+      LocalStorageWrapper.setItem(HISTORY_KEY, legacy);
+      return legacy;
+    }
+    return [];
   }
 
   public static saveHistory(history: ReadingHistory[]): void {

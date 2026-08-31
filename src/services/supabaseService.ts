@@ -273,7 +273,7 @@ export class SupabaseService {
         ads: ads || [],
         adSettings: adSettings || null,
         systemSettings: systemSettings || {
-          siteName: 'KomikYuk',
+          siteName: 'AntiTimpa',
           maxLoginAttempts: 5,
           maintenanceMode: false,
           supabaseUrl: getSupabaseCredentials().url,

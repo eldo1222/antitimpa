@@ -1,5 +1,5 @@
 -- ==============================================================================
--- KOMIKYUK / ANTITIMPA - MIGRATION: ADD MISSING COMIC & CHAPTER COLUMNS
+-- ANTITIMPA - MIGRATION: ADD MISSING COMIC & CHAPTER COLUMNS
 -- Migration File: supabase/migrations/20260831_add_missing_comic_columns.sql
 -- Description:
 --   Surgically and safely ensures EVERY column required by Comic & Chapter application

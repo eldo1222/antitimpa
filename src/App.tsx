@@ -18,6 +18,8 @@ import { LibraryView } from './components/frontend/LibraryView';
 import { ProfileView } from './components/frontend/ProfileView';
 import { ComicDetailView } from './components/frontend/ComicDetailView';
 import { ComicReaderView } from './components/frontend/ComicReaderView';
+import { PrivacyPolicyView } from './components/legal/PrivacyPolicyView';
+import { TermsOfServiceView } from './components/legal/TermsOfServiceView';
 import { AdminDashboard } from './components/admin/AdminDashboard';
 import { LoginModal } from './components/auth/LoginModal';
 import { GoogleAuthModal } from './components/auth/GoogleAuthModal';
@@ -130,6 +132,11 @@ const MainAppContent: React.FC = () => {
                     <Route path="/profile" element={<ProfileView />} />
                     <Route path="/comic/:comicId" element={<ComicDetailView />} />
                     <Route path="/read/:comicId/:chapterId" element={<ComicReaderView />} />
+                    <Route path="/privacy" element={<PrivacyPolicyView />} />
+                    <Route path="/privacy-policy" element={<PrivacyPolicyView />} />
+                    <Route path="/terms" element={<TermsOfServiceView />} />
+                    <Route path="/terms-of-service" element={<TermsOfServiceView />} />
+                    <Route path="/disclaimer" element={<TermsOfServiceView />} />
                     <Route path="/admin" element={<AdminRouteWrapper />} />
                     <Route path="*" element={<Navigate to="/" replace />} />
                   </Routes>
@@ -156,6 +163,11 @@ const MainAppContent: React.FC = () => {
                 <Route path="/profile" element={<ProfileView />} />
                 <Route path="/comic/:comicId" element={<ComicDetailView />} />
                 <Route path="/read/:comicId/:chapterId" element={<ComicReaderView />} />
+                <Route path="/privacy" element={<PrivacyPolicyView />} />
+                <Route path="/privacy-policy" element={<PrivacyPolicyView />} />
+                <Route path="/terms" element={<TermsOfServiceView />} />
+                <Route path="/terms-of-service" element={<TermsOfServiceView />} />
+                <Route path="/disclaimer" element={<TermsOfServiceView />} />
                 <Route path="/admin" element={<AdminRouteWrapper />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>

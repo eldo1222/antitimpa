@@ -1,5 +1,5 @@
 -- ==============================================================================
--- KOMIKYUK / ANTITIMPA - SUPABASE SCHEMA MIGRATION & CONTRACT SYNCHRONIZATION
+-- ANTITIMPA - SUPABASE SCHEMA MIGRATION & CONTRACT SYNCHRONIZATION
 -- Migration: 20260831_sync_database_contract.sql
 -- IDEMPOTENT & SAFE (CREATE TABLE IF NOT EXISTS / ALTER TABLE ADD COLUMN IF NOT EXISTS)
 -- ==============================================================================

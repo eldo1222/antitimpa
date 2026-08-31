@@ -7,15 +7,24 @@ export interface UIPreferences {
   savedAdminView?: string;
 }
 
-const PREFERENCES_KEY = 'komikyuk_ui_preferences';
+const PREFERENCES_KEY = 'antitimpa_ui_preferences';
+const LEGACY_PREFERENCES_KEY = 'komikyuk_ui_preferences';
 
 export class PreferenceStorage {
   public static getPreferences(): UIPreferences {
-    return LocalStorageWrapper.getItem<UIPreferences>(PREFERENCES_KEY, {
+    const defaultVal: UIPreferences = {
       readerMode: 'vertical',
       ageGatingAgreed: false,
       theme: 'dark',
-    });
+    };
+    const modern = LocalStorageWrapper.getItem<UIPreferences | null>(PREFERENCES_KEY, null);
+    if (modern) return modern;
+    const legacy = LocalStorageWrapper.getItem<UIPreferences | null>(LEGACY_PREFERENCES_KEY, null);
+    if (legacy) {
+      LocalStorageWrapper.setItem(PREFERENCES_KEY, legacy);
+      return legacy;
+    }
+    return defaultVal;
   }
 
   public static savePreferences(prefs: Partial<UIPreferences>): UIPreferences {

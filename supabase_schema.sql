@@ -1,5 +1,5 @@
 -- ==============================================================================
--- KOMIKYUK / ANTITIMPA - SUPABASE (POSTGRESQL) SCHEMA
+-- ANTITIMPA - SUPABASE (POSTGRESQL) SCHEMA
 -- ==============================================================================
 -- Petunjuk Eksekusi:
 -- 1. Buka Supabase Dashboard (https://app.supabase.com) -> Masuk ke Project Anda.
