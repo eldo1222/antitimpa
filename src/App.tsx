@@ -30,12 +30,24 @@ import { OfflineGuard } from './components/common/OfflineGuard';
 import { AdminInactivityGuard } from './components/admin/AdminInactivityGuard';
 import { Smartphone } from 'lucide-react';
 
-// Sync current URL path with AppContext activeTab and selected items
+// Sync current URL path with AppContext activeTab and clean up OAuth cancel hashes
 const RouteSynchronizer: React.FC = () => {
   const location = useLocation();
   const { setActiveTab } = useApp();
 
   useEffect(() => {
+    // 1. Clean up OAuth error or cancel query/hash params (e.g. #error=access_denied)
+    if (typeof window !== 'undefined') {
+      const hash = window.location.hash;
+      const search = window.location.search;
+      if (hash.includes('error=') || search.includes('error=')) {
+        console.info('[Auth] OAuth error or cancellation parameter detected and cleaned.');
+        const cleanUrl = window.location.pathname;
+        window.history.replaceState({}, document.title, cleanUrl);
+      }
+    }
+
+    // 2. Sync tab state with current route
     const path = location.pathname;
     if (path === '/') {
       setActiveTab('home');
@@ -46,7 +58,7 @@ const RouteSynchronizer: React.FC = () => {
     } else if (path.startsWith('/profile')) {
       setActiveTab('profile');
     }
-  }, [location.pathname]);
+  }, [location.pathname, location.hash, location.search]);
 
   return null;
 };
