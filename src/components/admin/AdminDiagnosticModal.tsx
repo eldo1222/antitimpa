@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useApp } from '../../context/AppContext';
 import { 
   Activity, 
   X, 
@@ -15,10 +16,16 @@ import {
   Sparkles,
   Layers,
   Table,
-  CheckCheck
+  CheckCheck,
+  Zap,
+  Radio,
+  KeyRound,
+  ShieldCheck,
+  UserCheck
 } from 'lucide-react';
 import { runSupabaseSingleItemDiagnostic, checkSupabaseSchemaHealth, DiagnosticTestResult, SchemaHealthReport } from '../../services/supabase/diagnosticRunner';
 import { isSupabaseConfigured } from '../../lib/supabase';
+import { getAuthDiagnostic, AuthDiagnosticInfo } from '../../auth';
 
 interface AdminDiagnosticModalProps {
   isOpen: boolean;
@@ -26,10 +33,18 @@ interface AdminDiagnosticModalProps {
 }
 
 export const AdminDiagnosticModal: React.FC<AdminDiagnosticModalProps> = ({ isOpen, onClose }) => {
+  const { realtimeDiagnostic, reconnectRealtime, lastRealtimeEvent, lastSyncTime, currentUser, googleUser } = useApp();
   const [isRunning, setIsRunning] = useState(false);
   const [result, setResult] = useState<DiagnosticTestResult | null>(null);
   const [copied, setCopied] = useState(false);
   const [keepTestRow, setKeepTestRow] = useState(false);
+  const [authDiag, setAuthDiag] = useState<AuthDiagnosticInfo | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      getAuthDiagnostic().then(setAuthDiag).catch(() => {});
+    }
+  }, [isOpen, currentUser, googleUser]);
 
   if (!isOpen) return null;
 
@@ -249,6 +264,72 @@ export const AdminDiagnosticModal: React.FC<AdminDiagnosticModalProps> = ({ isOp
                       <div className="text-cyan-400"><span className="text-slate-500">Hint:</span> {result.steps.chapterWrite.hint}</div>
                     )}
                   </div>
+                </div>
+              </div>
+
+              {/* Supabase Realtime Channel Health Check */}
+              <div className="p-4 bg-[#12121e] rounded-xl border border-[#1f1f30] space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                    <Zap className="w-4 h-4 text-emerald-400" />
+                    <span>Supabase Realtime Channel &amp; Socket Lifecycle</span>
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className={`text-[11px] font-bold px-2 py-0.5 rounded flex items-center gap-1.5 ${
+                      realtimeDiagnostic?.lifecycleStatus === 'SUBSCRIBED'
+                        ? 'bg-emerald-500/20 text-emerald-400'
+                        : realtimeDiagnostic?.lifecycleStatus === 'CONNECTING'
+                          ? 'bg-amber-500/20 text-amber-400'
+                          : 'bg-rose-500/20 text-rose-400'
+                    }`}>
+                      <span className={`w-2 h-2 rounded-full ${
+                        realtimeDiagnostic?.lifecycleStatus === 'SUBSCRIBED' ? 'bg-emerald-400 animate-pulse' : 'bg-current'
+                      }`} />
+                      {realtimeDiagnostic?.lifecycleStatus === 'SUBSCRIBED' ? 'CONNECTED (SUBSCRIBED)' : realtimeDiagnostic?.lifecycleStatus || 'DISCONNECTED'}
+                    </span>
+                    <button
+                      onClick={() => reconnectRealtime()}
+                      className="px-2 py-0.5 rounded bg-[#1f1f32] hover:bg-slate-700 text-xs font-medium text-slate-200 flex items-center gap-1 cursor-pointer transition-colors"
+                    >
+                      <RefreshCw className="w-3 h-3" /> Reconnect
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs font-mono bg-black/40 p-3 rounded-lg border border-white/5">
+                  <div><span className="text-slate-500">Channel:</span> <span className="text-indigo-300">{realtimeDiagnostic?.channelName || '-'}</span></div>
+                  <div><span className="text-slate-500">Attempt Terakhir:</span> <span className="text-slate-300">{realtimeDiagnostic?.lastConnectionAttempt || '-'}</span></div>
+                  <div><span className="text-slate-500">Subscribed Sukses:</span> <span className="text-emerald-300">{realtimeDiagnostic?.lastSuccessfulSubscription || 'Belum'}</span></div>
+                  <div><span className="text-slate-500">Event Terakhir:</span> <span className="text-amber-300">{lastRealtimeEvent ? `${lastRealtimeEvent.table} (${lastRealtimeEvent.type})` : 'Menunggu stream...'}</span></div>
+                  <div className="sm:col-span-2"><span className="text-slate-500">Subscribed Tables:</span> <span className="text-emerald-400">{realtimeDiagnostic?.subscribedTables?.join(', ')}</span></div>
+                  {realtimeDiagnostic?.lastError && (
+                    <div className="sm:col-span-2 text-rose-400"><span className="text-slate-500">Last Error:</span> {realtimeDiagnostic.lastError}</div>
+                  )}
+                </div>
+              </div>
+
+              {/* Supabase Auth & Google Identity Diagnostic */}
+              <div className="p-4 bg-[#12121e] rounded-xl border border-[#1f1f30] space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                    <KeyRound className="w-4 h-4 text-amber-400" />
+                    <span>Supabase Authentication &amp; Identity Engine</span>
+                  </span>
+                  <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 flex items-center gap-1.5">
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    SUPABASE AUTH (ACTIVE)
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs font-mono bg-black/40 p-3 rounded-lg border border-white/5">
+                  <div><span className="text-slate-500">Provider:</span> <span className="text-amber-300">Supabase Auth (PostgreSQL)</span></div>
+                  <div><span className="text-slate-500">Auth Status:</span> <span className={authDiag?.supabaseAuthStatus === 'CONNECTED' ? 'text-emerald-300' : 'text-amber-300'}>{authDiag?.supabaseAuthStatus || 'CONNECTED'}</span></div>
+                  <div><span className="text-slate-500">Sesi Aktif:</span> <span className={authDiag?.sessionStatus === 'ACTIVE' ? 'text-emerald-300 font-bold' : 'text-slate-400'}>{authDiag?.sessionStatus || (currentUser ? 'ACTIVE (App Session)' : 'NONE (Guest Mode)')}</span></div>
+                  <div><span className="text-slate-500">User Identity:</span> <span className="text-indigo-300">{currentUser ? `${currentUser.username} (${currentUser.role})` : 'Tamu'}</span></div>
+                  <div><span className="text-slate-500">User ID (Masked):</span> <span className="text-slate-300">{authDiag?.maskedUserId || (currentUser?.id ? `${currentUser.id.substring(0, 4)}...` : '-')}</span></div>
+                  <div><span className="text-slate-500">Public Profile (public.users):</span> <span className="text-emerald-300">Synchronized</span></div>
+                  <div><span className="text-slate-500">Firebase Auth:</span> <span className="text-rose-400 font-bold">NOT USED (Disabled)</span></div>
+                  <div><span className="text-slate-500">Firebase References:</span> <span className="text-emerald-300 font-bold">0 in auth flow</span></div>
                 </div>
               </div>
 

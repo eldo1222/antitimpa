@@ -33,12 +33,17 @@ import { DriveRepository } from '../features/drive/services/driveRepository';
 import { generateSlug } from '../utils/slug';
 import { checkSupabaseSchemaHealth, runSupabaseSingleItemDiagnostic, SchemaHealthReport, DiagnosticTestResult } from './supabase/diagnosticRunner';
 
+import { realtimeManager, RealtimeDiagnosticState, RealtimeLifecycleStatus, RealtimeCallbacks } from './supabase/realtime';
+
 // Re-export diagnostic utilities
 export {
   checkSupabaseSchemaHealth,
   runSupabaseSingleItemDiagnostic,
   type SchemaHealthReport,
-  type DiagnosticTestResult
+  type DiagnosticTestResult,
+  type RealtimeDiagnosticState,
+  type RealtimeLifecycleStatus,
+  type RealtimeCallbacks
 };
 
 // Re-export mappers for backward compatibility
@@ -413,134 +418,22 @@ export class SupabaseService {
   }
 
   /**
-   * Realtime Multi-Device Live Broadcast Channel
+   * Realtime Multi-Device Live Broadcast Channel (with lifecycle state & backoff)
    */
-  public static subscribeToSupabase(callbacks: {
-    onComicChange?: (eventType: 'INSERT' | 'UPDATE' | 'DELETE', comic: Comic | { id: string }) => void;
-    onChapterChange?: (eventType: 'INSERT' | 'UPDATE' | 'DELETE', chapter: Chapter | { id: string; comicId?: string }) => void;
-    onBannerChange?: (eventType: 'INSERT' | 'UPDATE' | 'DELETE', banner: Banner | { id: string }) => void;
-    onUserChange?: (eventType: 'INSERT' | 'UPDATE' | 'DELETE', user: User | { id: string }) => void;
-    onDriveChange?: (eventType: 'INSERT' | 'UPDATE' | 'DELETE', drive: DriveAccount | { id: string }) => void;
-    onLogChange?: (log: ActivityLog) => void;
-    onCommentChange?: (eventType: 'INSERT' | 'UPDATE' | 'DELETE', comment: Comment | { id: string }) => void;
-    onAdChange?: (eventType: 'INSERT' | 'UPDATE' | 'DELETE', ad: AdItem | { id: string }) => void;
-    onAdSettingsChange?: (adSettings: Partial<AdSettings>) => void;
-    onSettingsChange?: (settings: Partial<SystemSettings>) => void;
-    onStatusChange?: (status: 'connected' | 'connecting' | 'disconnected') => void;
-  }): () => void {
-    const client = getSupabaseClient();
-    if (!client) {
-      callbacks.onStatusChange?.('disconnected');
-      return () => {};
-    }
-
-    try {
-      callbacks.onStatusChange?.('connecting');
-      const channelId = `komikyuk-realtime-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
-      const channel = client.channel(channelId);
-
-      channel
-        .on('postgres_changes', { event: '*', schema: 'public', table: DATABASE_TABLES.COMICS }, (payload: any) => {
-          if (callbacks.onComicChange) {
-            if (payload.eventType === 'DELETE') {
-              callbacks.onComicChange('DELETE', { id: payload.old?.id || '' });
-            } else if (payload.new) {
-              callbacks.onComicChange(payload.eventType, mapDbToComic(payload.new));
-            }
-          }
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: DATABASE_TABLES.CHAPTERS }, (payload: any) => {
-          if (callbacks.onChapterChange) {
-            if (payload.eventType === 'DELETE') {
-              callbacks.onChapterChange('DELETE', { id: payload.old?.id || '', comicId: payload.old?.comic_id });
-            } else if (payload.new) {
-              callbacks.onChapterChange(payload.eventType, mapDbToChapter(payload.new));
-            }
-          }
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: DATABASE_TABLES.BANNERS }, (payload: any) => {
-          if (callbacks.onBannerChange) {
-            if (payload.eventType === 'DELETE') {
-              callbacks.onBannerChange('DELETE', { id: payload.old?.id || '' });
-            } else if (payload.new) {
-              callbacks.onBannerChange(payload.eventType, mapDbToBanner(payload.new));
-            }
-          }
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: DATABASE_TABLES.USERS }, (payload: any) => {
-          if (callbacks.onUserChange) {
-            if (payload.eventType === 'DELETE') {
-              callbacks.onUserChange('DELETE', { id: payload.old?.id || '' });
-            } else if (payload.new) {
-              callbacks.onUserChange(payload.eventType, mapDbToUser(payload.new));
-            }
-          }
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: DATABASE_TABLES.SYSTEM_SETTINGS }, (payload: any) => {
-          if (callbacks.onSettingsChange && payload.new) {
-            callbacks.onSettingsChange({
-              siteName: payload.new.site_name,
-              siteAnnouncement: payload.new.announcement,
-              maintenanceMode: Boolean(payload.new.maintenance_mode),
-              siteLogo: payload.new.site_logo,
-              siteFavicon: payload.new.site_favicon
-            });
-          }
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: DATABASE_TABLES.AD_SETTINGS }, (payload: any) => {
-          if (callbacks.onAdSettingsChange && payload.new) {
-            callbacks.onAdSettingsChange(mapDbToAdSettings(payload.new));
-          }
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: DATABASE_TABLES.DRIVE_ACCOUNTS }, (payload: any) => {
-          if (callbacks.onDriveChange) {
-            if (payload.eventType === 'DELETE') {
-              callbacks.onDriveChange('DELETE', { id: payload.old?.id || '' });
-            } else if (payload.new) {
-              callbacks.onDriveChange(payload.eventType, mapDbToDriveAccount(payload.new));
-            }
-          }
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: DATABASE_TABLES.COMMENTS }, (payload: any) => {
-          if (callbacks.onCommentChange) {
-            if (payload.eventType === 'DELETE') {
-              callbacks.onCommentChange('DELETE', { id: payload.old?.id || '' });
-            } else if (payload.new) {
-              callbacks.onCommentChange(payload.eventType, mapDbToComment(payload.new));
-            }
-          }
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: DATABASE_TABLES.ADS }, (payload: any) => {
-          if (callbacks.onAdChange) {
-            if (payload.eventType === 'DELETE') {
-              callbacks.onAdChange('DELETE', { id: payload.old?.id || '' });
-            } else if (payload.new) {
-              callbacks.onAdChange(payload.eventType, mapDbToAd(payload.new));
-            }
-          }
-        })
-        .subscribe((status) => {
-          if (status === 'SUBSCRIBED') {
-            callbacks.onStatusChange?.('connected');
-          } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
-            callbacks.onStatusChange?.('disconnected');
-          }
-        });
-
-      return () => {
-        try {
-          client.removeChannel(channel);
-        } catch (_) {}
-      };
-    } catch (e) {
-      logDatabaseError({ table: 'realtime_channel', operation: 'SUBSCRIBE', error: e });
-      callbacks.onStatusChange?.('disconnected');
-      return () => {};
-    }
+  public static subscribeToSupabase(callbacks: RealtimeCallbacks): () => void {
+    return realtimeManager.subscribe(callbacks);
   }
 
-  public static subscribeToRealtime(callbacks: Parameters<typeof SupabaseService.subscribeToSupabase>[0]): () => void {
-    return SupabaseService.subscribeToSupabase(callbacks);
+  public static subscribeToRealtime(callbacks: RealtimeCallbacks): () => void {
+    return realtimeManager.subscribe(callbacks);
+  }
+
+  public static getRealtimeDiagnosticState(): RealtimeDiagnosticState {
+    return realtimeManager.getDiagnosticState();
+  }
+
+  public static reconnectRealtime(): void {
+    realtimeManager.reconnect();
   }
 
   /**

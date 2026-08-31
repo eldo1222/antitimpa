@@ -53,6 +53,8 @@ export const AdminDatabaseTab: React.FC = () => {
     activityLogs, 
     systemSettings,
     realtimeStatus,
+    realtimeDiagnostic,
+    reconnectRealtime,
     lastSyncTime,
     lastRealtimeEvent,
     showAdminToast,
@@ -846,23 +848,83 @@ END $$;`;
               </div>
 
               {/* Realtime Subscription Status */}
-              <div className="p-3.5 bg-[#151726] rounded-xl border border-[#262842] space-y-2">
-                <div className="flex items-center justify-between text-[11px] text-slate-400 font-bold">
-                  <span className="flex items-center gap-1 text-emerald-300">
-                    <Zap className="w-3.5 h-3.5" /> 2. Supabase Realtime Subscriptions
-                  </span>
-                </div>
-                <div className="space-y-1 text-[11px]">
-                  <div className="flex items-center gap-2">
-                    <span className={`w-2 h-2 rounded-full ${realtimeStatus === 'connected' ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
-                    <span className="font-bold text-white uppercase">{realtimeStatus}</span>
+              <div className="p-3.5 bg-[#151726] rounded-xl border border-[#262842] space-y-2.5 flex flex-col justify-between">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-[11px] text-slate-400 font-bold">
+                    <span className="flex items-center gap-1 text-emerald-300">
+                      <Zap className="w-3.5 h-3.5" /> 2. Supabase Realtime Channel
+                    </span>
+                    <button
+                      onClick={() => reconnectRealtime()}
+                      title="Hubungkan Ulang Realtime Channel"
+                      className="px-2 py-0.5 rounded bg-[#1f2138] hover:bg-[#2c2f4f] text-emerald-300 border border-emerald-500/30 text-[10px] flex items-center gap-1 transition-all cursor-pointer"
+                    >
+                      <RefreshCw className="w-2.5 h-2.5" /> Reconnect
+                    </button>
                   </div>
-                  <div className="text-[10px] text-slate-400">
-                    Subscribed Tables: <code className="text-emerald-300">comics, chapters, users, banners</code>
+                  
+                  {/* Status Indicator: Only CONNECTED if strictly SUBSCRIBED */}
+                  <div className="flex items-center justify-between bg-[#0e101a] p-2 rounded-lg border border-[#1e2033]">
+                    <div className="flex items-center gap-2">
+                      <span className={`w-2.5 h-2.5 rounded-full ${
+                        realtimeDiagnostic?.lifecycleStatus === 'SUBSCRIBED' 
+                          ? 'bg-emerald-400 animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.6)]' 
+                          : realtimeDiagnostic?.lifecycleStatus === 'CONNECTING' 
+                            ? 'bg-amber-400 animate-ping' 
+                            : 'bg-rose-500'
+                      }`} />
+                      <div className="flex flex-col">
+                        <span className="font-extrabold text-[11px] tracking-wide text-white uppercase">
+                          {realtimeDiagnostic?.lifecycleStatus === 'SUBSCRIBED' ? 'CONNECTED' : realtimeDiagnostic?.lifecycleStatus || realtimeStatus}
+                        </span>
+                        <span className="text-[9px] text-slate-400">
+                          {realtimeDiagnostic?.lifecycleStatus === 'SUBSCRIBED' ? 'Socket live & listening' : `Lifecycle: ${realtimeDiagnostic?.lifecycleStatus || 'DISCONNECTED'}`}
+                        </span>
+                      </div>
+                    </div>
+                    {realtimeDiagnostic?.retryCount > 0 && realtimeDiagnostic?.lifecycleStatus !== 'SUBSCRIBED' && (
+                      <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-300 text-[9px] font-mono rounded">
+                        Retry #{realtimeDiagnostic.retryCount}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="space-y-1 font-mono text-[10px] text-slate-300 bg-[#0e101a] p-2 rounded-lg border border-[#1e2033]">
+                    <div>
+                      <span className="text-slate-500">Channel:</span>{' '}
+                      <span className="text-indigo-300 truncate inline-block max-w-[180px] align-bottom">
+                        {realtimeDiagnostic?.channelName || '-'}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-slate-500">Tables:</span>{' '}
+                      <span className="text-emerald-300">
+                        {realtimeDiagnostic?.subscribedTables?.slice(0, 4).join(', ') || 'comics, chapters, users, banners'}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between pt-1 border-t border-[#1e2033] text-[9px]">
+                      <span className="text-slate-500">Attempt / Subscribed:</span>
+                      <span className="text-slate-300 font-sans font-medium">
+                        {realtimeDiagnostic?.lastSuccessfulSubscription ? `OK @ ${realtimeDiagnostic.lastSuccessfulSubscription}` : realtimeDiagnostic?.lastConnectionAttempt ? `Coba @ ${realtimeDiagnostic.lastConnectionAttempt}` : '-'}
+                      </span>
+                    </div>
                   </div>
                 </div>
-                <div className="text-[10px] text-slate-400 pt-1 border-t border-[#202238]">
-                  Event Terakhir: <span className="text-slate-200 font-mono font-bold">{lastRealtimeEvent ? `${lastRealtimeEvent.table} (${lastRealtimeEvent.type}) @ ${lastRealtimeEvent.time}` : 'Menunggu stream event...'}</span>
+
+                <div className="text-[10px] text-slate-400 pt-1.5 border-t border-[#202238] space-y-1">
+                  <div className="truncate">
+                    Event Terakhir:{' '}
+                    <span className="text-slate-200 font-mono font-bold">
+                      {lastRealtimeEvent 
+                        ? `${lastRealtimeEvent.table} (${lastRealtimeEvent.type}) @ ${lastRealtimeEvent.time}` 
+                        : 'Menunggu stream event...'}
+                    </span>
+                  </div>
+                  {realtimeDiagnostic?.lastError && (
+                    <div className="text-rose-400 text-[9px] truncate" title={realtimeDiagnostic.lastError}>
+                      Err: {realtimeDiagnostic.lastError}
+                    </div>
+                  )}
                 </div>
               </div>
 

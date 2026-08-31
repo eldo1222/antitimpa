@@ -72,7 +72,7 @@ export const GoogleAuthModal: React.FC = () => {
           closeGoogleAuthModal();
         }, 600);
       } else if (res.errorType === 'unauthorized_domain') {
-        setErrorMessage('Domain preview browser ini belum didaftarkan di Firebase Console. Silakan gunakan tab "Input Email Google" di samping untuk verifikasi.');
+        setErrorMessage('Domain preview browser ini belum didaftarkan di Supabase URL Configuration. Silakan gunakan tab "Gunakan Email" di samping untuk verifikasi.');
         setMode('custom');
       } else {
         setErrorMessage(res.message || 'Login Google dibatalkan atau gagal.');

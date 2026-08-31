@@ -37,40 +37,27 @@ import {
 } from '../data/initialData';
 import { formatGoogleDriveEmbedUrl } from '../utils/driveHelper';
 import { updateFavicon } from '../utils/favicon';
-import { SupabaseService } from '../services/supabaseService';
+import { SupabaseService, RealtimeDiagnosticState } from '../services/supabaseService';
 import { isSupabaseConfigured, saveCustomSupabaseConfig, fetchUniversalSupabaseConfig } from '../lib/supabase';
-import { auth, googleProvider } from '../lib/firebase';
-import { signInWithPopup, signOut } from 'firebase/auth';
+import { 
+  AuthService, 
+  ADMIN_EMAILS, 
+  GoogleAuthUser, 
+  PendingGoogleUser, 
+  initAuthSessionListener, 
+  getCurrentSession, 
+  mapSupabaseAuthUserToGoogleUser,
+  getAuthDiagnostic
+} from '../auth';
 import bcrypt from 'bcryptjs';
 
-export const ADMIN_EMAILS = [
-  'admin@email.com',
-  'eldorivaldo8@gmail.com',
-  'admin@antitimpa.id',
-  'eldoa@gmail.com'
-];
+export { ADMIN_EMAILS, type GoogleAuthUser, type PendingGoogleUser };
 
 export interface ComicAccessCheck {
   allowed: boolean;
   reason?: 'unauthenticated' | 'locked' | 'inactive' | 'expired' | 'restricted_plan';
   message?: string;
   allowedComicTitles?: string[];
-}
-
-export interface GoogleAuthUser {
-  uid: string;
-  displayName: string;
-  email: string;
-  photoURL: string;
-  role?: 'admin' | 'reader' | 'user';
-  createdAt?: any;
-}
-
-export interface PendingGoogleUser {
-  uid: string;
-  email: string;
-  displayName: string;
-  photoURL: string;
 }
 
 interface AppContextType {
@@ -92,8 +79,10 @@ interface AppContextType {
   ads: AdItem[];
   adSettings: AdSettings;
   realtimeStatus: 'connected' | 'connecting' | 'disconnected';
+  realtimeDiagnostic: RealtimeDiagnosticState;
   lastSyncTime: string | null;
   lastRealtimeEvent: { time: string; table: string; type: string } | null;
+  reconnectRealtime: () => void;
   
   // Navigation & UI state
   activeTab: 'home' | 'discover' | 'library' | 'profile';
@@ -287,7 +276,7 @@ function safeSetItem(key: string, data: any): void {
     localStorage.setItem(key, serialized);
   } catch (error: any) {
     // Gracefully handle browser quota exceeded error (typically 5MB limit)
-    console.warn(`[LocalStorage] Quota limit reached or write failed for '${key}'. Continuing with Firebase and Memory state.`);
+    console.warn(`[LocalStorage] Quota limit reached or write failed for '${key}'. Continuing with Supabase and Memory state.`);
     // If chapters exceeded quota, purge the heavy chapters key to free up local space for user session & settings
     if (key === STORAGE_KEYS.CHAPTERS || error?.name === 'QuotaExceededError' || error?.code === 22 || error?.number === -2147024882) {
       try {
@@ -476,8 +465,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   // Admin Toast Notifications State
   const [adminToasts, setAdminToasts] = useState<AdminToastItem[]>([]);
   const [realtimeStatus, setRealtimeStatus] = useState<'connected' | 'connecting' | 'disconnected'>('connecting');
+  const [realtimeDiagnostic, setRealtimeDiagnostic] = useState<RealtimeDiagnosticState>(() => SupabaseService.getRealtimeDiagnosticState());
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
   const [lastRealtimeEvent, setLastRealtimeEvent] = useState<{ time: string; table: string; type: string } | null>(null);
+
+  const reconnectRealtime = useCallback(() => {
+    SupabaseService.reconnectRealtime();
+  }, []);
 
   const showAdminToast = useCallback((title: string, message?: string, type: 'success' | 'info' | 'warning' | 'error' = 'success') => {
     const id = `toast-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
@@ -568,8 +562,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
       // Start Supabase Postgres Realtime changes across all connected devices
       unsubSupabaseRealtime = SupabaseService.subscribeToRealtime({
-        onStatusChange: (status) => {
-          if (isMounted) setRealtimeStatus(status);
+        onStatusChange: (status, diag) => {
+          if (isMounted) {
+            setRealtimeStatus(status);
+            if (diag) setRealtimeDiagnostic(diag);
+          }
+        },
+        onDiagnosticUpdate: (diag) => {
+          if (isMounted) {
+            setRealtimeDiagnostic(diag);
+            setRealtimeStatus(diag.status);
+          }
         },
         onComicChange: (eventType, comic) => {
           if (isMounted) {
@@ -761,6 +764,70 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         document.removeEventListener('visibilitychange', handleRevalidate);
       }
       clearInterval(syncInterval);
+    };
+  }, []);
+
+  // Supabase Auth State Change & Initial Session Listener (Single Source of Truth)
+  useEffect(() => {
+    let isMounted = true;
+
+    // Handler for Supabase Auth state changes
+    const handleAuthChange = async (event: string, session: any) => {
+      if (!isMounted) return;
+
+      if (session?.user) {
+        const authUser = session.user;
+        const mappedGoogle = mapSupabaseAuthUserToGoogleUser(authUser);
+        setGoogleUser(mappedGoogle);
+        safeSetItem(STORAGE_KEYS.GOOGLE_USER, mappedGoogle);
+
+        try {
+          const appUser = await AuthService.linkOrCreatePublicUserProfile(authUser);
+          if (isMounted && appUser) {
+            setCurrentUser(appUser);
+            safeSetItem(STORAGE_KEYS.CURRENT_USER, appUser);
+            setUsers(prev => {
+              const filtered = prev.filter(u => u.id !== appUser.id && (u.email || '').toLowerCase() !== (appUser.email || '').toLowerCase());
+              return [appUser, ...filtered];
+            });
+
+            if (appUser.role === 'admin') {
+              setIsAdminView(true);
+            }
+          }
+        } catch (err) {
+          console.warn('[Supabase Auth] User profile sync warning:', err);
+        }
+      } else if (event === 'SIGNED_OUT') {
+        if (isMounted) {
+          setGoogleUser(null);
+          setCurrentUser(null);
+          safeSetItem(STORAGE_KEYS.GOOGLE_USER, null);
+          safeSetItem(STORAGE_KEYS.CURRENT_USER, null);
+          try {
+            localStorage.removeItem(STORAGE_KEYS.GOOGLE_USER);
+            localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+          } catch (_) {}
+          setIsAdminView(false);
+        }
+      }
+    };
+
+    // 1. Check initial active session on load
+    getCurrentSession().then(session => {
+      if (isMounted && session?.user) {
+        handleAuthChange('INITIAL_SESSION', session);
+      }
+    });
+
+    // 2. Realtime listener for Auth state events (SIGNED_IN, SIGNED_OUT, TOKEN_REFRESHED, USER_UPDATED)
+    const unsubAuth = initAuthSessionListener((event, session) => {
+      handleAuthChange(event, session);
+    });
+
+    return () => {
+      isMounted = false;
+      unsubAuth();
     };
   }, []);
 
@@ -1200,14 +1267,23 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return { success: true, message: `Selamat datang kembali, ${targetUser.username}!`, user: updatedUser };
   };
 
-  const logout = () => {
+  const logout = async () => {
     if (currentUser) {
       addLog(currentUser.username, 'Pengguna Logout', 'logout', 'info', 'Sesi diakhiri secara manual');
+    }
+    try {
+      await AuthService.signOut();
+    } catch (err) {
+      console.warn('[Supabase Auth] Sign out notice:', err);
     }
     setCurrentUser(null);
     setGoogleUser(null);
     safeSetItem(STORAGE_KEYS.CURRENT_USER, null);
     safeSetItem(STORAGE_KEYS.GOOGLE_USER, null);
+    try {
+      localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+      localStorage.removeItem(STORAGE_KEYS.GOOGLE_USER);
+    } catch (_) {}
     if (isAdminView) {
       setIsAdminView(false);
     }
@@ -1219,7 +1295,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       let userEmail: string;
       let userName: string;
       let userAvatar: string;
-      let isAuthenticPopup = false;
 
       if (manualGoogleData && manualGoogleData.email) {
         // Direct / custom account input
@@ -1234,20 +1309,28 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           if (!pass || (pass !== 'admin123' && pass !== 'superadmin')) {
             return {
               success: false,
-              message: 'Alamat email ini adalah Akun Pemilik (Super Admin). Demi keamanan, silakan gunakan tombol "Google Sign-In Popup" resmi atau masukkan Password Admin Anda.',
+              message: 'Alamat email ini adalah Akun Pemilik (Super Admin). Demi keamanan, silakan gunakan tombol "Google Sign-In" resmi atau masukkan Password Admin Anda.',
               errorType: 'admin_auth_required'
             };
           }
         }
       } else {
-        // Real browser Firebase Google Auth Popup (Cryptographically verified by Google OAuth)
-        const result = await signInWithPopup(auth, googleProvider);
-        const user = result.user;
-        userUid = user.uid;
-        userEmail = (user.email || '').toLowerCase();
-        userName = user.displayName || userEmail.split('@')[0] || 'User Google';
-        userAvatar = user.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(userName)}&background=ff5b14&color=fff&bold=true`;
-        isAuthenticPopup = true;
+        // Official Supabase Auth Google OAuth Flow
+        const res = await AuthService.signInWithGoogle({
+          redirectTo: window.location.origin
+        });
+
+        if (!res.success) {
+          return {
+            success: false,
+            message: res.message || 'Gagal memulai login Google melalui Supabase Auth.'
+          };
+        }
+
+        return {
+          success: true,
+          message: 'Mengarahkan ke Google Sign-In...'
+        };
       }
 
       const isAdminEmail = ADMIN_EMAILS.includes(userEmail);
@@ -1344,20 +1427,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       };
 
     } catch (error: any) {
-      if (error?.code === 'auth/unauthorized-domain' || error?.message?.includes('unauthorized-domain')) {
-        console.warn('Firebase Auth notice: Domain unauthorized. Opening direct Google sign-in modal.');
-        setIsGoogleAuthModalOpen(true);
-        return { 
-          success: false, 
-          errorType: 'unauthorized_domain',
-          message: 'Domain pengujian ini belum didaftarkan di Firebase Console. Silakan pilih akun Google Anda di jendela yang terbuka untuk masuk langsung.' 
-        };
-      }
-
-      if (error?.code === 'auth/popup-closed-by-user' || error?.message?.includes('popup-closed-by-user')) {
-        return { success: false, message: 'Login Google dibatalkan.' };
-      }
-
       console.warn('Google Sign-In Notice:', error?.message || error);
       const errMsg = error?.message || 'Gagal login dengan Akun Google.';
       return { success: false, message: errMsg };
@@ -1526,9 +1595,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const logoutGoogle = async () => {
     try {
-      await signOut(auth);
+      await AuthService.signOut();
     } catch (err) {
-      console.warn('Firebase SignOut error:', err);
+      console.warn('[Supabase Auth] Sign out error:', err);
     }
     setGoogleUser(null);
     safeSetItem(STORAGE_KEYS.GOOGLE_USER, null);
@@ -3294,8 +3363,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         ads,
         adSettings,
         realtimeStatus,
+        realtimeDiagnostic,
         lastSyncTime,
         lastRealtimeEvent,
+        reconnectRealtime,
         activeTab,
         selectedComicId,
         readingChapterId,
