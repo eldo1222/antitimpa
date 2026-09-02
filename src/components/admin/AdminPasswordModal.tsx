@@ -29,7 +29,7 @@ export const AdminPasswordModal: React.FC<AdminPasswordModalProps> = ({ isOpen, 
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
     setSuccessMessage(null);
@@ -56,9 +56,8 @@ export const AdminPasswordModal: React.FC<AdminPasswordModalProps> = ({ isOpen, 
 
     setIsSubmitting(true);
 
-    setTimeout(() => {
-      setIsSubmitting(false);
-      const res = changeAdminPassword(oldPassword, newPassword);
+    try {
+      const res = await changeAdminPassword(oldPassword, newPassword);
       if (res.success) {
         setSuccessMessage(res.message);
         setOldPassword('');
@@ -70,7 +69,11 @@ export const AdminPasswordModal: React.FC<AdminPasswordModalProps> = ({ isOpen, 
       } else {
         setErrorMessage(res.message);
       }
-    }, 400);
+    } catch (err: any) {
+      setErrorMessage(err?.message || 'Terjadi kesalahan sistem saat memperbarui kata sandi.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (

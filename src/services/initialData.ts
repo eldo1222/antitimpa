@@ -164,7 +164,7 @@ export const INITIAL_USERS: UserAccount[] = [
   {
     id: 'user-admin',
     username: 'admin',
-    password: 'admin123@password',
+    password: '$2b$10$KnHXbd4Zwp2BJXw9nArE7eyEwQVBm0uQgBoK1Voh70LsGdoCkn/d2',
     role: 'admin',
     status: 'active',
     planType: 'plan_15k_all',
@@ -176,7 +176,7 @@ export const INITIAL_USERS: UserAccount[] = [
   {
     id: 'user-reader-5k',
     username: 'andi_5k',
-    password: 'reader123',
+    password: '$2b$10$.gt9ybC8nfCcvNrVR7ejMOARjTRdSb2E7OwKnkC5oolsbKvP8n8t6',
     role: 'reader',
     status: 'active',
     planType: 'plan_5k_single',
@@ -190,7 +190,7 @@ export const INITIAL_USERS: UserAccount[] = [
   {
     id: 'user-reader-15k',
     username: 'budi_vip',
-    password: 'reader123',
+    password: '$2b$10$.gt9ybC8nfCcvNrVR7ejMOARjTRdSb2E7OwKnkC5oolsbKvP8n8t6',
     role: 'reader',
     status: 'active',
     planType: 'plan_15k_all',

@@ -35,6 +35,12 @@ export interface User {
   allowedComicIds?: string[];
   priceNote?: string;
   notes?: string;
+  loginMethod?: 'google' | 'password' | 'credentials' | string;
+  provider?: string;
+  lastActive?: string;
+  readingHistory?: any[];
+  bookmarks?: any[];
+  favorites?: any[];
 }
 
 export type UserAccount = User;

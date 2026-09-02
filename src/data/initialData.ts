@@ -713,7 +713,7 @@ export const initialUsers: User[] = [
   {
     id: 'user-admin',
     username: 'admin',
-    passwordHash: 'admin123',
+    passwordHash: '$2b$10$KnHXbd4Zwp2BJXw9nArE7eyEwQVBm0uQgBoK1Voh70LsGdoCkn/d2',
     role: 'admin',
     status: 'active',
     createdAt: '2023-01-01T00:00:00.000Z',
@@ -736,7 +736,7 @@ export const initialUsers: User[] = [
   {
     id: 'user-1',
     username: 'CyberReader_01',
-    passwordHash: 'reader123',
+    passwordHash: '$2b$10$.gt9ybC8nfCcvNrVR7ejMOARjTRdSb2E7OwKnkC5oolsbKvP8n8t6',
     role: 'reader',
     status: 'active',
     createdAt: '2022-06-15T10:00:00.000Z',
@@ -759,7 +759,7 @@ export const initialUsers: User[] = [
   {
     id: 'user-2',
     username: 'shadow_reader_99',
-    passwordHash: 'reader123',
+    passwordHash: '$2b$10$.gt9ybC8nfCcvNrVR7ejMOARjTRdSb2E7OwKnkC5oolsbKvP8n8t6',
     role: 'reader',
     status: 'active',
     createdAt: '2024-08-01T08:00:00.000Z',
@@ -783,7 +783,7 @@ export const initialUsers: User[] = [
   {
     id: 'user-3',
     username: 'manga_queen_xx',
-    passwordHash: 'reader123',
+    passwordHash: '$2b$10$.gt9ybC8nfCcvNrVR7ejMOARjTRdSb2E7OwKnkC5oolsbKvP8n8t6',
     role: 'reader',
     status: 'active',
     createdAt: '2024-05-10T12:00:00.000Z',
@@ -806,7 +806,7 @@ export const initialUsers: User[] = [
   {
     id: 'user-4',
     username: 'zero_x_hero',
-    passwordHash: 'reader123',
+    passwordHash: '$2b$10$.gt9ybC8nfCcvNrVR7ejMOARjTRdSb2E7OwKnkC5oolsbKvP8n8t6',
     role: 'reader',
     status: 'expired',
     createdAt: '2024-09-01T10:00:00.000Z',
@@ -830,7 +830,7 @@ export const initialUsers: User[] = [
   {
     id: 'user-5',
     username: 'bot_scraper_882',
-    passwordHash: 'wrongpass',
+    passwordHash: '$2b$10$mE0tIXJn5IwBc6wZWLyIKeYKAwZaA4eKW.XRrAqMcfZutZh1ws/zO',
     role: 'reader',
     status: 'locked',
     createdAt: '2024-10-01T04:00:00.000Z',

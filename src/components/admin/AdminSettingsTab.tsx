@@ -84,7 +84,7 @@ export const AdminSettingsTab: React.FC = () => {
     setTimeout(() => setSavedSuccess(false), 2000);
   };
 
-  const handlePasswordSubmit = (e: React.FormEvent) => {
+  const handlePasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setPasswordError(null);
     setPasswordSuccess(null);
@@ -111,9 +111,8 @@ export const AdminSettingsTab: React.FC = () => {
 
     setIsChangingPassword(true);
 
-    setTimeout(() => {
-      setIsChangingPassword(false);
-      const res = changeAdminPassword(oldPassword, newPassword);
+    try {
+      const res = await changeAdminPassword(oldPassword, newPassword);
       if (res.success) {
         setPasswordSuccess(res.message);
         setOldPassword('');
@@ -123,7 +122,11 @@ export const AdminSettingsTab: React.FC = () => {
       } else {
         setPasswordError(res.message);
       }
-    }, 400);
+    } catch (err: any) {
+      setPasswordError(err?.message || 'Terjadi kesalahan saat mengganti password.');
+    } finally {
+      setIsChangingPassword(false);
+    }
   };
 
   return (

@@ -214,7 +214,7 @@ export class SupabaseService {
   }
 
   /**
-   * Fetch All Data from Supabase Database
+   * Fetch All Data from Supabase Database (with automatic fallback to Central Server DB)
    */
   public static async fetchFullDatabase(): Promise<{
     comics: Comic[];
@@ -229,86 +229,131 @@ export class SupabaseService {
     systemSettings: SystemSettings | null;
   } | null> {
     const client = getSupabaseClient();
-    if (!client) return null;
+    if (client) {
+      try {
+        // 1. Fetch Comics
+        const { data: comics } = await ComicRepository.getAll();
 
-    try {
-      // 1. Fetch Comics
-      const { data: comics } = await ComicRepository.getAll();
+        // 2. Fetch Chapters Grouped
+        const { data: chaptersMap } = await ChapterRepository.getAllGrouped();
 
-      // 2. Fetch Chapters Grouped
-      const { data: chaptersMap } = await ChapterRepository.getAllGrouped();
+        // 3. Fetch Users
+        const { data: users } = await UserRepository.getAll();
 
-      // 3. Fetch Users
-      const { data: users } = await UserRepository.getAll();
+        // 4. Fetch Banners
+        const { data: banners } = await BannerRepository.getAll();
 
-      // 4. Fetch Banners
-      const { data: banners } = await BannerRepository.getAll();
+        // 5. Fetch Drive Accounts
+        const { data: driveAccounts } = await DriveRepository.getAll();
 
-      // 5. Fetch Drive Accounts
-      const { data: driveAccounts } = await DriveRepository.getAll();
+        // 6. Fetch Activity Logs
+        const { data: activityLogs } = await SettingsRepository.getLogs(200);
 
-      // 6. Fetch Activity Logs
-      const { data: activityLogs } = await SettingsRepository.getLogs(200);
+        // 7. Fetch Comments
+        const { data: comments } = await CommentRepository.getAll();
 
-      // 7. Fetch Comments
-      const { data: comments } = await CommentRepository.getAll();
+        // 8. Fetch Ads
+        const { data: ads } = await AdRepository.getAllAds();
 
-      // 8. Fetch Ads
-      const { data: ads } = await AdRepository.getAllAds();
+        // 9. Fetch Ad Settings
+        const { data: adSettings } = await AdRepository.getSettings();
 
-      // 9. Fetch Ad Settings
-      const { data: adSettings } = await AdRepository.getSettings();
+        // 10. Fetch Settings
+        const { data: systemSettings } = await SettingsRepository.getSettings();
 
-      // 10. Fetch Settings
-      const { data: systemSettings } = await SettingsRepository.getSettings();
-
-      return {
-        comics: comics || [],
-        chapters: chaptersMap || {},
-        users: users || [],
-        banners: banners || [],
-        driveAccounts: driveAccounts || [],
-        activityLogs: activityLogs || [],
-        comments: comments || [],
-        ads: ads || [],
-        adSettings: adSettings || null,
-        systemSettings: systemSettings || {
-          siteName: 'AntiTimpa',
-          maxLoginAttempts: 5,
-          maintenanceMode: false,
-          supabaseUrl: getSupabaseCredentials().url,
-          supabaseAnonKey: getSupabaseCredentials().anonKey
+        if (comics && chaptersMap) {
+          return {
+            comics: comics || [],
+            chapters: chaptersMap || {},
+            users: users || [],
+            banners: banners || [],
+            driveAccounts: driveAccounts || [],
+            activityLogs: activityLogs || [],
+            comments: comments || [],
+            ads: ads || [],
+            adSettings: adSettings || null,
+            systemSettings: systemSettings || {
+              siteName: 'AntiTimpa',
+              maxLoginAttempts: 5,
+              maintenanceMode: false,
+              supabaseUrl: getSupabaseCredentials().url,
+              supabaseAnonKey: getSupabaseCredentials().anonKey
+            }
+          };
         }
-      };
-    } catch (error) {
-      console.error('[SupabaseService] fetchFullDatabase error:', error);
-      return null;
+      } catch (error) {
+        console.warn('[SupabaseService] Remote database fetch fallback to server API:', error);
+      }
     }
+
+    // Fallback: Fetch directly from Central Server Backend (/api/data)
+    try {
+      const res = await fetch('/api/data', { 
+        cache: 'no-store',
+        headers: { 'Pragma': 'no-cache', 'Cache-Control': 'no-cache' }
+      });
+      if (res.ok) {
+        const sData = await res.json();
+        return {
+          comics: sData.comics || [],
+          chapters: sData.chapters || {},
+          users: sData.users || [],
+          banners: sData.banners || [],
+          driveAccounts: sData.driveAccounts || [],
+          activityLogs: sData.activityLogs || [],
+          comments: sData.comments || [],
+          ads: sData.ads || [],
+          adSettings: sData.adSettings || null,
+          systemSettings: sData.systemSettings || null
+        };
+      }
+    } catch (_) {}
+
+    return null;
   }
 
   /**
-   * Fetch Single User by Username or Email
+   * Fetch Single User by Username or Email (Supabase + Server DB Single Source of Truth)
    */
   public static async fetchUser(identifier: string): Promise<User | null> {
-    const client = getSupabaseClient();
-    if (!client || !identifier) return null;
-    try {
-      const clean = identifier.trim();
-      const isEmail = clean.includes('@');
-      const { data, error } = isEmail
-        ? await client.from(DATABASE_TABLES.USERS).select('*').ilike('email', clean).maybeSingle()
-        : await client.from(DATABASE_TABLES.USERS).select('*').ilike('username', clean).maybeSingle();
+    const clean = (identifier || '').trim().toLowerCase();
+    if (!clean) return null;
 
-      if (error) {
-        logDatabaseError({ table: DATABASE_TABLES.USERS, operation: 'SELECT', error, details: { identifier } });
-        return null;
-      }
-      if (!data) return null;
-      return mapDbToUser(data);
-    } catch (err) {
-      logDatabaseError({ table: DATABASE_TABLES.USERS, operation: 'SELECT', error: err, details: { identifier } });
-      return null;
+    // 1. Try Supabase if configured
+    const client = getSupabaseClient();
+    if (client) {
+      try {
+        const isEmail = clean.includes('@');
+        const { data, error } = isEmail
+          ? await client.from(DATABASE_TABLES.USERS).select('*').ilike('email', clean).maybeSingle()
+          : await client.from(DATABASE_TABLES.USERS).select('*').ilike('username', clean).maybeSingle();
+
+        if (!error && data) {
+          return mapDbToUser(data);
+        }
+      } catch (_) {}
     }
+
+    // 2. Try Central Server (/api/data)
+    try {
+      const res = await fetch('/api/data', { 
+        cache: 'no-store',
+        headers: { 'Pragma': 'no-cache', 'Cache-Control': 'no-cache' }
+      });
+      if (res.ok) {
+        const fullData = await res.json();
+        if (Array.isArray(fullData.users)) {
+          const match = fullData.users.find((u: User) =>
+            (u.username || '').trim().toLowerCase() === clean ||
+            (u.email || '').trim().toLowerCase() === clean ||
+            u.id === clean
+          );
+          if (match) return match;
+        }
+      }
+    } catch (_) {}
+
+    return null;
   }
 
   // Comic CRUD
@@ -356,15 +401,65 @@ export class SupabaseService {
     return res.success;
   }
 
-  // User CRUD
-  public static async saveUser(user: User): Promise<boolean> {
-    const res = await UserRepository.save(user);
-    return res.success;
+  // User CRUD (Single Source of Truth: Central Server + Supabase)
+  public static async saveUser(user: User): Promise<{ success: boolean; error?: string }> {
+    let serverOk = false;
+    let supabaseOk = false;
+    let errorMsg = '';
+
+    // 1. Save to Central Backend Server (/api/data/users)
+    try {
+      const res = await fetch('/api/data/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(user)
+      });
+      if (res.ok) {
+        serverOk = true;
+      } else {
+        const data = await res.json().catch(() => ({}));
+        errorMsg = data.error || `Server HTTP ${res.status}`;
+      }
+    } catch (e: any) {
+      errorMsg = e?.message || 'Gagal menghubungi server';
+    }
+
+    // 2. Save to Supabase (if configured)
+    try {
+      const subRes = await UserRepository.save(user);
+      if (subRes.success) {
+        supabaseOk = true;
+      } else if (subRes.error && !subRes.error.includes('offline') && !subRes.error.includes('unreachable')) {
+        errorMsg = subRes.error;
+      }
+    } catch (e: any) {
+      // Non-blocking if offline
+    }
+
+    const isSuccess = serverOk || supabaseOk;
+    return {
+      success: isSuccess,
+      error: isSuccess ? undefined : (errorMsg || 'Gagal menyimpan kredensial/data pengguna.')
+    };
   }
 
-  public static async deleteUser(userId: string): Promise<boolean> {
-    const res = await UserRepository.delete(userId);
-    return res.success;
+  public static async deleteUser(userId: string): Promise<{ success: boolean; error?: string }> {
+    let serverOk = false;
+    let supabaseOk = false;
+
+    // 1. Delete on Central Server
+    try {
+      const res = await fetch(`/api/data/users/${encodeURIComponent(userId)}`, { method: 'DELETE' });
+      if (res.ok) serverOk = true;
+    } catch (_) {}
+
+    // 2. Delete on Supabase
+    try {
+      const subRes = await UserRepository.delete(userId);
+      if (subRes.success) supabaseOk = true;
+    } catch (_) {}
+
+    return { success: serverOk || supabaseOk };
   }
 
   // Drive CRUD

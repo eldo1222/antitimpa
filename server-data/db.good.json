@@ -1508,7 +1508,7 @@
     {
       "id": "user-admin",
       "username": "admin",
-      "passwordHash": "$2b$10$sSLTkpuNQ/jIR.TFG060d./z51ZsSk9Mm6cGx16CAyjFiBapY7RqC",
+      "passwordHash": "$2b$10$cHkmXzEiZV5bNpyULbHBMuyhIVQRTZgTUamKzos/t/Hvf4AEhdtXu",
       "role": "admin",
       "status": "active",
       "createdAt": "2023-01-01T00:00:00.000Z",
@@ -1531,7 +1531,7 @@
     {
       "id": "user-1",
       "username": "CyberReader_01",
-      "passwordHash": "$2b$10$GNgY7mTj9eQLXrOew.kVjem3fM4UNcouaCWIHVhwM5fng9r5J0Jee",
+      "passwordHash": "$2b$10$JBhSHv9ZoTCr8/VU3n2gN.PtlwRVNVM4sodsnyTB9ZZTP72cwQU1q",
       "role": "reader",
       "status": "active",
       "createdAt": "2022-06-15T10:00:00.000Z",
@@ -1554,7 +1554,7 @@
     {
       "id": "user-2",
       "username": "shadow_reader_99",
-      "passwordHash": "$2b$10$rzABw4czy5oiSzgBasucU.krsuu5MHFrJAAzd7uKMsQL5MxqOUg2O",
+      "passwordHash": "$2b$10$tSYtNrVQyK.Dtyyf6.2J8utmaB.WbewscBtnmT9mmwNbg8ZYi9j8C",
       "role": "reader",
       "status": "active",
       "createdAt": "2024-08-01T08:00:00.000Z",
@@ -1580,7 +1580,7 @@
     {
       "id": "user-3",
       "username": "manga_queen_xx",
-      "passwordHash": "$2b$10$0VBwt2qQnw7XS21Xe4SlfuY00j4n9PTBxKqFUTUX5DwuYyTfZp7m6",
+      "passwordHash": "$2b$10$wQO7qLqpNR980VjKg6MV4eSBBO6k8M.WLNHmNJZBlnmlBs7Ghquea",
       "role": "reader",
       "status": "active",
       "createdAt": "2024-05-10T12:00:00.000Z",
@@ -1603,7 +1603,7 @@
     {
       "id": "user-4",
       "username": "zero_x_hero",
-      "passwordHash": "$2b$10$BEynGX3uQ8bIPCGRPwMQ.uVRTgbPO6V5tYaw7B8rO8SHHoZcnTlDa",
+      "passwordHash": "$2b$10$I/29NgbVNrG0wArahdupxez1s6HgOf/OoYHp2oyBHSEd8Dm1roese",
       "role": "reader",
       "status": "expired",
       "createdAt": "2024-09-01T10:00:00.000Z",
@@ -1629,7 +1629,7 @@
     {
       "id": "user-5",
       "username": "bot_scraper_882",
-      "passwordHash": "$2b$10$TCX8s7iUDyO4seFDDdm9n.9Ukvz7ve.M9Qu7OnMhZ7Gx.8a.42eb.",
+      "passwordHash": "$2b$10$Lkk/h7oWF1Ey4CCuMxLe5.88vd7sDGWhEmHPyQrIRPNcpf8zIcOqW",
       "role": "reader",
       "status": "locked",
       "createdAt": "2024-10-01T04:00:00.000Z",
@@ -2071,5 +2071,5 @@
     "floatingBottomEnabled": true,
     "showAdLabel": true
   },
-  "version": 1788358034373
+  "version": 1788357967911
 }

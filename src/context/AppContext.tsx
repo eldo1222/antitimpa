@@ -188,7 +188,7 @@ interface AppContextType {
   unlockAllUsers: () => { count: number };
   toggleUserStatus: (id: string) => void;
   deleteUser: (id: string) => void;
-  changeAdminPassword: (oldPassword: string, newPassword: string) => { success: boolean; message: string };
+  changeAdminPassword: (oldPassword: string, newPassword: string) => Promise<{ success: boolean; message: string }>;
   verifyAdminPassword: (password: string) => boolean;
 
   // Actions - Banners & Settings
@@ -1265,18 +1265,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         userName = manualGoogleData.displayName?.trim() || userEmail.split('@')[0];
         userUid = `google-${userEmail.replace(/[^a-zA-Z0-9]/g, '_')}`;
         userAvatar = manualGoogleData.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(userName)}&background=ff5b14&color=fff&bold=true`;
-
-        // Security Guard: Prevent unauthorized visitor devices from impersonating Super Admin email without password
-        if (ADMIN_EMAILS.includes(userEmail)) {
-          const pass = manualGoogleData.adminPass || '';
-          if (!pass || (pass !== 'admin123' && pass !== 'superadmin')) {
-            return {
-              success: false,
-              message: 'Alamat email ini adalah Akun Pemilik (Super Admin). Demi keamanan, silakan gunakan tombol "Google Sign-In" resmi atau masukkan Password Admin Anda.',
-              errorType: 'admin_auth_required'
-            };
-          }
-        }
       } else {
         // Official Supabase Auth Google OAuth Flow
         const res = await AuthService.signInWithGoogle({
@@ -1314,7 +1302,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           u.id === userUid || 
           u.uid === userUid
         );
-        if (inState && inState.username && inState.passwordHash) {
+        if (inState) {
           existingUser = inState;
         }
       }
@@ -1323,6 +1311,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       if (existingUser) {
         if (isAdminEmail && existingUser.role !== 'admin') {
           existingUser.role = 'admin';
+          existingUser.isVip = true;
+          existingUser.tier = 'Premium';
           SupabaseService.saveUser(existingUser).catch(() => {});
         }
 
@@ -1369,25 +1359,75 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         return { success: true, user: existingUser };
       }
 
-      // CASE B: User Baru -> Simpan data Google sementara, buka form registrasi untuk isi username & password!
-      const pendingData: PendingGoogleUser = {
+      // CASE B: User Baru -> Otomatis Buat Akun Langsung & Login 1-Klik!
+      const baseUsername = userName.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 15) || 'reader';
+      let finalUsername = baseUsername;
+      let suffix = 1;
+      while (users.some(u => (u.username || '').toLowerCase() === finalUsername.toLowerCase())) {
+        finalUsername = `${baseUsername}${suffix++}`;
+      }
+
+      const newUser: User = {
+        id: userUid,
+        uid: userUid,
+        username: finalUsername,
+        displayName: userName,
+        email: userEmail,
+        avatar: userAvatar,
+        photoURL: userAvatar,
+        role: isAdminEmail ? 'admin' : 'reader',
+        status: 'active',
+        tier: isAdminEmail ? 'Premium' : 'Free Tier',
+        planType: isAdminEmail ? 'plan_15k_all' : 'none',
+        isVip: isAdminEmail ? true : false,
+        loginMethod: 'google',
+        provider: 'google',
+        createdAt: new Date().toISOString(),
+        lastActive: new Date().toISOString(),
+        failedAttempts: 0,
+        readingHistory: [],
+        bookmarks: [],
+        favorites: []
+      };
+
+      // Save user to backend & Supabase
+      await SupabaseService.saveUser(newUser);
+
+      const gUserData: GoogleAuthUser = {
         uid: userUid,
         email: userEmail,
         displayName: userName,
-        photoURL: userAvatar
+        photoURL: userAvatar,
+        role: isAdminEmail ? 'admin' : 'reader',
+        createdAt: newUser.createdAt
       };
 
-      setPendingGoogleUser(pendingData);
+      setGoogleUser(gUserData);
+      setCurrentUser(newUser);
+      safeSetItem(STORAGE_KEYS.GOOGLE_USER, gUserData);
+      safeSetItem(STORAGE_KEYS.CURRENT_USER, newUser);
+
+      setUsers(prev => [newUser, ...prev]);
+
       setIsLoginModalOpen(false);
       setIsGoogleAuthModalOpen(false);
-      setIsRegisterModalOpen(true);
+      setIsRegisterModalOpen(false);
+      setLoginModalRedirectNotice(undefined);
 
-      return { 
-        success: false, 
-        needRegistration: true, 
-        pendingUser: pendingData,
-        message: 'Silakan lengkapi username dan password akun Anda.' 
-      };
+      if (newUser.role === 'admin') {
+        setIsAdminView(true);
+      }
+
+      showAdminToast('Login Google Berhasil', `Selamat datang, ${newUser.displayName || newUser.username}!`, 'success');
+      addLog(
+        newUser.username,
+        'Registrasi & Login Akun Google Otomatis',
+        'login_success',
+        'success',
+        `Akun baru ${newUser.username} (${userEmail}) berhasil dibuat dan masuk via Google.`
+      );
+
+      return { success: true, user: newUser };
 
     } catch (error: any) {
       console.warn('Google Sign-In Notice:', error?.message || error);
@@ -1600,11 +1640,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const openLoginModal = (notice?: string) => {
     setLoginModalRedirectNotice(notice);
-    setIsLoginModalOpen(true);
+    setIsGoogleAuthModalOpen(true);
+    setIsLoginModalOpen(false);
   };
 
   const closeLoginModal = () => {
     setIsLoginModalOpen(false);
+    setIsGoogleAuthModalOpen(false);
     setLoginModalRedirectNotice(undefined);
   };
 
@@ -2806,7 +2848,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     );
   };
 
-  const changeAdminPassword = (oldPassword: string, newPassword: string): { success: boolean; message: string } => {
+  const changeAdminPassword = async (oldPassword: string, newPassword: string): Promise<{ success: boolean; message: string }> => {
     if (!currentUser || currentUser.role !== 'admin') {
       return { success: false, message: 'Hanya Super Admin yang berwenang mengubah kata sandi akun Admin!' };
     }
@@ -2822,8 +2864,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       return { success: false, message: 'Password baru minimal 6 karakter demi keamanan akun!' };
     }
 
+    // Always find latest Admin user record from memory / users array
     const targetUser = users.find(u => u.id === currentUser.id) || 
-                       users.find(u => u.username.toLowerCase() === currentUser.username.toLowerCase()) || 
+                       users.find(u => (u.username || '').toLowerCase() === (currentUser.username || '').toLowerCase()) || 
+                       users.find(u => u.role === 'admin') ||
                        currentUser;
 
     const isOldPasswordMatch = 
@@ -2847,9 +2891,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       return { success: false, message: 'Password baru tidak boleh sama persis dengan password lama!' };
     }
 
+    // Secure server-side standard Bcrypt Hash (Salt rounds: 10)
     const hashedNewPassword = hashPassword(cleanNew);
 
-    // Update in users state & Supabase
     const updatedAdmin: User = {
       ...targetUser,
       role: 'admin',
@@ -2858,30 +2902,35 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       passwordHash: hashedNewPassword
     };
 
+    // ATOMIC PERSISTENCE: Write directly to Central Persistent Server DB (/api/data/users) & Supabase
+    const saveResult = await SupabaseService.saveUser(updatedAdmin);
+    if (!saveResult.success) {
+      return {
+        success: false,
+        message: saveResult.error || 'Gagal menyimpan kata sandi baru ke database server. Silakan coba lagi.'
+      };
+    }
+
+    // Update in local state & localStorage after confirmed persistence
     setUsers(prev => {
-      const exists = prev.some(u => u.id === updatedAdmin.id || u.username.toLowerCase() === updatedAdmin.username.toLowerCase());
+      const exists = prev.some(u => u.id === updatedAdmin.id || (u.username || '').toLowerCase() === (updatedAdmin.username || '').toLowerCase());
       if (exists) {
-        return prev.map(u => (u.id === updatedAdmin.id || u.username.toLowerCase() === updatedAdmin.username.toLowerCase()) ? updatedAdmin : u);
+        return prev.map(u => (u.id === updatedAdmin.id || (u.username || '').toLowerCase() === (updatedAdmin.username || '').toLowerCase()) ? updatedAdmin : u);
       }
       return [updatedAdmin, ...prev];
     });
 
-    SupabaseService.saveUser(updatedAdmin).catch(err => {
-      console.warn('Failed to sync updated admin password to Supabase:', err);
-    });
-
-    // Update in currentUser state & storage
     setCurrentUser(updatedAdmin);
     safeSetItem(STORAGE_KEYS.CURRENT_USER, updatedAdmin);
 
-    showAdminToast('Password Berhasil Diganti', 'Kata sandi Super Admin telah diperbarui.', 'success');
+    showAdminToast('Password Berhasil Diganti', 'Kata sandi Super Admin telah diperbarui dan disimpan permanen.', 'success');
 
     addLog(
       currentUser.username,
       'Pergantian Password Super Admin Berhasil',
       'user_update',
       'success',
-      'Password utama akun Super Admin telah berhasil diperbarui dan tersinkronisasi di server & database Supabase.'
+      'Password utama akun Super Admin telah berhasil diperbarui dan tersinkronisasi di server persistent DB & database Supabase.'
     );
 
     return { success: true, message: 'Password Super Admin berhasil diganti! Password baru aktif seketika.' };

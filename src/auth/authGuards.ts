@@ -2,6 +2,7 @@ import { User } from '../features/users/types/user.types';
 import { GoogleAuthUser } from './authTypes';
 
 export const ADMIN_EMAILS: string[] = [
+  'jefaruan627@gmail.com',
   'admin@email.com',
   'eldorivaldo8@gmail.com',
   'admin@antitimpa.id',
