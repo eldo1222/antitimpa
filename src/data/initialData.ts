@@ -1006,7 +1006,7 @@ export const initialSystemSettings: SystemSettings = {
   siteFavicon: '',
   tiktokUrl: 'https://www.tiktok.com/@anti.timpa',
   tiktokHandle: '@anti.timpa',
-  adminPhone: '089514441988',
+  adminPhone: '+6289514441988',
   maxLoginAttempts: 3,
   lockoutDurationMinutes: 15,
   sessionTimeout: '24 Hours',

@@ -28,7 +28,7 @@ export function mapDbToSettings(s: Record<string, any>): SystemSettings {
     maintenanceMode: Boolean(s.maintenance_mode),
     siteLogo: s.site_logo || undefined,
     siteFavicon: s.site_favicon || undefined,
-    adminPhone: s.admin_phone || '089514441988',
+    adminPhone: s.admin_phone || '+6289514441988',
     tiktokUrl: s.tiktok_url || 'https://www.tiktok.com/@anti.timpa',
     tiktokHandle: s.tiktok_handle || '@anti.timpa',
     watermarkText: s.watermark_text || 'AntiTimpa Digital Reader',

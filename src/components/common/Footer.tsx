@@ -8,6 +8,12 @@ export const Footer: React.FC = () => {
   const { systemSettings } = useApp();
   const [legalModalType, setLegalModalType] = useState<'privacy' | 'disclaimer' | null>(null);
 
+  const phoneValue = systemSettings?.adminPhone || '+6289514441988';
+  const displayPhone = phoneValue.startsWith('+') 
+    ? phoneValue 
+    : (phoneValue.startsWith('62') ? `+${phoneValue}` : `+62${phoneValue.replace(/^0/, '')}`);
+  const cleanWaNumber = phoneValue.replace(/[^0-9]/g, '') || '6289514441988';
+
   const handleShare = () => {
     if (navigator.share) {
       navigator.share({
@@ -63,13 +69,13 @@ export const Footer: React.FC = () => {
 
         {/* Admin WhatsApp Button */}
         <a
-          href={`https://wa.me/${systemSettings?.adminPhone?.replace(/[^0-9]/g, '') || '6289514441988'}?text=Halo%20Admin%20AntiTimpa,%20saya%20ingin%20bertanya%20mengenai%20layanan%20komik.`}
+          href={`https://wa.me/${cleanWaNumber}?text=Halo%20Admin%20AntiTimpa,%20saya%20ingin%20bertanya%20mengenai%20layanan%20komik.`}
           target="_blank"
           rel="noreferrer"
           className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/30 text-xs font-bold shadow-lg transition-all active:scale-95"
         >
           <MessageCircle className="w-4 h-4 text-emerald-400" />
-          <span>WA Admin: {systemSettings?.adminPhone || '089514441988'}</span>
+          <span>WA Admin: {displayPhone}</span>
         </a>
 
         {/* Share Button */}
