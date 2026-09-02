@@ -10,6 +10,14 @@ export function mapSettingsToDb(s: Partial<SystemSettings>): Record<string, any>
   if (s.maintenanceMode !== undefined) row.maintenance_mode = s.maintenanceMode;
   if (s.siteLogo !== undefined) row.site_logo = s.siteLogo;
   if (s.siteFavicon !== undefined) row.site_favicon = s.siteFavicon;
+  if (s.adminPhone !== undefined) row.admin_phone = s.adminPhone;
+  if (s.tiktokUrl !== undefined) row.tiktok_url = s.tiktokUrl;
+  if (s.tiktokHandle !== undefined) row.tiktok_handle = s.tiktokHandle;
+  if (s.watermarkText !== undefined) row.watermark_text = s.watermarkText;
+  if (s.maxFailedAttempts !== undefined) row.max_failed_attempts = s.maxFailedAttempts;
+  if (s.allowGuestPreview !== undefined) row.allow_guest_preview = s.allowGuestPreview;
+  if (s.guestPreviewPages !== undefined) row.guest_preview_pages = s.guestPreviewPages;
+  if (s.ageGating18Plus !== undefined) row.enable_18plus = s.ageGating18Plus;
   return row;
 }
 
@@ -20,10 +28,15 @@ export function mapDbToSettings(s: Record<string, any>): SystemSettings {
     maintenanceMode: Boolean(s.maintenance_mode),
     siteLogo: s.site_logo || undefined,
     siteFavicon: s.site_favicon || undefined,
+    adminPhone: s.admin_phone || '089514441988',
+    tiktokUrl: s.tiktok_url || 'https://www.tiktok.com/@anti.timpa',
+    tiktokHandle: s.tiktok_handle || '@anti.timpa',
+    watermarkText: s.watermark_text || 'AntiTimpa Digital Reader',
     maxLoginAttempts: 5,
-    allowGuestPreview: true,
-    guestPreviewPages: 3,
-    ageGating18Plus: true,
+    maxFailedAttempts: typeof s.max_failed_attempts === 'number' ? s.max_failed_attempts : 3,
+    allowGuestPreview: s.allow_guest_preview !== undefined ? Boolean(s.allow_guest_preview) : true,
+    guestPreviewPages: typeof s.guest_preview_pages === 'number' ? s.guest_preview_pages : 2,
+    ageGating18Plus: s.enable_18plus !== undefined ? Boolean(s.enable_18plus) : true,
     defaultComicSorting: 'newest',
     defaultReaderMode: 'vertical',
   };

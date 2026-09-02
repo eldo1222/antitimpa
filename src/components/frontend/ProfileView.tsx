@@ -35,6 +35,7 @@ export const ProfileView: React.FC = () => {
     readingHistory, 
     comics, 
     chapters,
+    systemSettings,
     setIsAdminView 
   } = useApp();
 
@@ -42,6 +43,9 @@ export const ProfileView: React.FC = () => {
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [profileModalTab, setProfileModalTab] = useState<'profile' | 'password' | 'account'>('profile');
+
+  const adminPhone = systemSettings?.adminPhone || '089514441988';
+  const cleanWaPhone = adminPhone.replace(/^0/, '62').replace(/[^0-9]/g, '') || '6289514441988';
 
   if (!currentUser) {
     return (
@@ -356,11 +360,11 @@ export const ProfileView: React.FC = () => {
 
             <div className="p-3.5 bg-[#1d1d2b] rounded-xl border border-[#2a2a3e] space-y-2 text-xs">
               <p><strong className="text-white">Admin Support:</strong> admin@antitimpa.id</p>
-              <p><strong className="text-white">WhatsApp Admin:</strong> <span className="font-mono text-emerald-400 font-bold">089514441988</span></p>
+              <p><strong className="text-white">WhatsApp Admin:</strong> <span className="font-mono text-emerald-400 font-bold">{adminPhone}</span></p>
               <p><strong className="text-white">Jam Operasional:</strong> 24/7 Fast Response</p>
               
               <a
-                href="https://wa.me/6289514441988?text=Halo%20Admin%20AntiTimpa,%20saya%20ingin%20konsultasi%20akun%20pembaca%20atau%20perpanjang%20durasi."
+                href={`https://wa.me/${cleanWaPhone}?text=Halo%20Admin%20AntiTimpa,%20saya%20ingin%20konsultasi%20akun%20pembaca%20atau%20perpanjang%20durasi.`}
                 target="_blank"
                 rel="noreferrer"
                 className="mt-2 w-full py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-lg flex items-center justify-center gap-1.5 transition-colors"

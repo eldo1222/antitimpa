@@ -13,6 +13,7 @@ import {
   ShieldCheck, 
   KeyRound, 
   Mail, 
+  Phone,
   Sparkles, 
   CheckCircle2, 
   AlertCircle, 
@@ -63,6 +64,7 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
   const [avatarUrl, setAvatarUrl] = useState(user?.avatar || PRESET_AVATARS[0]);
   const [displayName, setDisplayName] = useState(user?.displayName || user?.username || '');
   const [username, setUsername] = useState(user?.username || '');
+  const [phone, setPhone] = useState(user?.phone || user?.phoneNumber || '');
   const [bio, setBio] = useState(user?.bio || '');
 
   // Password Fields State
@@ -89,6 +91,7 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
       setAvatarUrl(user.avatar || PRESET_AVATARS[0]);
       setDisplayName(user.displayName || user.username || '');
       setUsername(user.username || '');
+      setPhone(user.phone || user.phoneNumber || '');
       setBio(user.bio || '');
       setCurrentPassword('');
       setNewPassword('');
@@ -133,6 +136,8 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
         avatar: avatarUrl,
         displayName: displayName.trim() || username,
         username: username.trim().toLowerCase(),
+        phone: phone.trim(),
+        phoneNumber: phone.trim(),
         bio: bio.trim()
       });
 
@@ -394,6 +399,28 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
                 />
               </div>
 
+              {/* Phone / WhatsApp Input */}
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1.5">
+                  Nomor Telepon / WhatsApp
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                    <Phone className="w-3.5 h-3.5" />
+                  </div>
+                  <input
+                    type="tel"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="misal: 081234567890"
+                    className="w-full pl-9 pr-4 py-2.5 bg-[#0e0e14] border border-[#2d2d40] rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#ff5b14]"
+                  />
+                </div>
+                <p className="text-[10px] text-slate-500 mt-1">
+                  Digunakan untuk konfirmasi aktivasi paket pembaca atau perpanjangan durasi VIP.
+                </p>
+              </div>
+
               {/* Bio Input */}
               <div>
                 <label className="block text-xs font-bold text-slate-300 mb-1.5">
@@ -559,6 +586,13 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
                   <span className="text-slate-400">Akun Google Terhubung</span>
                   <span className="font-mono text-slate-200 truncate max-w-[200px]">
                     {user.email || googleUser?.email || 'Belum terhubung email'}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between pb-2.5 border-b border-[#1f1f2e]">
+                  <span className="text-slate-400">Nomor Telepon / WhatsApp</span>
+                  <span className="font-mono text-slate-200">
+                    {user.phone || user.phoneNumber || 'Belum diisi'}
                   </span>
                 </div>
 

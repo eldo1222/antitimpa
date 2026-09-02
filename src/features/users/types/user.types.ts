@@ -26,6 +26,8 @@ export interface User {
   durationType?: DurationType;
   failedAttempts?: number;
   avatar?: string;
+  phone?: string;
+  phoneNumber?: string;
   tier?: 'Free Tier' | 'Pro Member' | 'Premium';
   isVip?: boolean;
   bio?: string;

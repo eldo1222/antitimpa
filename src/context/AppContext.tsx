@@ -176,6 +176,8 @@ interface AppContextType {
     username: string; 
     password: string; 
     durationType: DurationType; 
+    phone?: string;
+    phoneNumber?: string;
     tier?: 'Free Tier' | 'Pro Member' | 'Premium';
     planType?: PlanType;
     accessType?: AccessType;
@@ -183,7 +185,7 @@ interface AppContextType {
     priceNote?: string;
   }) => { success: boolean; message: string };
   updateUser: (id: string, updates: Partial<User>) => void;
-  updateUserProfile: (userId: string, updates: { avatar?: string; displayName?: string; bio?: string; username?: string; password?: string }) => Promise<{ success: boolean; message: string }> | void;
+  updateUserProfile: (userId: string, updates: { avatar?: string; displayName?: string; bio?: string; username?: string; password?: string; phone?: string; phoneNumber?: string }) => Promise<{ success: boolean; message: string }> | void;
   unlockUser: (id: string) => void;
   unlockAllUsers: () => { count: number };
   toggleUserStatus: (id: string) => void;
@@ -2586,6 +2588,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     username: string; 
     password: string; 
     durationType: DurationType; 
+    phone?: string;
+    phoneNumber?: string;
     tier?: 'Free Tier' | 'Pro Member' | 'Premium';
     planType?: PlanType;
     accessType?: AccessType;
@@ -2616,6 +2620,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       id: `user-${Date.now()}`,
       username: cleanUsername,
       passwordHash: userData.password,
+      phone: userData.phone || userData.phoneNumber || '',
+      phoneNumber: userData.phone || userData.phoneNumber || '',
       role: 'reader',
       status: 'active',
       createdAt: new Date().toISOString(),
@@ -2700,7 +2706,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const updateUserProfile = async (
     userId: string, 
-    updates: { avatar?: string; displayName?: string; bio?: string; username?: string; password?: string }
+    updates: { avatar?: string; displayName?: string; bio?: string; username?: string; password?: string; phone?: string; phoneNumber?: string }
   ): Promise<{ success: boolean; message: string }> => {
     const target = users.find(u => u.id === userId) || (currentUser?.id === userId ? currentUser : null);
     if (!target) {
@@ -2726,6 +2732,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     if (updates.avatar !== undefined) modified.avatar = updates.avatar;
     if (updates.avatar !== undefined) modified.photoURL = updates.avatar;
     if (updates.displayName !== undefined) modified.displayName = updates.displayName;
+    if (updates.phone !== undefined) {
+      modified.phone = updates.phone;
+      modified.phoneNumber = updates.phone;
+    }
+    if (updates.phoneNumber !== undefined) {
+      modified.phone = updates.phoneNumber;
+      modified.phoneNumber = updates.phoneNumber;
+    }
     if (updates.bio !== undefined) modified.bio = updates.bio;
     if (updates.username !== undefined) modified.username = updates.username.trim().toLowerCase();
     if (updates.password) modified.passwordHash = hashPassword(updates.password);

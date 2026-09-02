@@ -123,13 +123,24 @@ CREATE INDEX IF NOT EXISTS idx_chapters_comic_number ON public.chapters(comic_id
 CREATE TABLE IF NOT EXISTS public.users (
     id TEXT PRIMARY KEY,
     username TEXT NOT NULL UNIQUE,
+    display_name TEXT,
     email TEXT,
+    phone TEXT,
+    phone_number TEXT,
+    bio TEXT,
     password_hash TEXT,
     role TEXT DEFAULT 'user',
     package_type TEXT DEFAULT 'free',
     package_expiry TIMESTAMPTZ,
     coins INT DEFAULT 0,
     avatar TEXT,
+    duration_type TEXT DEFAULT 'unlimited',
+    allowed_comic_ids JSONB DEFAULT '[]'::jsonb,
+    price_note TEXT,
+    expires_at TIMESTAMPTZ,
+    first_login_at TIMESTAMPTZ,
+    failed_attempts INT DEFAULT 0,
+    status TEXT DEFAULT 'active',
     bookmarks JSONB DEFAULT '[]'::jsonb,
     history JSONB DEFAULT '[]'::jsonb,
     is_active BOOLEAN DEFAULT TRUE,
@@ -140,13 +151,24 @@ CREATE TABLE IF NOT EXISTS public.users (
 DO $$
 BEGIN
     ALTER TABLE public.users ADD COLUMN IF NOT EXISTS username TEXT;
+    ALTER TABLE public.users ADD COLUMN IF NOT EXISTS display_name TEXT;
     ALTER TABLE public.users ADD COLUMN IF NOT EXISTS email TEXT;
+    ALTER TABLE public.users ADD COLUMN IF NOT EXISTS phone TEXT;
+    ALTER TABLE public.users ADD COLUMN IF NOT EXISTS phone_number TEXT;
+    ALTER TABLE public.users ADD COLUMN IF NOT EXISTS bio TEXT;
     ALTER TABLE public.users ADD COLUMN IF NOT EXISTS password_hash TEXT;
     ALTER TABLE public.users ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'user';
     ALTER TABLE public.users ADD COLUMN IF NOT EXISTS package_type TEXT DEFAULT 'free';
     ALTER TABLE public.users ADD COLUMN IF NOT EXISTS package_expiry TIMESTAMPTZ;
     ALTER TABLE public.users ADD COLUMN IF NOT EXISTS coins INT DEFAULT 0;
     ALTER TABLE public.users ADD COLUMN IF NOT EXISTS avatar TEXT;
+    ALTER TABLE public.users ADD COLUMN IF NOT EXISTS duration_type TEXT DEFAULT 'unlimited';
+    ALTER TABLE public.users ADD COLUMN IF NOT EXISTS allowed_comic_ids JSONB DEFAULT '[]'::jsonb;
+    ALTER TABLE public.users ADD COLUMN IF NOT EXISTS price_note TEXT;
+    ALTER TABLE public.users ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
+    ALTER TABLE public.users ADD COLUMN IF NOT EXISTS first_login_at TIMESTAMPTZ;
+    ALTER TABLE public.users ADD COLUMN IF NOT EXISTS failed_attempts INT DEFAULT 0;
+    ALTER TABLE public.users ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active';
     ALTER TABLE public.users ADD COLUMN IF NOT EXISTS bookmarks JSONB DEFAULT '[]'::jsonb;
     ALTER TABLE public.users ADD COLUMN IF NOT EXISTS history JSONB DEFAULT '[]'::jsonb;
     ALTER TABLE public.users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;
@@ -276,11 +298,32 @@ CREATE TABLE IF NOT EXISTS public.system_settings (
     site_logo TEXT,
     site_favicon TEXT,
     announcement TEXT,
+    admin_phone TEXT DEFAULT '089514441988',
+    tiktok_url TEXT DEFAULT 'https://www.tiktok.com/@anti.timpa',
+    tiktok_handle TEXT DEFAULT '@anti.timpa',
+    watermark_text TEXT DEFAULT 'AntiTimpa Digital Reader',
+    max_failed_attempts INT DEFAULT 3,
+    guest_preview_pages INT DEFAULT 2,
+    allow_guest_preview BOOLEAN DEFAULT TRUE,
     enable_comments BOOLEAN DEFAULT TRUE,
     enable_18plus BOOLEAN DEFAULT TRUE,
     maintenance_mode BOOLEAN DEFAULT FALSE,
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+DO $$
+BEGIN
+    ALTER TABLE public.system_settings ADD COLUMN IF NOT EXISTS admin_phone TEXT DEFAULT '089514441988';
+    ALTER TABLE public.system_settings ADD COLUMN IF NOT EXISTS tiktok_url TEXT DEFAULT 'https://www.tiktok.com/@anti.timpa';
+    ALTER TABLE public.system_settings ADD COLUMN IF NOT EXISTS tiktok_handle TEXT DEFAULT '@anti.timpa';
+    ALTER TABLE public.system_settings ADD COLUMN IF NOT EXISTS watermark_text TEXT DEFAULT 'AntiTimpa Digital Reader';
+    ALTER TABLE public.system_settings ADD COLUMN IF NOT EXISTS max_failed_attempts INT DEFAULT 3;
+    ALTER TABLE public.system_settings ADD COLUMN IF NOT EXISTS guest_preview_pages INT DEFAULT 2;
+    ALTER TABLE public.system_settings ADD COLUMN IF NOT EXISTS allow_guest_preview BOOLEAN DEFAULT TRUE;
+    ALTER TABLE public.system_settings ADD COLUMN IF NOT EXISTS enable_comments BOOLEAN DEFAULT TRUE;
+    ALTER TABLE public.system_settings ADD COLUMN IF NOT EXISTS enable_18plus BOOLEAN DEFAULT TRUE;
+    ALTER TABLE public.system_settings ADD COLUMN IF NOT EXISTS maintenance_mode BOOLEAN DEFAULT FALSE;
+END $$;
 
 -- Seed default system settings singleton if empty
 INSERT INTO public.system_settings (id, site_name, site_tagline, enable_comments, enable_18plus, updated_at)

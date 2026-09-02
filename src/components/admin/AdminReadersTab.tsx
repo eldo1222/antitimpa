@@ -21,7 +21,9 @@ import {
   Tag,
   Flame,
   Shield,
-  Edit3
+  Edit3,
+  Phone,
+  MessageCircle
 } from 'lucide-react';
 
 export const AdminReadersTab: React.FC = () => {
@@ -40,6 +42,7 @@ export const AdminReadersTab: React.FC = () => {
   // New User Form State
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [phone, setPhone] = useState('');
   const [selectedPlanPreset, setSelectedPlanPreset] = useState<'15k' | '5k' | 'custom'>('15k');
   const [durationType, setDurationType] = useState<DurationType>('1_day');
   const [selectedSingleComicId, setSelectedSingleComicId] = useState<string>(comics[0]?.id || '');
@@ -54,6 +57,7 @@ export const AdminReadersTab: React.FC = () => {
   const [editDurationType, setEditDurationType] = useState<DurationType>('1_day');
   const [editAllowedComicIds, setEditAllowedComicIds] = useState<string[]>([]);
   const [editPriceNote, setEditPriceNote] = useState('');
+  const [editPhone, setEditPhone] = useState('');
 
   const readerUsers = users.filter(u => u.role !== 'admin');
 
@@ -88,6 +92,7 @@ export const AdminReadersTab: React.FC = () => {
   const openAddModal = () => {
     setUsername('');
     setPassword('');
+    setPhone('');
     setSelectedPlanPreset('15k');
     setDurationType('1_day');
     setSelectedSingleComicId(comics[0]?.id || '');
@@ -147,6 +152,8 @@ export const AdminReadersTab: React.FC = () => {
     const res = addUser({
       username,
       password,
+      phone: phone.trim(),
+      phoneNumber: phone.trim(),
       durationType,
       tier: planType === 'plan_15k_all' ? 'Premium' : 'Pro Member',
       planType,
@@ -161,6 +168,7 @@ export const AdminReadersTab: React.FC = () => {
         setShowAddModal(false);
         setUsername('');
         setPassword('');
+        setPhone('');
         setCreateSuccess(null);
       }, 700);
     } else {
@@ -175,6 +183,7 @@ export const AdminReadersTab: React.FC = () => {
     setEditDurationType(user.durationType || '1_day');
     setEditAllowedComicIds(user.allowedComicIds || []);
     setEditPriceNote(user.priceNote || '');
+    setEditPhone(user.phone || user.phoneNumber || '');
   };
 
   const handleSavePermissions = (e: React.FormEvent) => {
@@ -199,6 +208,8 @@ export const AdminReadersTab: React.FC = () => {
       accessType: finalAccessType,
       durationType: editDurationType,
       allowedComicIds: finalAllowedIds,
+      phone: editPhone.trim(),
+      phoneNumber: editPhone.trim(),
       priceNote: editPriceNote || (editPlanType === 'plan_15k_all' ? 'Rp 15.000 / All Access' : 'Rp 5.000 / 1 Judul')
     });
 
@@ -427,7 +438,21 @@ export const AdminReadersTab: React.FC = () => {
                           <img src={u.avatar} alt={u.username} className="w-8 h-8 rounded-xl object-cover ring-1 ring-white/10" />
                           <div>
                             <span className="font-bold text-white text-xs block">{u.username}</span>
-                            <span className="text-[10px] text-slate-400">{u.bio || 'Reader Member'}</span>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="text-[10px] text-slate-400">{u.bio || 'Reader Member'}</span>
+                              {(u.phone || u.phoneNumber) && (
+                                <a
+                                  href={`https://wa.me/${(u.phone || u.phoneNumber || '').replace(/^0/, '62').replace(/[^0-9]/g, '')}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="inline-flex items-center gap-0.5 px-1.5 py-0.2 text-[9px] font-bold text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 rounded"
+                                  title="Buka Chat WhatsApp"
+                                >
+                                  <Phone className="w-2.5 h-2.5" />
+                                  <span>{u.phone || u.phoneNumber}</span>
+                                </a>
+                              )}
+                            </div>
                           </div>
                         </div>
                       </td>
@@ -592,7 +617,7 @@ export const AdminReadersTab: React.FC = () => {
 
             <form onSubmit={handleCreateUser} className="space-y-4 text-xs">
               {/* Account Credentials */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="block text-slate-300 mb-1 font-bold">Username Pembaca</label>
                   <input
@@ -614,6 +639,17 @@ export const AdminReadersTab: React.FC = () => {
                     placeholder="Minimal 6 karakter"
                     className="w-full p-2.5 bg-[#181824] border border-[#27273a] rounded-xl text-white focus:outline-none focus:border-[#ff5b14]"
                     required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 mb-1 font-bold">No. WhatsApp / HP</label>
+                  <input
+                    type="tel"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="misal: 081234567890"
+                    className="w-full p-2.5 bg-[#181824] border border-[#27273a] rounded-xl text-white focus:outline-none focus:border-[#ff5b14]"
                   />
                 </div>
               </div>
@@ -853,6 +889,23 @@ export const AdminReadersTab: React.FC = () => {
                     onChange={(e) => setEditPriceNote(e.target.value)}
                     placeholder="misal: Rp 15.000 / 1 Hari"
                     className="w-full p-2.5 bg-[#181824] border border-[#27273a] rounded-xl text-white"
+                  />
+                </div>
+              </div>
+
+              {/* Reader Phone Number */}
+              <div>
+                <label className="block text-slate-300 mb-1 font-bold">Nomor Telepon / WhatsApp Pembaca</label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                    <Phone className="w-3.5 h-3.5" />
+                  </div>
+                  <input
+                    type="tel"
+                    value={editPhone}
+                    onChange={(e) => setEditPhone(e.target.value)}
+                    placeholder="misal: 081234567890"
+                    className="w-full pl-9 pr-3 py-2.5 bg-[#181824] border border-[#27273a] rounded-xl text-white focus:outline-none focus:border-[#ff5b14]"
                   />
                 </div>
               </div>
