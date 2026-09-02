@@ -6,6 +6,8 @@ import {
   searchKomikcast,
   getKomikcastDetail,
   searchDoujindesu,
+  searchKomiktap,
+  fetchKomiktapDetail,
   DOUJINDESU_SCRAPE_FEEDS,
   PRESET_SCRAPE_FEEDS, 
   buildComicFromScrape, 
@@ -52,7 +54,7 @@ import { AdminDiagnosticModal } from './AdminDiagnosticModal';
 export const AdminScraperTab: React.FC = () => {
   const { comics, chapters, injectComicWithChapters, batchInjectComicsWithChapters, driveAccounts, addActivityLog } = useApp();
 
-  const [activeSource, setActiveSource] = useState<'komikcast' | 'mangadex' | 'jikan' | 'presets' | 'pdf_converter' | 'custom'>('komikcast');
+  const [activeSource, setActiveSource] = useState<'komikcast' | 'mangadex' | 'komiktap' | 'jikan' | 'presets' | 'pdf_converter' | 'custom'>('komikcast');
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [searchResults, setSearchResults] = useState<ScrapedComicResult[]>([]);
@@ -64,6 +66,11 @@ export const AdminScraperTab: React.FC = () => {
   // Komikcast filters
   const [komikcastCategoryFilter, setKomikcastCategoryFilter] = useState<'all' | 'manga' | 'manhwa' | 'manhua' | 'doujin' | '18plus'>('all');
   const [komikcastOrder, setKomikcastOrder] = useState<'popular' | 'latest' | 'update'>('popular');
+
+  // Komiktap filters & direct URL scraper input
+  const [komiktapCategoryFilter, setKomiktapCategoryFilter] = useState<'all' | 'manhwa' | 'manga' | 'manhua'>('all');
+  const [komiktapDirectInput, setKomiktapDirectInput] = useState('');
+  const [isDirectImporting, setIsDirectImporting] = useState(false);
 
   // MangaDex, Doujindesu & Preset filters
   const [mangadexCategoryFilter, setMangadexCategoryFilter] = useState<'all' | '18plus' | 'manhwa' | 'manga' | 'manhua'>('all');
@@ -387,7 +394,90 @@ export const AdminScraperTab: React.FC = () => {
     }
   };
 
-  // 4. Import single scraped item (fetches full Komikcast details if from Komikcast)
+  // 4. Komiktap (Komiktap.info) Search
+  const handleSearchKomiktap = async (
+    e?: React.FormEvent,
+    customQ?: string,
+    overrideCategory?: 'all' | 'manhwa' | 'manga' | 'manhua',
+    pageToUse: number = 1
+  ) => {
+    if (e) e.preventDefault();
+    const queryToSearch = customQ !== undefined ? customQ : searchQuery;
+    const catToUse = overrideCategory !== undefined ? overrideCategory : komiktapCategoryFilter;
+
+    setIsSearching(true);
+    setErrorMsg('');
+    try {
+      const results = await searchKomiktap(queryToSearch.trim(), catToUse, pageToUse);
+      if (results && results.length > 0) {
+        setSearchResults(results);
+        setHasSearched(true);
+      } else {
+        // Fallback to preset feeds so admin always has quality titles to choose from
+        setSearchResults(DOUJINDESU_SCRAPE_FEEDS);
+        setHasSearched(true);
+        if (queryToSearch) {
+          setErrorMsg(`Tidak ditemukan hasil langsung di Komiktap untuk "${queryToSearch}". Menampilkan katalog rekomendasi.`);
+        }
+      }
+    } catch (err) {
+      console.error(err);
+      setErrorMsg('Gagal menarik data dari Komiktap.');
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  // Direct Komiktap.info URL / Slug Scraper
+  const handleDirectKomiktapImport = async () => {
+    if (!komiktapDirectInput.trim()) return;
+    setIsDirectImporting(true);
+    setErrorMsg('');
+    const inputVal = komiktapDirectInput.trim();
+    setBatchStatus(`⏳ Menghubungi Komiktap.info untuk "${inputVal}"...`);
+
+    try {
+      const detail = await fetchKomiktapDetail(inputVal);
+      if (!detail) {
+        setErrorMsg('Gagal menemukan data di Komiktap.info. Pastikan slug atau tautan valid (contoh: irodori-kazoku)');
+        setBatchStatus(null);
+        return;
+      }
+
+      const scrapedItem: ScrapedComicResult = {
+        title: detail.title,
+        slug: detail.slug,
+        coverImage: detail.coverImage,
+        bannerImage: detail.coverImage,
+        synopsis: detail.synopsis || `Komik ${detail.title} dari Komiktap.info`,
+        genres: detail.genres && detail.genres.length > 0 ? detail.genres : ['Manhwa 18+', 'Doujin', 'Dewasa'],
+        status: detail.status || 'ongoing',
+        storyWriter: detail.storyWriter || 'Komiktap Creator',
+        artist: detail.artist || 'Komiktap Artist',
+        rating: detail.rating || 4.9,
+        totalChapters: detail.chapters?.length || 0,
+        contentType: '18plus',
+        comicType: detail.comicType || 'manhwa',
+        isFree: defaultIsFree,
+        isVisibleOnHome: defaultIsVisibleOnHome,
+        isPublished: true,
+        sourceApi: 'Komiktap API (Komiktap.info)',
+        sourceUrl: detail.url || `https://komiktap.info/manga/${detail.slug}/`,
+        chapters: detail.chapters || []
+      };
+
+      await handleImportSingle(scrapedItem);
+      setKomiktapDirectInput('');
+    } catch (err: any) {
+      console.error(err);
+      setErrorMsg('Terjadi kesalahan saat menarik dari Komiktap: ' + (err.message || ''));
+      setBatchStatus(null);
+    } finally {
+      setIsDirectImporting(false);
+    }
+  };
+
+  // 5. Import single scraped item (fetches full details if from Komikcast or Komiktap)
   const handleImportSingle = async (item: ScrapedComicResult, overrideOptions?: { isVisibleOnHome?: boolean; contentType?: ComicContentType; comicType?: ComicCategoryType }) => {
     let itemToUse = item;
 
@@ -400,6 +490,30 @@ export const AdminScraperTab: React.FC = () => {
         }
       } catch (e) {
         console.warn('Failed to load full Komikcast details, using basic item:', e);
+      }
+    }
+
+    // If Komiktap, fetch full detail & chapters from Komiktap scraper
+    if ((item.sourceApi?.includes('Komiktap') || item.sourceUrl?.includes('komiktap.info')) && (item.slug || item.sourceUrl)) {
+      try {
+        setBatchStatus(`⏳ Mengambil struktur chapter lengkap Komiktap untuk "${item.title}"...`);
+        const ktDetail = await fetchKomiktapDetail(item.slug || item.sourceUrl || '');
+        if (ktDetail) {
+          itemToUse = {
+            ...itemToUse,
+            title: ktDetail.title || itemToUse.title,
+            slug: ktDetail.slug || itemToUse.slug,
+            coverImage: ktDetail.coverImage || itemToUse.coverImage,
+            synopsis: ktDetail.synopsis || itemToUse.synopsis,
+            chapters: ktDetail.chapters || itemToUse.chapters || [],
+            genres: ktDetail.genres && ktDetail.genres.length > 0 ? ktDetail.genres : itemToUse.genres,
+            sourceUrl: ktDetail.url || itemToUse.sourceUrl,
+            comicType: ktDetail.comicType || itemToUse.comicType,
+            contentType: '18plus'
+          };
+        }
+      } catch (e) {
+        console.warn('Failed to load full Komiktap details:', e);
       }
     }
 
@@ -1069,19 +1183,19 @@ export const AdminScraperTab: React.FC = () => {
 
         <button
           onClick={() => {
-            setActiveSource('presets');
+            setActiveSource('komiktap');
             if (searchResults.length === 0) {
-              setSearchResults(DOUJINDESU_SCRAPE_FEEDS);
+              handleSearchKomiktap(undefined, '', 'all');
             }
           }}
           className={`pb-2.5 px-3.5 font-bold transition-all border-b-2 flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
-            activeSource === 'presets'
+            activeSource === 'komiktap' || activeSource === 'presets'
               ? 'border-[#ff5b14] text-white bg-white/5 rounded-t-lg'
               : 'border-transparent text-slate-400 hover:text-slate-200'
           }`}
         >
           <Sparkles className="w-3.5 h-3.5 text-rose-400" />
-          <span>API Doujindesu (18+ &amp; Doujin)</span>
+          <span>Komiktap.info (18+ &amp; Manhwa)</span>
         </button>
 
         <button
@@ -1561,72 +1675,151 @@ export const AdminScraperTab: React.FC = () => {
       )}
 
       {/* ============================================================ */}
-      {/* TAB 3: API DOUJINDESU & 18+ VIP SCRAPER                      */}
+      {/* TAB 3: KOMIKTAP.INFO (18+ & MANHWA) REAL SCRAPER             */}
       {/* ============================================================ */}
-      {activeSource === 'presets' && (
+      {(activeSource === 'komiktap' || activeSource === 'presets') && (
         <div className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-2 bg-[#11111a] p-3 rounded-2xl border border-[#202030]">
-            <div className="flex flex-wrap items-center gap-1.5 text-xs">
-              <span className="text-slate-400 font-bold mr-1 text-xs">Filter Doujindesu:</span>
+          {/* Direct URL / Slug Quick Importer */}
+          <div className="p-4 bg-gradient-to-r from-[#171120] to-[#12121c] border border-rose-500/30 rounded-2xl shadow-lg">
+            <div className="flex items-center gap-2 mb-2">
+              <Sparkles className="w-4 h-4 text-rose-400" />
+              <h3 className="font-extrabold text-white text-sm">Tarik Langsung via URL / Slug Komiktap.info</h3>
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                Gambar &amp; Chapter Asli
+              </span>
+            </div>
+            <p className="text-xs text-slate-400 mb-3">
+              Mendukung ekstraksi komik lengkap beserta seluruh chapter dan gambar scanlation aslinya (contoh: <code className="text-rose-300 bg-rose-950/40 px-1 py-0.5 rounded">irodori-kazoku</code> atau <code className="text-rose-300 bg-rose-950/40 px-1 py-0.5 rounded">https://komiktap.info/manga/irodori-kazoku/</code>).
+            </p>
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <input
+                  type="text"
+                  value={komiktapDirectInput}
+                  onChange={(e) => setKomiktapDirectInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleDirectKomiktapImport(); }}
+                  placeholder="Masukkan slug atau link Komiktap (contoh: irodori-kazoku)..."
+                  className="w-full px-4 py-2.5 bg-[#0e0e16] border border-[#262638] rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-rose-500"
+                />
+              </div>
               <button
-                onClick={() => setPresetCategoryFilter('all')}
-                className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-all cursor-pointer ${
-                  presetCategoryFilter === 'all'
-                    ? 'bg-[#ff5b14] text-white shadow-sm'
-                    : 'bg-[#181824] text-slate-400 hover:text-slate-200 border border-[#262638]'
-                }`}
+                type="button"
+                onClick={handleDirectKomiktapImport}
+                disabled={isDirectImporting || !komiktapDirectInput.trim()}
+                className="px-4 py-2.5 bg-gradient-to-r from-rose-600 to-[#ff5b14] hover:from-rose-500 hover:to-[#ff6d2e] disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow flex items-center gap-1.5 cursor-pointer transition-all whitespace-nowrap"
               >
-                🔞 Semua 18+ ({DOUJINDESU_SCRAPE_FEEDS.length})
-              </button>
-
-              <button
-                onClick={() => setPresetCategoryFilter('18plus')}
-                className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-all cursor-pointer ${
-                  presetCategoryFilter === '18plus'
-                    ? 'bg-rose-600 text-white shadow-sm'
-                    : 'bg-[#181824] text-slate-400 hover:text-slate-200 border border-[#262638]'
-                }`}
-              >
-                🔥 Netorare / NTR &amp; VIP
-              </button>
-
-              <button
-                onClick={() => setPresetCategoryFilter('manhwa')}
-                className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-all cursor-pointer ${
-                  presetCategoryFilter === 'manhwa'
-                    ? 'bg-emerald-600 text-white shadow-sm'
-                    : 'bg-[#181824] text-slate-400 hover:text-slate-200 border border-[#262638]'
-                }`}
-              >
-                👠 MILF / Noona
-              </button>
-
-              <button
-                onClick={() => setPresetCategoryFilter('manga')}
-                className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-all cursor-pointer ${
-                  presetCategoryFilter === 'manga'
-                    ? 'bg-indigo-600 text-white shadow-sm'
-                    : 'bg-[#181824] text-slate-400 hover:text-slate-200 border border-[#262638]'
-                }`}
-              >
-                👑 Harem 18+
-              </button>
-
-              <button
-                onClick={() => setPresetCategoryFilter('manhua')}
-                className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-all cursor-pointer ${
-                  presetCategoryFilter === 'manhua'
-                    ? 'bg-amber-600 text-white shadow-sm'
-                    : 'bg-[#181824] text-slate-400 hover:text-slate-200 border border-[#262638]'
-                }`}
-              >
-                🌸 Doujinshi Lengkap
+                {isDirectImporting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                <span>Tarik Komik &amp; Chapter</span>
               </button>
             </div>
           </div>
 
+          {/* Search Form */}
+          <form onSubmit={handleSearchKomiktap} className="flex gap-2">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Cari judul komik di Komiktap.info (contoh: Irodori Kazoku, Silent War, Stepmother Friends)..."
+                className="w-full pl-10 pr-4 py-2.5 bg-[#11111a] border border-[#222234] rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#ff5b14]"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={isSearching}
+              className="px-4 py-2.5 bg-[#ff5b14] hover:bg-[#e04e0e] disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow flex items-center gap-1.5 cursor-pointer transition-all whitespace-nowrap"
+            >
+              {isSearching ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+              <span>Cari Komiktap</span>
+            </button>
+          </form>
+
+          {/* Category Filter Pills */}
+          <div className="flex flex-wrap items-center justify-between gap-2 bg-[#11111a] p-3 rounded-2xl border border-[#202030]">
+            <div className="flex flex-wrap items-center gap-1.5 text-xs">
+              <span className="text-slate-400 font-bold mr-1 text-xs">Kategori Komiktap:</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setKomiktapCategoryFilter('all');
+                  handleSearchKomiktap(undefined, searchQuery, 'all');
+                }}
+                className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-all cursor-pointer ${
+                  komiktapCategoryFilter === 'all'
+                    ? 'bg-[#ff5b14] text-white shadow-sm'
+                    : 'bg-[#181824] text-slate-400 hover:text-slate-200 border border-[#262638]'
+                }`}
+              >
+                🔞 Semua 18+
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setKomiktapCategoryFilter('manhwa');
+                  handleSearchKomiktap(undefined, searchQuery, 'manhwa');
+                }}
+                className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-all cursor-pointer ${
+                  komiktapCategoryFilter === 'manhwa'
+                    ? 'bg-rose-600 text-white shadow-sm'
+                    : 'bg-[#181824] text-slate-400 hover:text-slate-200 border border-[#262638]'
+                }`}
+              >
+                🔥 Manhwa 18+
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setKomiktapCategoryFilter('manga');
+                  handleSearchKomiktap(undefined, searchQuery, 'manga');
+                }}
+                className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-all cursor-pointer ${
+                  komiktapCategoryFilter === 'manga'
+                    ? 'bg-indigo-600 text-white shadow-sm'
+                    : 'bg-[#181824] text-slate-400 hover:text-slate-200 border border-[#262638]'
+                }`}
+              >
+                👑 Manga 18+
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setKomiktapCategoryFilter('manhua');
+                  handleSearchKomiktap(undefined, searchQuery, 'manhua');
+                }}
+                className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-all cursor-pointer ${
+                  komiktapCategoryFilter === 'manhua'
+                    ? 'bg-amber-600 text-white shadow-sm'
+                    : 'bg-[#181824] text-slate-400 hover:text-slate-200 border border-[#262638]'
+                }`}
+              >
+                🌸 Manhua 18+
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => handleSearchKomiktap(undefined, '', 'all')}
+              className="text-[11px] font-bold text-slate-400 hover:text-white flex items-center gap-1 cursor-pointer"
+            >
+              <RefreshCw className="w-3.5 h-3.5" /> Muat Ulang Katalog
+            </button>
+          </div>
+
+          {errorMsg && (
+            <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-300 flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{errorMsg}</span>
+            </div>
+          )}
+
+          {/* Results Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {DOUJINDESU_SCRAPE_FEEDS.map((item, idx) => {
+            {(searchResults.length > 0 ? searchResults : DOUJINDESU_SCRAPE_FEEDS).map((item, idx) => {
               const isImported = importedSlugs[item.slug || item.title] || comics.some(c => c.title.toLowerCase() === item.title.toLowerCase());
 
               return (
@@ -1646,32 +1839,36 @@ export const AdminScraperTab: React.FC = () => {
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5 mb-1 flex-wrap">
-                        <span className={`px-2 py-0.5 rounded-md text-[9px] font-extrabold border ${
-                          item.contentType === '18plus'
-                            ? 'bg-rose-500/15 text-rose-300 border-rose-500/30'
-                            : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
-                        }`}>
-                          {item.contentType === '18plus' ? '🔞 18+ VIP' : (item.comicType || 'manga').toUpperCase()}
+                        <span className="px-2 py-0.5 rounded-md text-[9px] font-extrabold border bg-rose-500/15 text-rose-300 border-rose-500/30">
+                          🔞 18+ VIP
+                        </span>
+                        <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-white/5 text-slate-300 border border-white/10">
+                          {(item.comicType || 'manhwa').toUpperCase()}
                         </span>
                         <span className="text-[10px] text-slate-400">{(item.status || 'ongoing').toUpperCase()}</span>
                       </div>
                       <h4 className="font-bold text-sm text-white line-clamp-1 leading-snug">{item.title}</h4>
                       <p className="text-[11px] text-slate-400 line-clamp-2 mt-1 leading-relaxed">{item.synopsis}</p>
+                      {item.sourceUrl && (
+                        <p className="text-[10px] text-rose-400/80 truncate mt-1 font-mono">
+                          {item.sourceUrl.replace('https://', '')}
+                        </p>
+                      )}
                     </div>
                   </div>
 
                   <div className="flex items-center justify-between pt-3 mt-3 border-t border-[#1b1b2a] text-xs">
-                    <span className="text-[10px] text-slate-500 font-mono">{item.sourceApi}</span>
+                    <span className="text-[10px] text-slate-500 font-mono">Komiktap.info</span>
                     {isImported ? (
                       <span className="px-3 py-1 bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 rounded-xl text-xs font-bold flex items-center gap-1">
-                        <CheckCircle2 className="w-3.5 h-3.5" /> Sudah Ada
+                        <CheckCircle2 className="w-3.5 h-3.5" /> Sudah Ada di Web
                       </span>
                     ) : (
                       <button
                         onClick={() => handleImportSingle(item)}
-                        className="px-3 py-1.5 bg-[#ff5b14] hover:bg-[#e04e0e] text-white rounded-xl font-bold text-xs flex items-center gap-1 cursor-pointer"
+                        className="px-3.5 py-1.5 bg-gradient-to-r from-rose-600 to-[#ff5b14] hover:from-rose-500 hover:to-[#ff6d2e] text-white rounded-xl font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-md transition-all"
                       >
-                        <Download className="w-3.5 h-3.5" /> Tarik ke Web
+                        <Download className="w-3.5 h-3.5" /> Tarik Komik &amp; Gambar
                       </button>
                     )}
                   </div>

@@ -1073,6 +1073,146 @@ export const DOUJINDESU_SCRAPE_FEEDS: ScrapedComicResult[] = PRESET_IMPORT_FEEDS
 
 export const PRESET_SCRAPE_FEEDS = DOUJINDESU_SCRAPE_FEEDS;
 
+// ============================================================================
+// KOMIKTAP SCRAPER & DATA EXTRACTOR (Komiktap.info)
+// Scrapes comic metadata, chapters, and chapter pages directly
+// ============================================================================
+
+export async function searchKomiktap(
+  query: string = '',
+  category: string = 'all',
+  page: number = 1,
+  order: string = 'popular'
+): Promise<ScrapedComicResult[]> {
+  try {
+    const params = new URLSearchParams();
+    if (query) params.append('q', query);
+    if (category) params.append('category', category);
+    params.append('page', String(page));
+    params.append('order', order);
+
+    const res = await fetch(`/api/komiktap/search?${params.toString()}`);
+    if (res.ok) {
+      const json = await res.json();
+      if (json.data && Array.isArray(json.data)) {
+        return json.data.map((item: any) => ({
+          title: item.title,
+          slug: item.slug,
+          coverImage: item.coverImage,
+          bannerImage: item.coverImage,
+          synopsis: `Komik ${item.title} dari Komiktap.info. Tipe: ${item.comicType || 'Manhwa'}.`,
+          genres: ['Manhwa 18+', 'Doujin', 'Dewasa', 'Romance 18+'],
+          status: 'ongoing' as const,
+          storyWriter: 'Komiktap Creator',
+          artist: 'Komiktap Artist',
+          rating: item.rating || 4.9,
+          totalChapters: 10,
+          contentType: '18plus' as const,
+          comicType: item.comicType || 'manhwa',
+          isFree: false,
+          isVisibleOnHome: true,
+          isPublished: true,
+          sourceApi: 'Komiktap API (Komiktap.info)',
+          sourceUrl: item.url || `https://komiktap.info/manga/${item.slug}/`
+        }));
+      }
+    }
+  } catch (e) {
+    console.warn('Komiktap search error via Express proxy:', e);
+  }
+
+  // Fallback to serverless route /api/komiktap-proxy
+  try {
+    const params = new URLSearchParams({ action: 'search' });
+    if (query) params.append('q', query);
+    if (category) params.append('category', category);
+    params.append('page', String(page));
+    params.append('order', order);
+
+    const res = await fetch(`/api/komiktap-proxy?${params.toString()}`);
+    if (res.ok) {
+      const json = await res.json();
+      if (json.data && Array.isArray(json.data)) {
+        return json.data.map((item: any) => ({
+          title: item.title,
+          slug: item.slug,
+          coverImage: item.coverImage,
+          bannerImage: item.coverImage,
+          synopsis: `Komik ${item.title} dari Komiktap.info. Tipe: ${item.comicType || 'Manhwa'}.`,
+          genres: ['Manhwa 18+', 'Doujin', 'Dewasa', 'Romance 18+'],
+          status: 'ongoing' as const,
+          storyWriter: 'Komiktap Creator',
+          artist: 'Komiktap Artist',
+          rating: item.rating || 4.9,
+          totalChapters: 10,
+          contentType: '18plus' as const,
+          comicType: item.comicType || 'manhwa',
+          isFree: false,
+          isVisibleOnHome: true,
+          isPublished: true,
+          sourceApi: 'Komiktap API (Komiktap.info)',
+          sourceUrl: item.url || `https://komiktap.info/manga/${item.slug}/`
+        }));
+      }
+    }
+  } catch (e) {
+    console.warn('Komiktap search error via Serverless proxy:', e);
+  }
+
+  return [];
+}
+
+export async function fetchKomiktapDetail(slugOrUrl: string): Promise<any> {
+  const cleanSlug = slugOrUrl.startsWith('http')
+    ? (slugOrUrl.replace(/\/$/, '').split('/').pop() || '')
+    : slugOrUrl.replace(/^\/|\/$/g, '');
+
+  try {
+    const res = await fetch(`/api/komiktap/comic/${encodeURIComponent(cleanSlug)}`);
+    if (res.ok) {
+      const json = await res.json();
+      if (json.data) return json.data;
+    }
+  } catch (e) {}
+
+  try {
+    const res = await fetch(`/api/komiktap-proxy?action=detail&slug=${encodeURIComponent(cleanSlug)}`);
+    if (res.ok) {
+      const json = await res.json();
+      if (json.data) return json.data;
+    }
+  } catch (e) {}
+
+  return null;
+}
+
+export async function fetchKomiktapChapterPages(chapterUrlOrSlug: string): Promise<{
+  pages: Array<{ id: string; pageNumber: number; imageUrl: string; fallbackUrl: string; directUrl: string }>;
+  total: number;
+}> {
+  try {
+    const res = await fetch(`/api/komiktap/chapter?url=${encodeURIComponent(chapterUrlOrSlug)}`);
+    if (res.ok) {
+      const json = await res.json();
+      if (json.pages && Array.isArray(json.pages)) {
+        return json;
+      }
+    }
+  } catch (e) {}
+
+  try {
+    const res = await fetch(`/api/komiktap-proxy?action=chapter&url=${encodeURIComponent(chapterUrlOrSlug)}`);
+    if (res.ok) {
+      const json = await res.json();
+      if (json.pages && Array.isArray(json.pages)) {
+        return json;
+      }
+    }
+  } catch (e) {}
+
+  return { pages: [], total: 0 };
+}
+
 // Fetch real chapters from MangaDex API
 export async function fetchMangaDexChapters(mangaId: string): Promise<any[]> {
   // Attempt 1: Express Server API Proxy
@@ -1313,7 +1453,7 @@ export function buildComicFromScrape(
   return { comic, chapters };
 }
 
-// Asynchronous Builder that pulls real MangaDex chapters or auto-resolves Jikan/MAL manga titles
+// Asynchronous Builder that pulls real Komiktap/MangaDex chapters or auto-resolves Jikan/MAL manga titles
 export async function buildComicFromScrapeAsync(
   scraped: ScrapedComicResult,
   customSettings?: {
@@ -1325,6 +1465,78 @@ export async function buildComicFromScrapeAsync(
     primaryDriveAccountId?: string;
   }
 ): Promise<{ comic: Comic; chapters: Chapter[] }> {
+  // If source is Komiktap (Komiktap.info), pull complete detail and all real chapters!
+  if (scraped.sourceApi?.includes('Komiktap') || scraped.sourceUrl?.includes('komiktap.info')) {
+    try {
+      const detail = await fetchKomiktapDetail(scraped.slug || scraped.sourceUrl || '');
+      if (detail) {
+        const comicId = `comic-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+        const now = new Date().toISOString().split('T')[0];
+        const requestedContentType = customSettings?.contentType ?? '18plus';
+        const finalContentType: ComicContentType = requestedContentType === 'auto' ? '18plus' : requestedContentType;
+        const isFree = customSettings?.isFree ?? false;
+        const isVisibleOnHome = customSettings?.isVisibleOnHome ?? true;
+        const isPublished = customSettings?.isPublished ?? true;
+        const comicType = customSettings?.comicType ?? detail.comicType ?? 'manhwa';
+
+        const comic: Comic = {
+          id: comicId,
+          title: detail.title || scraped.title,
+          slug: detail.slug || scraped.slug || (detail.title || scraped.title).toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+          coverImage: detail.coverImage || scraped.coverImage || getFallbackCover(scraped.title, comicType),
+          bannerImage: detail.bannerImage || detail.coverImage || scraped.coverImage || getFallbackCover(scraped.title, comicType),
+          synopsis: detail.synopsis || scraped.synopsis || `Komik ${detail.title} dari Komiktap.info`,
+          genres: detail.genres && detail.genres.length > 0 ? detail.genres : ['Manhwa 18+', 'Doujin', 'Dewasa', 'Romance 18+'],
+          status: detail.status || 'ongoing',
+          storyWriter: detail.storyWriter || 'Komiktap Creator',
+          artist: detail.artist || 'Komiktap Artist',
+          rating: detail.rating || 4.9,
+          ratingCount: 0,
+          totalChapters: detail.chapters?.length || 0,
+          totalReaders: 0,
+          createdAt: now,
+          updatedAt: now,
+          isTrending: true,
+          isFeatured: isVisibleOnHome,
+          contentType: finalContentType,
+          comicType,
+          type: comicType,
+          isFree,
+          isVisibleOnHome,
+          showOnHome: isVisibleOnHome,
+          isPublished,
+          sourceApi: 'Komiktap API (Komiktap.info)',
+          sourceUrl: detail.url || scraped.sourceUrl || `https://komiktap.info/manga/${detail.slug}/`,
+          primaryDriveAccountId: customSettings?.primaryDriveAccountId
+        };
+
+        const chapters: Chapter[] = (detail.chapters || []).map((ch: any, idx: number) => {
+          const chNum = ch.chapterNumber || (idx + 1);
+          const chSlug = ch.url || ch.slug || `${detail.slug}-chapter-${chNum}`;
+          return {
+            id: `ch-${comicId}-${chNum}`,
+            comicId: comicId,
+            chapterNumber: chNum,
+            title: ch.title || `Chapter ${chNum}`,
+            slug: chSlug,
+            releaseDate: ch.releaseDate || now,
+            isNew: idx >= (detail.chapters?.length || 0) - 2,
+            isLocked: !isFree,
+            sourceType: 'images' as const,
+            pages: [],
+            viewsCount: 0,
+            externalUrl: ch.url || (chSlug.startsWith('http') ? chSlug : undefined),
+            driveUrl: chSlug
+          };
+        });
+
+        return { comic, chapters };
+      }
+    } catch (ktErr) {
+      console.warn('Komiktap async scrape detail error:', ktErr);
+    }
+  }
+
   let targetMangaDexId = scraped.mangaDexId;
 
   // Auto-resolver for Jikan / MyAnimeList & external items:
@@ -1416,6 +1628,7 @@ export async function buildComicFromScrapeAsync(
           comicId: comicId,
           chapterNumber: chNum,
           title: mdCh.title || `Chapter ${chNum}`,
+          slug: mdCh.id, // Preserved for database sync
           releaseDate: mdCh.releaseDate || now,
           isNew: idx >= selectedMdChapters.length - 2,
           isLocked: !isFree,

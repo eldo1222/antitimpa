@@ -17,6 +17,9 @@ export function mapChapterToDb(ch: Partial<Chapter> & { parentComicId?: string }
   }
   if (ch.chapterNumber !== undefined) row.chapter_number = Number(ch.chapterNumber) || 1;
   if (ch.title !== undefined) row.title = ch.title || `Chapter ${ch.chapterNumber || 1}`;
+  if (ch.slug !== undefined || ch.mangadexChapterId !== undefined || ch.driveUrl !== undefined || ch.externalUrl !== undefined) {
+    row.slug = ch.slug || ch.mangadexChapterId || ch.driveUrl || ch.externalUrl || null;
+  }
   if (ch.releaseDate !== undefined) row.release_date = ch.releaseDate;
   if (ch.isLocked !== undefined) row.is_locked = Boolean(ch.isLocked);
   if (ch.sourceType !== undefined) row.source_type = ch.sourceType || 'images';
@@ -31,11 +34,19 @@ export function mapChapterToDb(ch: Partial<Chapter> & { parentComicId?: string }
 }
 
 export function mapDbToChapter(row: Record<string, any>): Chapter {
+  const rawSlug = String(row.slug || '');
+  const rawId = String(row.id || '').replace(/^ch-/, '');
+  const isUuid = (val: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
+
+  const mdChapterId = isUuid(rawSlug) ? rawSlug : (isUuid(rawId) ? rawId : undefined);
+  const isUrl = rawSlug.startsWith('http://') || rawSlug.startsWith('https://');
+
   return {
     id: row.id,
     comicId: row.comic_id || '',
     chapterNumber: Number(row.chapter_number) || 1,
     title: row.title || '',
+    slug: row.slug || undefined,
     releaseDate: row.release_date || new Date().toISOString(),
     isLocked: Boolean(row.is_locked),
     sourceType: row.source_type || 'images',
@@ -43,6 +54,9 @@ export function mapDbToChapter(row: Record<string, any>): Chapter {
     driveFileId: row.drive_file_id || undefined,
     driveEmbedUrl: row.drive_embed_url || undefined,
     driveAccountId: row.drive_account_id || undefined,
+    driveUrl: (!mdChapterId && !isUrl) ? row.slug : undefined,
+    externalUrl: isUrl ? row.slug : undefined,
+    mangadexChapterId: mdChapterId,
     viewsCount: Number(row.views_count) || 0,
     createdAt: row.created_at || new Date().toISOString(),
     updatedAt: row.updated_at || new Date().toISOString(),

@@ -134,13 +134,53 @@ export const ComicReaderView: React.FC = () => {
 
   const sourceType = activeChapter?.sourceType || 'images';
 
-  // Live fetch real scanlation pages if chapter originates from MangaDex or Komikcast
+  // Live fetch real scanlation pages if chapter originates from MangaDex, Komiktap, or Komikcast
   useEffect(() => {
     if (!activeChapter) return;
     setLivePages(null);
 
+    // 1. KOMIKTAP DETECTION & FETCHING
+    const isKomiktap = (activeChapter.externalUrl && activeChapter.externalUrl.includes('komiktap.info')) ||
+      (activeChapter.slug && activeChapter.slug.includes('komiktap.info')) ||
+      (activeChapter.slug && activeChapter.slug.includes('-chapter-')) ||
+      (activeChapter.driveUrl && activeChapter.driveUrl.includes('komiktap.info')) ||
+      (activeChapter.driveUrl && activeChapter.driveUrl.includes('-chapter-')) ||
+      (activeComic?.sourceApi?.toLowerCase().includes('komiktap')) ||
+      (activeComic?.sourceUrl?.toLowerCase().includes('komiktap.info'));
+
+    if (isKomiktap) {
+      setIsLoadingPages(true);
+      const targetUrl = activeChapter.externalUrl || activeChapter.slug || activeChapter.driveUrl || '';
+      const fetchUrl = `/api/komiktap/chapter?url=${encodeURIComponent(targetUrl)}`;
+      const fallbackProxyUrl = `/api/komiktap-proxy?action=chapter&url=${encodeURIComponent(targetUrl)}`;
+
+      fetch(fetchUrl)
+        .then(async r => {
+          if (r.ok) return r.json();
+          const r2 = await fetch(fallbackProxyUrl);
+          return r2.json();
+        })
+        .then(data => {
+          if (data && data.pages && data.pages.length > 0) {
+            setLivePages(data.pages);
+          }
+        })
+        .catch(err => {
+          console.warn('Failed to load Komiktap pages:', err);
+        })
+        .finally(() => {
+          setIsLoadingPages(false);
+        });
+      return;
+    }
+
+    // 2. MANGADEX DETECTION & FETCHING
+    const rawSlug = String(activeChapter.slug || '');
+    const rawId = String(activeChapter.id || '').replace(/^ch-/, '');
+    const isUuid = (val: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
+
     const mdChapterId = activeChapter.mangadexChapterId || 
-      (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(activeChapter.id) ? activeChapter.id : null);
+      (isUuid(rawSlug) ? rawSlug : (isUuid(rawId) ? rawId : null));
 
     if (mdChapterId) {
       setIsLoadingPages(true);
@@ -187,11 +227,12 @@ export const ComicReaderView: React.FC = () => {
             if (hash && fileList.length > 0) {
               const mappedPages = fileList.map((filename: string, idx: number) => {
                 const directUrl = `${baseUrl}/data/${hash}/${filename}`;
+                const uploadsDirectUrl = `https://uploads.mangadex.org/data/${hash}/${filename}`;
                 return {
                   id: `p-${mdChapterId}-${idx + 1}`,
                   pageNumber: idx + 1,
-                  imageUrl: `/api/mangadex/image?chapterId=${mdChapterId}&hash=${hash}&filename=${encodeURIComponent(filename)}&quality=data`,
-                  fallbackUrl: `/api/proxy-image?url=${encodeURIComponent(directUrl)}`,
+                  imageUrl: `/api/mangadex/image?chapterId=${mdChapterId}&hash=${hash}&filename=${encodeURIComponent(filename)}&quality=data&baseUrl=${encodeURIComponent(baseUrl)}`,
+                  fallbackUrl: `/api/proxy-image?url=${encodeURIComponent(uploadsDirectUrl)}`,
                   directUrl
                 };
               });
@@ -224,7 +265,7 @@ export const ComicReaderView: React.FC = () => {
           setIsLoadingPages(false);
         });
     }
-  }, [activeChapter?.id, activeChapter?.mangadexChapterId, activeChapter?.driveUrl]);
+  }, [activeChapter?.id, activeChapter?.slug, activeChapter?.mangadexChapterId, activeChapter?.driveUrl, activeChapter?.externalUrl]);
 
   // Restore previous page if exists
   useEffect(() => {
@@ -373,47 +414,40 @@ export const ComicReaderView: React.FC = () => {
     }
   };
 
-  // Multi-tier fallback handler for MangaDex and remote chapter images
+  // Multi-tier fallback handler for MangaDex, Komiktap, and remote chapter images
   const handlePageImageError = (e: React.SyntheticEvent<HTMLImageElement, Event>, fallbackUrl?: string) => {
     const target = e.currentTarget;
     const currentSrc = target.src;
 
-    // Stage 1: If /api/mangadex/image fails, try /api/image-proxy or serverless route
+    // Stage 1: If /api/mangadex/image fails and fallbackUrl exists, try /api/proxy-image
     if (currentSrc.includes('/api/mangadex/image')) {
-      const queryStr = currentSrc.split('/api/mangadex/image')[1] || '';
-      target.src = `/api/image-proxy${queryStr}`;
-      return;
-    }
-
-    // Stage 2: If /api/image-proxy fails, try /api/proxy-image with fallbackUrl
-    if (currentSrc.includes('/api/image-proxy')) {
       if (fallbackUrl) {
         target.src = `/api/proxy-image?url=${encodeURIComponent(fallbackUrl)}`;
         return;
       }
     }
 
-    // Stage 3: If /api/proxy-image fails, try external CORS proxy
+    // Stage 2: If /api/proxy-image fails, try direct URL without referrer or external CORS proxy
     if (currentSrc.includes('/api/proxy-image?url=')) {
       const originalUrl = decodeURIComponent(currentSrc.split('/api/proxy-image?url=')[1] || '');
       if (originalUrl) {
-        target.src = `https://corsproxy.io/?url=${encodeURIComponent(originalUrl)}`;
-        return;
-      }
-    }
-
-    // Stage 4: If CORS proxy failed, try loading directly with no-referrer
-    if (currentSrc.includes('corsproxy.io/?url=')) {
-      const parts = currentSrc.split('?url=');
-      const originalUrl = parts[1] ? decodeURIComponent(parts[1]) : '';
-      if (originalUrl) {
+        // First attempt direct load with no-referrer
+        target.referrerPolicy = 'no-referrer';
         target.src = originalUrl;
         return;
       }
     }
 
-    // Stage 5: If fallbackUrl provided and hasn't been tried yet
+    // Stage 3: If direct load failed, try corsproxy.io as reliable CDN bridge
+    if (!currentSrc.includes('corsproxy.io/?url=') && (fallbackUrl || currentSrc.startsWith('http'))) {
+      const targetUrl = fallbackUrl || currentSrc;
+      target.src = `https://corsproxy.io/?url=${encodeURIComponent(targetUrl)}`;
+      return;
+    }
+
+    // Stage 4: If fallbackUrl provided and hasn't been tried yet
     if (fallbackUrl && target.src !== fallbackUrl) {
+      target.referrerPolicy = 'no-referrer';
       target.src = fallbackUrl;
       return;
     }

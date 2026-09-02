@@ -12,6 +12,7 @@ export interface Chapter {
   comicId: string;
   chapterNumber: number;
   title: string;
+  slug?: string;
   releaseDate: string;
   isNew?: boolean;
   isLocked?: boolean;

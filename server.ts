@@ -15,6 +15,7 @@ import {
   initialComments 
 } from "./src/data/initialData";
 import { Comic, Chapter, User, Banner, DriveAccount, ActivityLog, SystemSettings, Comment, AdItem, AdSettings } from "./src/types";
+import { scrapeKomiktapSearch, scrapeKomiktapDetail, scrapeKomiktapChapterPages } from "./api/komiktap-proxy";
 
 interface CentralDB {
   comics: Comic[];
@@ -850,26 +851,67 @@ async function startServer() {
   });
 
   // ----------------------------------------------------
-  // DOUJINDESU PROXY & SCRAPER API ENDPOINTS
+  // KOMIKTAP SCRAPER & PROXY API ENDPOINTS (Komiktap.info)
   // ----------------------------------------------------
 
-  // Search Doujindesu (18+ & Doujinshi)
+  // Search or browse catalog from Komiktap.info
+  app.get("/api/komiktap/search", async (req, res) => {
+    try {
+      const { q = "", category = "all", page = "1", order = "popular" } = req.query;
+      const items = await scrapeKomiktapSearch(
+        String(q),
+        String(category),
+        Math.max(1, parseInt(String(page)) || 1),
+        String(order)
+      );
+      res.json({ data: items, total: items.length });
+    } catch (error: any) {
+      console.error("Komiktap search error:", error.message);
+      res.status(500).json({ error: "Failed to fetch from Komiktap", message: error.message, data: [] });
+    }
+  });
+
+  // Get comic details & chapters list from Komiktap.info
+  app.get("/api/komiktap/comic/:slug", async (req, res) => {
+    try {
+      const { slug } = req.params;
+      const detail = await scrapeKomiktapDetail(slug);
+      res.json({ data: detail });
+    } catch (error: any) {
+      console.error("Komiktap comic detail error:", error.message);
+      res.status(500).json({ error: "Failed to fetch comic detail from Komiktap", message: error.message });
+    }
+  });
+
+  // Get chapter image pages from Komiktap.info
+  app.get("/api/komiktap/chapter", async (req, res) => {
+    try {
+      const { url = "", slug = "" } = req.query;
+      const target = String(url || slug).trim();
+      if (!target) {
+        return res.status(400).json({ error: "Chapter url or slug parameter is required" });
+      }
+      const result = await scrapeKomiktapChapterPages(target);
+      res.json(result);
+    } catch (error: any) {
+      console.error("Komiktap chapter pages error:", error.message);
+      res.status(500).json({ error: "Failed to fetch chapter pages from Komiktap", message: error.message, pages: [] });
+    }
+  });
+
+  // Backward compatibility alias for legacy Doujindesu search
   app.get("/api/doujindesu/search", async (req, res) => {
     try {
-      const { q = "", category = "all" } = req.query;
-      const qStr = String(q).trim().toLowerCase();
-
-      // Return Doujindesu curated catalog items
-      const results = dbState.comics
-        .filter((c) => c.contentType === "18plus" || c.comicType === "doujin" || c.sourceApi?.includes("Doujindesu"))
-        .filter((c) => {
-          if (!qStr) return true;
-          return c.title.toLowerCase().includes(qStr) || (c.genres || []).some((g) => g.toLowerCase().includes(qStr));
-        });
-
-      res.json({ data: results, total: results.length });
+      const { q = "", category = "all", page = "1" } = req.query;
+      const items = await scrapeKomiktapSearch(
+        String(q),
+        String(category),
+        Math.max(1, parseInt(String(page)) || 1),
+        "popular"
+      );
+      res.json({ data: items, total: items.length });
     } catch (error: any) {
-      res.status(500).json({ error: "Failed to fetch from Doujindesu proxy", message: error.message });
+      res.status(500).json({ error: "Failed to fetch from Komiktap", message: error.message, data: [] });
     }
   });
 
@@ -1190,7 +1232,7 @@ async function startServer() {
         return {
           id: `page-${chapterId}-${idx + 1}`,
           pageNumber: idx + 1,
-          imageUrl: `/api/mangadex/image?chapterId=${chapterId}&hash=${hash}&filename=${encodeURIComponent(filename)}&quality=${qualityFolder}`,
+          imageUrl: `/api/mangadex/image?chapterId=${chapterId}&hash=${hash}&filename=${encodeURIComponent(filename)}&quality=${qualityFolder}&baseUrl=${encodeURIComponent(baseUrl)}`,
           fallbackUrl: `/api/proxy-image?url=${encodeURIComponent(uploadsDirectUrl)}`,
           directUrl,
           caption: `Halaman ${idx + 1}`,
@@ -1204,23 +1246,28 @@ async function startServer() {
     }
   });
 
-  // Dedicated MangaDex Image Proxy with Fallback & Direct Mirror Streaming
+  // Dedicated MangaDex Image Proxy with Multi-Tier Fallback & Dynamic Live Node Resolution
   app.get("/api/mangadex/image", async (req, res) => {
     try {
-      const { hash = "", filename = "", quality = "data" } = req.query;
+      const { hash = "", filename = "", quality = "data", baseUrl = "", chapterId = "" } = req.query;
       const strHash = String(hash);
       const strFile = String(filename);
       const strQuality = quality === "data-saver" ? "data-saver" : "data";
+      const strBaseUrl = String(baseUrl || "").trim();
+      const strChapterId = String(chapterId || "").trim();
 
       if (!strHash || !strFile) {
         return res.status(400).send("Hash and filename required");
       }
 
-      const candidateUrls = [
+      const candidateUrls: string[] = [];
+      if (strBaseUrl && strBaseUrl.startsWith("http")) {
+        candidateUrls.push(`${strBaseUrl}/${strQuality}/${strHash}/${strFile}`);
+      }
+      candidateUrls.push(
         `https://uploads.mangadex.org/${strQuality}/${strHash}/${strFile}`,
-        `https://s2.mangadex.org/${strQuality}/${strHash}/${strFile}`,
-        `https://cmdxd98sb0x3yprd.mangadex.network/${strQuality}/${strHash}/${strFile}`,
-      ];
+        `https://s2.mangadex.org/${strQuality}/${strHash}/${strFile}`
+      );
 
       let streamRes: any = null;
       for (const targetUrl of candidateUrls) {
@@ -1240,6 +1287,33 @@ async function startServer() {
           if (r.ok) {
             streamRes = r;
             break;
+          }
+        } catch (e) {
+          // continue
+        }
+      }
+
+      // Dynamic fallback: If static candidates failed and chapterId is available, ask at-home server for current alive node
+      if (!streamRes && strChapterId) {
+        try {
+          const atHomeRes = await fetch(`https://api.mangadex.org/at-home/server/${strChapterId}`);
+          if (atHomeRes.ok) {
+            const atHomeJson = await atHomeRes.json();
+            const liveNode = atHomeJson.baseUrl;
+            const liveHash = atHomeJson.chapter?.hash || strHash;
+            if (liveNode) {
+              const liveUrl = `${liveNode}/${strQuality}/${liveHash}/${strFile}`;
+              const r = await fetch(liveUrl, {
+                headers: {
+                  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                  "Referer": "https://mangadex.org/",
+                  "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+                }
+              });
+              if (r.ok) {
+                streamRes = r;
+              }
+            }
           }
         } catch (e) {
           // continue
@@ -1886,12 +1960,71 @@ async function startServer() {
       const lower = imageUrl.toLowerCase();
       if (lower.includes("mangadex")) {
         referer = "https://mangadex.org/";
+      } else if (lower.includes("komiktap") || lower.includes("cdnasu") || lower.includes("komikindo")) {
+        referer = "https://komiktap.info/";
       } else if (lower.includes("komikcast")) {
         referer = "https://komikcast.bz/";
       } else if (lower.includes("myanimelist") || lower.includes("jikan")) {
         referer = "https://myanimelist.net/";
       } else if (lower.includes("wp.com") || lower.includes("blogspot") || lower.includes("googleusercontent")) {
         referer = "";
+      } else {
+        try {
+          referer = new URL(imageUrl).origin;
+        } catch (e) {
+          referer = "";
+        }
+      }
+
+      const headers: Record<string, string> = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        Accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+      };
+      if (referer) {
+        headers["Referer"] = referer;
+      }
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10000);
+      const response = await fetch(imageUrl, {
+        signal: controller.signal,
+        headers,
+      });
+      clearTimeout(timeout);
+
+      if (!response.ok) {
+        return res.status(response.status).send("Failed to fetch image from source");
+      }
+
+      const contentType = response.headers.get("content-type") || "image/jpeg";
+      res.setHeader("Content-Type", contentType);
+      res.setHeader("Cache-Control", "public, max-age=604800, s-maxage=604800");
+
+      const arrayBuffer = await response.arrayBuffer();
+      res.send(Buffer.from(arrayBuffer));
+    } catch (error: any) {
+      res.status(500).send("Failed to proxy image");
+    }
+  });
+
+  // Direct alias for /api/image-proxy (for client or serverless compatibility)
+  app.get("/api/image-proxy", async (req, res) => {
+    try {
+      const imageUrl = (req.query.url as string) || '';
+      if (!imageUrl) {
+        return res.status(400).send("URL parameter is required");
+      }
+
+      let referer = "";
+      const lower = imageUrl.toLowerCase();
+      if (lower.includes("mangadex")) {
+        referer = "https://mangadex.org/";
+      } else if (lower.includes("komiktap") || lower.includes("cdnasu") || lower.includes("komikindo")) {
+        referer = "https://komiktap.info/";
+      } else if (lower.includes("komikcast")) {
+        referer = "https://komikcast.bz/";
+      } else if (lower.includes("myanimelist") || lower.includes("jikan")) {
+        referer = "https://myanimelist.net/";
       } else {
         try {
           referer = new URL(imageUrl).origin;
