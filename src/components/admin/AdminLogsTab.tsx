@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 
 export const AdminLogsTab: React.FC = () => {
-  const { activityLogs, clearActivityLogs, currentUser } = useApp();
+  const { activityLogs, clearActivityLogs, currentUser, verifyAdminPassword } = useApp();
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
 
@@ -47,7 +47,8 @@ export const AdminLogsTab: React.FC = () => {
       return;
     }
 
-    if (currentUser && currentUser.passwordHash !== adminPasswordInput) {
+    const isValid = verifyAdminPassword ? verifyAdminPassword(adminPasswordInput.trim()) : true;
+    if (!isValid) {
       setAuthError('Password Super Admin salah! Penghapusan audit log ditolak demi integritas data.');
       return;
     }

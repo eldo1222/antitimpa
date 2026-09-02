@@ -189,6 +189,7 @@ interface AppContextType {
   toggleUserStatus: (id: string) => void;
   deleteUser: (id: string) => void;
   changeAdminPassword: (oldPassword: string, newPassword: string) => { success: boolean; message: string };
+  verifyAdminPassword: (password: string) => boolean;
 
   // Actions - Banners & Settings
   addBanner: (banner: Omit<Banner, 'id'>) => void;
@@ -1061,16 +1062,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     // 1. First look in local memory state
     let targetUser = users.find(u => (u.username || '').trim().toLowerCase() === cleanUsername.toLowerCase());
 
-    // 2. If not found in state OR if password doesn't match current cache, fetch directly from Supabase for 100% realtime cross-device accuracy
+    // 2. Fetch fresh user from Supabase if not in memory or if password doesn't match local cached version
     if (!targetUser || !verifyPasswordMatch(targetUser.passwordHash, rawPassword)) {
       try {
         const freshUser = await SupabaseService.fetchUser(cleanUsername);
         if (freshUser) {
           targetUser = freshUser;
           setUsers(prev => {
-            const exists = prev.some(u => u.id === freshUser.id);
+            const exists = prev.some(u => u.id === freshUser.id || (u.username || '').toLowerCase() === (freshUser.username || '').toLowerCase());
             if (exists) {
-              return prev.map(u => u.id === freshUser.id ? freshUser : u);
+              return prev.map(u => (u.id === freshUser.id || (u.username || '').toLowerCase() === (freshUser.username || '').toLowerCase()) ? freshUser : u);
             }
             return [...prev, freshUser];
           });
@@ -1081,39 +1082,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
 
     if (!targetUser) {
-      // Auto-fallback bootstrap for Super Admin if not yet in state
-      if (cleanUsername.toLowerCase() === 'admin' || cleanUsername.toLowerCase() === 'eldoaru') {
-        const isAdminPass = rawPassword.trim() === 'eldoaru1223' || rawPassword.trim() === 'admin123';
-        if (isAdminPass) {
-          const bootstrappedAdmin: User = {
-            id: 'user-admin',
-            username: cleanUsername.toLowerCase(),
-            role: 'admin',
-            status: 'active',
-            failedAttempts: 0,
-            passwordHash: hashPassword(rawPassword.trim()),
-            createdAt: new Date().toISOString(),
-            firstLoginAt: new Date().toISOString(),
-            expiresAt: null,
-            durationType: '1_year',
-            tier: 'Premium',
-            planType: 'plan_15k_all',
-            accessType: 'all',
-            priceNote: 'Super Admin Lifetime Access',
-            bio: 'AntiTimpa Super Administrator'
-          };
-          setUsers(prev => [bootstrappedAdmin, ...prev.filter(u => u.username.toLowerCase() !== cleanUsername.toLowerCase())]);
-          SupabaseService.saveUser(bootstrappedAdmin).catch(() => {});
-          setCurrentUser(bootstrappedAdmin);
-          safeSetItem(STORAGE_KEYS.CURRENT_USER, bootstrappedAdmin);
-          setIsAdminView(true);
-          setIsLoginModalOpen(false);
-          setLoginModalRedirectNotice(undefined);
-          showAdminToast('Login Super Admin Berhasil', `Selamat datang kembali, Super Admin ${bootstrappedAdmin.username}!`, 'success');
-          return { success: true, message: `Selamat datang kembali, Super Admin ${bootstrappedAdmin.username}!`, user: bootstrappedAdmin };
-        }
-      }
-
       addLog(cleanUsername || 'anonymous', 'Login Gagal: User Tidak Ditemukan', 'login_failed', 'failed', 'Akun tidak terdaftar dalam database');
       return { success: false, message: 'Username tidak ditemukan. Silakan periksa kembali atau hubungi Admin.' };
     }
@@ -1125,29 +1093,24 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       cleanUsername.toLowerCase() === 'admin' ||
       cleanUsername.toLowerCase() === 'eldoaru';
 
-    // Admin account handling (Admin accounts are NEVER permanently locked by failed attempts)
+    // Admin account handling
     if (isAdmin) {
-      const isPasswordValid = 
-        verifyPasswordMatch(targetUser.passwordHash, rawPassword) ||
-        rawPassword.trim() === 'eldoaru1223' ||
-        rawPassword.trim() === 'admin123' ||
-        rawPassword === 'eldoaru1223' ||
-        rawPassword === 'admin123';
+      const isPasswordValid = verifyPasswordMatch(targetUser.passwordHash, rawPassword);
 
       if (!isPasswordValid) {
         addLog(targetUser.username, 'Login Admin Gagal: Password Salah', 'login_failed', 'warning', 'Percobaan masuk Super Admin dengan password tidak cocok.');
         return { 
           success: false, 
-          message: 'Password Admin salah! Silakan periksa kembali huruf besar/kecil atau gunakan password admin Anda.' 
+          message: 'Password Admin salah! Silakan periksa kembali huruf besar/kecil dari kata sandi Anda.' 
         };
       }
 
+      // Preserve the verified passwordHash without overwriting it!
       const updatedAdmin: User = {
         ...targetUser,
         role: 'admin',
         failedAttempts: 0,
         status: 'active',
-        passwordHash: hashPassword(rawPassword.trim()),
         firstLoginAt: targetUser.firstLoginAt || new Date().toISOString()
       };
       setUsers(prev => prev.map(u => u.id === targetUser.id ? updatedAdmin : u));
@@ -2659,10 +2622,23 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           const firstLoginTime = new Date(u.firstLoginAt).getTime();
           newExpiresAt = new Date(firstLoginTime + getDurationMs(updates.durationType)).toISOString();
         }
-        const updatedUser: User = { ...u, ...updates, expiresAt: newExpiresAt || u.expiresAt };
+
+        let finalHash = updates.passwordHash;
+        if (finalHash && !finalHash.startsWith('$2a$') && !finalHash.startsWith('$2b$') && !finalHash.startsWith('$2y$')) {
+          finalHash = hashPassword(finalHash);
+        }
+
+        const updatedUser: User = { 
+          ...u, 
+          ...updates, 
+          ...(finalHash ? { passwordHash: finalHash } : {}),
+          expiresAt: newExpiresAt || u.expiresAt 
+        };
+
         SupabaseService.saveUser(updatedUser).catch(() => {});
         if (currentUser && currentUser.id === id) {
           setCurrentUser(updatedUser);
+          safeSetItem(STORAGE_KEYS.CURRENT_USER, updatedUser);
         }
         return updatedUser;
       }
@@ -2718,24 +2694,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
 
     setUsers(prev => {
-      const cleanUsername = (updatedUser.username || '').toLowerCase();
-      const filtered = prev.filter(u => 
-        u.id !== userId && 
-        u.id !== updatedUser.id && 
-        (u.username || '').toLowerCase() !== cleanUsername &&
-        (updatedUser.role === 'admin' ? u.role !== 'admin' : true)
-      );
-      return [updatedUser, ...filtered];
+      const exists = prev.some(u => u.id === userId);
+      if (exists) {
+        return prev.map(u => u.id === userId ? updatedUser : u);
+      }
+      return [updatedUser, ...prev];
     });
 
     SupabaseService.saveUser(updatedUser).catch(() => {});
 
-    if (updatedUser.role === 'admin' && updatedUser.id !== 'user-admin') {
-      const canon = { ...updatedUser, id: 'user-admin' };
-      SupabaseService.saveUser(canon).catch(() => {});
-    }
-
-    if (currentUser && (currentUser.id === userId || (currentUser.role === 'admin' && updatedUser.role === 'admin'))) {
+    if (currentUser && currentUser.id === userId) {
       setCurrentUser(updatedUser);
       safeSetItem(STORAGE_KEYS.CURRENT_USER, updatedUser);
     }
@@ -2854,19 +2822,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       return { success: false, message: 'Password baru minimal 6 karakter demi keamanan akun!' };
     }
 
-    const adminUser = users.find(u => u.id === currentUser.id || u.role === 'admin');
-    const storedFromAdminUser = adminUser?.passwordHash;
-    const storedFromCurrentUser = currentUser?.passwordHash;
+    const targetUser = users.find(u => u.id === currentUser.id) || 
+                       users.find(u => u.username.toLowerCase() === currentUser.username.toLowerCase()) || 
+                       currentUser;
 
     const isOldPasswordMatch = 
-      verifyPasswordMatch(storedFromAdminUser, cleanOld) ||
-      verifyPasswordMatch(storedFromCurrentUser, cleanOld) ||
-      verifyPasswordMatch(storedFromAdminUser, oldPassword) ||
-      verifyPasswordMatch(storedFromCurrentUser, oldPassword) ||
-      cleanOld === 'admin123' ||
-      oldPassword === 'admin123' ||
-      cleanOld === 'eldoaru1223' ||
-      oldPassword === 'eldoaru1223';
+      verifyPasswordMatch(targetUser.passwordHash, cleanOld) ||
+      verifyPasswordMatch(targetUser.passwordHash, oldPassword) ||
+      verifyPasswordMatch(currentUser.passwordHash, cleanOld) ||
+      verifyPasswordMatch(currentUser.passwordHash, oldPassword);
 
     if (!isOldPasswordMatch) {
       addLog(
@@ -2887,9 +2851,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     // Update in users state & Supabase
     const updatedAdmin: User = {
-      ...(adminUser || currentUser),
-      id: adminUser?.id || currentUser.id || 'user-admin',
-      username: adminUser?.username || currentUser.username || 'admin',
+      ...targetUser,
       role: 'admin',
       status: 'active',
       failedAttempts: 0,
@@ -2897,19 +2859,18 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
 
     setUsers(prev => {
-      const filtered = prev.filter(u => u.id !== updatedAdmin.id && u.role !== 'admin');
-      return [updatedAdmin, ...filtered];
+      const exists = prev.some(u => u.id === updatedAdmin.id || u.username.toLowerCase() === updatedAdmin.username.toLowerCase());
+      if (exists) {
+        return prev.map(u => (u.id === updatedAdmin.id || u.username.toLowerCase() === updatedAdmin.username.toLowerCase()) ? updatedAdmin : u);
+      }
+      return [updatedAdmin, ...prev];
     });
 
-    SupabaseService.saveUser(updatedAdmin).catch(() => {});
+    SupabaseService.saveUser(updatedAdmin).catch(err => {
+      console.warn('Failed to sync updated admin password to Supabase:', err);
+    });
 
-    // Also explicitly ensure user-admin doc is updated
-    if (updatedAdmin.id !== 'user-admin') {
-      const canon = { ...updatedAdmin, id: 'user-admin' };
-      SupabaseService.saveUser(canon).catch(() => {});
-    }
-
-    // Update in currentUser state
+    // Update in currentUser state & storage
     setCurrentUser(updatedAdmin);
     safeSetItem(STORAGE_KEYS.CURRENT_USER, updatedAdmin);
 
@@ -2923,7 +2884,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       'Password utama akun Super Admin telah berhasil diperbarui dan tersinkronisasi di server & database Supabase.'
     );
 
-    return { success: true, message: 'Password Super Admin berhasil diganti! Semua perangkat yang terhubung akan disinkronkan.' };
+    return { success: true, message: 'Password Super Admin berhasil diganti! Password baru aktif seketika.' };
+  };
+
+  const verifyAdminPassword = (password: string): boolean => {
+    if (!currentUser || !password) return false;
+    const target = users.find(u => u.id === currentUser.id) || currentUser;
+    return verifyPasswordMatch(target.passwordHash, password);
   };
 
   // Banner Management
@@ -3434,6 +3401,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         toggleUserStatus,
         deleteUser,
         changeAdminPassword,
+        verifyAdminPassword,
         addBanner,
         updateBanner,
         deleteBanner,

@@ -43,6 +43,24 @@ export function isMissingTableError(error: any): boolean {
   );
 }
 
+export function isNetworkOrOfflineError(error: any): boolean {
+  if (!error) return false;
+  const rawMessage = error?.message || (typeof error === 'string' ? error : JSON.stringify(error));
+  const rawStack = error?.stack || '';
+  const fullText = `${rawMessage} ${rawStack}`;
+  return (
+    fullText.includes('Failed to fetch') ||
+    fullText.includes('NetworkError') ||
+    fullText.includes('Network request failed') ||
+    fullText.includes('fetch failed') ||
+    fullText.includes('ECONNREFUSED') ||
+    fullText.includes('ENOTFOUND') ||
+    fullText.includes('ERR_NAME_NOT_RESOLVED') ||
+    fullText.includes('TypeError: Failed to fetch') ||
+    fullText.includes('net::ERR_')
+  );
+}
+
 export function parseSupabaseError(error: any): ParsedDbError {
   if (!error) {
     return {
@@ -57,7 +75,21 @@ export function parseSupabaseError(error: any): ParsedDbError {
   const details = error?.details || null;
   const hint = error?.hint || null;
 
-  // 1. Missing Table Error (PGRST205 or 42P01)
+  // 1. Network / Offline / Unreachable Error
+  if (isNetworkOrOfflineError(error)) {
+    return {
+      isError: true,
+      code: code || 'NETWORK_OFFLINE',
+      message: rawMessage,
+      details,
+      hint,
+      userFriendlyMessage: 'Koneksi ke Supabase offline atau belum dapat dijangkau. Sistem otomatis menggunakan penyimpanan lokal server.',
+      remediationHint: 'Pastikan koneksi internet aktif dan URL Supabase valid di tab Database.',
+      rawError: error,
+    };
+  }
+
+  // 2. Missing Table Error (PGRST205 or 42P01)
   if (isMissingTableError(error)) {
     return {
       isError: true,

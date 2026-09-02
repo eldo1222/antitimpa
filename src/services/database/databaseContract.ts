@@ -132,9 +132,9 @@ export const DATABASE_CONTRACT = {
   },
 } as const;
 
-import { isMissingTableError } from '../supabase/errors';
+import { isMissingTableError, isNetworkOrOfflineError } from '../supabase/errors';
 
-export { isMissingTableError };
+export { isMissingTableError, isNetworkOrOfflineError };
 
 // Error logging deduplication to prevent console flooding on polling loops
 const logTimestamps = new Map<string, number>();
@@ -159,6 +159,12 @@ export function logDatabaseError(context: {
     return; // Silently throttled to stop warning loops
   }
   logTimestamps.set(dedupeKey, now);
+
+  // If network is offline or remote host unreachable, log as a non-breaking connection notice
+  if (isNetworkOrOfflineError(context.error)) {
+    console.warn(`[DATABASE NETWORK NOTICE] [${context.operation} ${context.table}] Gagal menghubungi Supabase remote (${msg}). Fallback ke server penyimpanan lokal aktif.`);
+    return;
+  }
 
   // If table is simply not yet created in Supabase SQL schema, log as a descriptive notice once
   if (isMissingTableError(context.error)) {
