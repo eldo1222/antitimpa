@@ -193,7 +193,7 @@ export const ComicDetailView: React.FC = () => {
     (comic.whereToRead && comic.whereToRead.length > 0) || 
     !!comic.sourceUrl || 
     !!comic.mangaDexId ||
-    rawChaptersList.some(ch => ch.sourceType === 'external' || !!ch.externalUrl);
+    rawChaptersList.some(ch => ch.sourceType === 'external' || (ch.externalSources && ch.externalSources.length > 0));
 
   const handleShare = () => {
     if (navigator.clipboard) {
@@ -209,8 +209,9 @@ export const ComicDetailView: React.FC = () => {
   };
 
   const handleChapterClick = (chapter: Chapter) => {
-    // If chapter is an external link, open the Where to Read gateway modal immediately
-    if (chapter.sourceType === 'external' || chapter.externalUrl || (chapter.externalSources && chapter.externalSources.length > 0)) {
+    // If chapter is purely an external gateway (sourceType === 'external'), open the Where to Read modal
+    const isPureExternal = chapter.sourceType === 'external' || (chapter.externalSources && chapter.externalSources.length > 0);
+    if (isPureExternal) {
       openWhereToRead(chapter);
       return;
     }
@@ -574,7 +575,7 @@ export const ComicDetailView: React.FC = () => {
                 <div className="space-y-2 max-h-[600px] overflow-y-auto pr-1">
                   {chaptersList.map((chapter, idx) => {
                     const isCurrentReading = readingProgress?.chapterId === chapter.id;
-                    const isExternalChapter = chapter.sourceType === 'external' || !!chapter.externalUrl || (chapter.externalSources && chapter.externalSources.length > 0);
+                    const isExternalChapter = chapter.sourceType === 'external' || (chapter.externalSources && chapter.externalSources.length > 0);
 
                     return (
                       <div

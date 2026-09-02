@@ -44,7 +44,8 @@ export const ComicReaderView: React.FC = () => {
     openLoginModal, 
     startReading, 
     saveReadingProgress,
-    getReadingProgress 
+    getReadingProgress,
+    updateChapter
   } = useApp();
 
   const [readingMode, setReadingMode] = useState<'vertical' | 'paged'>('vertical');
@@ -137,6 +138,14 @@ export const ComicReaderView: React.FC = () => {
   // Live fetch real scanlation pages if chapter originates from MangaDex, Komiktap, or Komikcast
   useEffect(() => {
     if (!activeChapter) return;
+    
+    // If pages already exist in memory / database, use them immediately
+    if (activeChapter.pages && activeChapter.pages.length > 0) {
+      setLivePages(activeChapter.pages as any);
+      setIsLoadingPages(false);
+      return;
+    }
+
     setLivePages(null);
 
     // 1. KOMIKTAP DETECTION & FETCHING
@@ -150,7 +159,12 @@ export const ComicReaderView: React.FC = () => {
 
     if (isKomiktap) {
       setIsLoadingPages(true);
-      const targetUrl = activeChapter.externalUrl || activeChapter.slug || activeChapter.driveUrl || '';
+      let targetUrl = activeChapter.slug || activeChapter.driveUrl || activeChapter.externalUrl || '';
+      if (!targetUrl || targetUrl.startsWith('ch-')) {
+        const cSlug = activeComic?.slug || activeComic?.title?.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || '';
+        targetUrl = `${cSlug}-chapter-${activeChapter.chapterNumber}`;
+      }
+
       const fetchUrl = `/api/komiktap/chapter?url=${encodeURIComponent(targetUrl)}`;
       const fallbackProxyUrl = `/api/komiktap-proxy?action=chapter&url=${encodeURIComponent(targetUrl)}`;
 
@@ -163,6 +177,9 @@ export const ComicReaderView: React.FC = () => {
         .then(data => {
           if (data && data.pages && data.pages.length > 0) {
             setLivePages(data.pages);
+            if (activeComic?.id && activeChapter?.id) {
+              updateChapter(activeComic.id, activeChapter.id, { pages: data.pages, sourceType: 'images' });
+            }
           }
         })
         .catch(err => {
@@ -568,7 +585,7 @@ export const ComicReaderView: React.FC = () => {
         onClick={() => setIsHudVisible(prev => !prev)}
       >
         {/* CASE 0: EXTERNAL GATEWAY READER MODE (NHentai, DoujinDesu, MangaPlus, etc.) */}
-        {sourceType === 'external' || !!activeChapter.externalUrl ? (
+        {(sourceType === 'external' && pages.length === 0 && !livePages && !isLoadingPages) ? (
           <div className="w-full max-w-3xl mx-auto flex-1 flex flex-col items-center justify-center p-4 sm:p-6 pt-20 pb-20 space-y-6">
             <div className="w-full bg-[#12121c] border border-[#2b2b3d] rounded-2xl p-6 sm:p-8 shadow-2xl text-center space-y-5 animate-in zoom-in-95 duration-200">
               

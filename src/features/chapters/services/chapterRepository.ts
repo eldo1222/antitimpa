@@ -197,21 +197,49 @@ export class ChapterRepository {
         rows.push(row);
       }
 
-      const allIds = chapters.map(ch => ch.id);
-      const allColumns = rows.length > 0 ? Object.keys(rows[0]) : [];
+      // Sanitize: deduplicate rows by id and ensure unique chapter_number per comic to prevent PG 21000
+      const seenRowIds = new Set<string>();
+      const sanitizedRows: Record<string, any>[] = [];
+      const seenComicChNums = new Map<string, Set<number>>();
+
+      for (const row of rows) {
+        let finalId = String(row.id || '');
+        if (seenRowIds.has(finalId)) {
+          finalId = `${finalId}-v${Math.random().toString(36).substring(2, 6)}`;
+          row.id = finalId;
+        }
+        seenRowIds.add(finalId);
+
+        const comicKey = String(row.comic_id || '');
+        if (!seenComicChNums.has(comicKey)) {
+          seenComicChNums.set(comicKey, new Set<number>());
+        }
+        const chNumSet = seenComicChNums.get(comicKey)!;
+        let num = Number(row.chapter_number) || 1;
+        while (chNumSet.has(num)) {
+          num = Number((num + 0.1).toFixed(1));
+        }
+        row.chapter_number = num;
+        chNumSet.add(num);
+
+        sanitizedRows.push(row);
+      }
+
+      const allIds = sanitizedRows.map(r => r.id);
+      const allColumns = sanitizedRows.length > 0 ? Object.keys(sanitizedRows[0]) : [];
 
       console.log(`[SUPABASE CHAPTER UPSERT]`, {
         table: DATABASE_TABLES.CHAPTERS,
         operation: 'UPSERT',
-        count: rows.length,
+        count: sanitizedRows.length,
         ids: allIds.slice(0, 10),
         columns: allColumns
       });
 
       const CHUNK_SIZE = 50;
-      for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
-        const chunk = rows.slice(i, i + CHUNK_SIZE);
-        const chunkIds = chapters.slice(i, i + CHUNK_SIZE).map(c => c.id);
+      for (let i = 0; i < sanitizedRows.length; i += CHUNK_SIZE) {
+        const chunk = sanitizedRows.slice(i, i + CHUNK_SIZE);
+        const chunkIds = chunk.map(c => c.id);
         const { error } = await client.from(DATABASE_TABLES.CHAPTERS).upsert(chunk, { onConflict: 'id' });
         if (error) {
           logDatabaseError({ table: DATABASE_TABLES.CHAPTERS, operation: 'UPSERT', error, details: { chunkIndex: i, total: rows.length, chunkIds } });

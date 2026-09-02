@@ -92,6 +92,7 @@ export const AdminChaptersTab: React.FC = () => {
 
   // Chapter PDF downloading state
   const [downloadingChapterId, setDownloadingChapterId] = useState<string | null>(null);
+  const [fetchingChapterId, setFetchingChapterId] = useState<string | null>(null);
   const [pdfToastMsg, setPdfToastMsg] = useState<string | null>(null);
 
   // Form State
@@ -545,6 +546,37 @@ export const AdminChaptersTab: React.FC = () => {
   const handlePreviewInReader = (chapterId: string) => {
     startReading(chapterId);
     setIsAdminView(false);
+  };
+
+  const handleFetchChapterPages = async (ch: Chapter) => {
+    if (!currentComic) return;
+    setFetchingChapterId(ch.id);
+    const chTitle = ch.title || `Chapter ${ch.chapterNumber}`;
+    setPdfToastMsg(`Menarik gambar untuk ${chTitle}...`);
+
+    try {
+      let targetUrl = ch.slug || ch.driveUrl || ch.externalUrl || '';
+      if (!targetUrl || targetUrl.startsWith('ch-')) {
+        const cSlug = currentComic.slug || currentComic.title?.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || '';
+        targetUrl = `${cSlug}-chapter-${ch.chapterNumber}`;
+      }
+
+      const res = await fetch(`/api/komiktap/chapter?url=${encodeURIComponent(targetUrl)}`);
+      const data = await res.json();
+      if (data && data.pages && data.pages.length > 0) {
+        updateChapter(currentComic.id, ch.id, { pages: data.pages, sourceType: 'images' });
+        setPdfToastMsg(`Berhasil! ${data.pages.length} gambar tersimpan untuk ${chTitle}.`);
+        setTimeout(() => setPdfToastMsg(null), 3500);
+      } else {
+        setPdfToastMsg(`Gagal: ${data?.error || 'Tidak ada gambar yang ditemukan.'}`);
+        setTimeout(() => setPdfToastMsg(null), 4000);
+      }
+    } catch (err: any) {
+      setPdfToastMsg(`Gagal: ${err.message || 'Koneksi bermasalah'}`);
+      setTimeout(() => setPdfToastMsg(null), 4000);
+    } finally {
+      setFetchingChapterId(null);
+    }
   };
 
   const handleDownloadChapterPdf = async (ch: Chapter) => {
@@ -1181,6 +1213,20 @@ export const AdminChaptersTab: React.FC = () => {
                             <Download className="w-3.5 h-3.5" />
                           )}
                         </button>
+                        {(!ch.pages || ch.pages.length === 0) && (
+                          <button
+                            onClick={() => handleFetchChapterPages(ch)}
+                            disabled={fetchingChapterId === ch.id}
+                            className="p-1.5 text-amber-400 hover:text-white hover:bg-amber-500/20 rounded-lg transition-colors cursor-pointer"
+                            title="Tarik Lembar Gambar Chapter"
+                          >
+                            {fetchingChapterId === ch.id ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
+                            ) : (
+                              <Sparkles className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                        )}
                         <button
                           onClick={() => handlePreviewInReader(ch.id)}
                           className="p-1.5 text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/10 rounded-lg transition-colors cursor-pointer"

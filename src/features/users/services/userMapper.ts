@@ -34,6 +34,11 @@ export function mapUserToDb(u: Partial<User>): Record<string, any> {
   if (u.firstLoginAt !== undefined) row.first_login_at = u.firstLoginAt;
   if (u.failedAttempts !== undefined) row.failed_attempts = u.failedAttempts;
   if (u.createdAt !== undefined) row.created_at = u.createdAt;
+  if (u.stats !== undefined) {
+    row.chapters_read = u.stats.chaptersRead;
+    row.comics_read = u.stats.comicsRead;
+    row.days_active = u.stats.daysActive;
+  }
   row.updated_at = new Date().toISOString();
   return row;
 }
@@ -63,5 +68,10 @@ export function mapDbToUser(u: Record<string, any>): User {
     firstLoginAt: u.first_login_at || null,
     failedAttempts: typeof u.failed_attempts === 'number' ? u.failed_attempts : (u.failedAttempts || 0),
     createdAt: u.created_at || new Date().toISOString(),
+    stats: u.stats || {
+      comicsRead: Number(u.comics_read || 0),
+      chaptersRead: Number(u.chapters_read || 0),
+      daysActive: Number(u.days_active || 1),
+    },
   };
 }

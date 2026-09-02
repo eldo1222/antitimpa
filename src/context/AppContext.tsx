@@ -3266,11 +3266,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     if (currentUser) {
       setCurrentUser(prev => {
         if (!prev) return null;
+        const currentStats = prev.stats || {
+          comicsRead: 0,
+          chaptersRead: 0,
+          daysActive: 1
+        };
         const updated: User = {
           ...prev,
           stats: {
-            ...prev.stats,
-            chaptersRead: prev.stats.chaptersRead + 1
+            ...currentStats,
+            chaptersRead: (currentStats.chaptersRead || 0) + 1
           }
         };
         SupabaseService.saveUser(updated).catch(() => {});

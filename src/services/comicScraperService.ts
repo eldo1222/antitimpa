@@ -1510,11 +1510,54 @@ export async function buildComicFromScrapeAsync(
           primaryDriveAccountId: customSettings?.primaryDriveAccountId
         };
 
+        // Disambiguation maps for unique IDs and unique chapter numbers
+        const seenChapterNums = new Map<number, number>();
+        const seenChapterIds = new Set<string>();
+
+        // Preload chapter pages for immediate reading (all chapters if <= 5, or first 3 chapters if more)
+        const preloadedPagesMap = new Map<number, any[]>();
+        const totalChaps = detail.chapters?.length || 0;
+        const preloadLimit = totalChaps <= 5 ? totalChaps : 3;
+        const chaptersToPreload = (detail.chapters || []).slice(0, preloadLimit);
+
+        if (chaptersToPreload.length > 0) {
+          try {
+            const fetchPromises = chaptersToPreload.map(async (ch: any, idx: number) => {
+              const chTarget = ch.slug || ch.url || '';
+              if (!chTarget) return;
+              const chPagesRes = await fetchKomiktapChapterPages(chTarget);
+              if (chPagesRes && chPagesRes.pages && chPagesRes.pages.length > 0) {
+                preloadedPagesMap.set(idx, chPagesRes.pages);
+              }
+            });
+            await Promise.allSettled(fetchPromises);
+          } catch (e) {
+            console.warn('Could not prefetch chapter pages:', e);
+          }
+        }
+
         const chapters: Chapter[] = (detail.chapters || []).map((ch: any, idx: number) => {
-          const chNum = ch.chapterNumber || (idx + 1);
+          let chNum = typeof ch.chapterNumber === 'number' ? ch.chapterNumber : (parseFloat(ch.chapterNumber) || (idx + 1));
+          if (seenChapterNums.has(chNum)) {
+            const count = seenChapterNums.get(chNum)! + 1;
+            seenChapterNums.set(chNum, count);
+            chNum = Number((chNum + count * 0.1).toFixed(1));
+          } else {
+            seenChapterNums.set(chNum, 0);
+          }
+
           const chSlug = ch.url || ch.slug || `${detail.slug}-chapter-${chNum}`;
+          const numStr = String(chNum).replace('.', '_');
+          let chId = `ch-${comicId}-${numStr}`;
+          if (seenChapterIds.has(chId)) {
+            chId = `ch-${comicId}-${numStr}-${idx + 1}`;
+          }
+          seenChapterIds.add(chId);
+
+          const chapterPages = preloadedPagesMap.get(idx) || ch.pages || [];
+
           return {
-            id: `ch-${comicId}-${chNum}`,
+            id: chId,
             comicId: comicId,
             chapterNumber: chNum,
             title: ch.title || `Chapter ${chNum}`,
@@ -1523,9 +1566,8 @@ export async function buildComicFromScrapeAsync(
             isNew: idx >= (detail.chapters?.length || 0) - 2,
             isLocked: !isFree,
             sourceType: 'images' as const,
-            pages: [],
+            pages: chapterPages,
             viewsCount: 0,
-            externalUrl: ch.url || (chSlug.startsWith('http') ? chSlug : undefined),
             driveUrl: chSlug
           };
         });

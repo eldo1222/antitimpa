@@ -280,6 +280,21 @@ export async function scrapeKomiktapDetail(slugOrUrl: string): Promise<KomiktapC
     });
   }
 
+  // Deduplicate and disambiguate duplicate chapter numbers (e.g. 191 & 191-2)
+  const seenChapterNums = new Map<number, number>();
+  for (const ch of chapters) {
+    if (seenChapterNums.has(ch.chapterNumber)) {
+      const count = seenChapterNums.get(ch.chapterNumber)! + 1;
+      seenChapterNums.set(ch.chapterNumber, count);
+      ch.chapterNumber = Number((ch.chapterNumber + count * 0.1).toFixed(1));
+      if (!ch.title.includes('(')) {
+        ch.title = `${ch.title} (Part ${count + 1})`;
+      }
+    } else {
+      seenChapterNums.set(ch.chapterNumber, 0);
+    }
+  }
+
   // Ensure chapters are sorted in ascending order (Ch 1 first, Ch N last)
   chapters.sort((a, b) => a.chapterNumber - b.chapterNumber);
 
