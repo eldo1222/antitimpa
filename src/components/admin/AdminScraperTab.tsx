@@ -526,7 +526,10 @@ export const AdminScraperTab: React.FC = () => {
       comicType: overrideOptions?.comicType ?? itemToUse.comicType,
       isFree: isNormal ? true : defaultIsFree,
       isVisibleOnHome: overrideOptions?.isVisibleOnHome ?? defaultIsVisibleOnHome,
-      primaryDriveAccountId: defaultDriveAccountId
+      primaryDriveAccountId: defaultDriveAccountId,
+      onProgress: (current, total, chTitle) => {
+        setBatchStatus(`⏳ Menarik lembar gambar chapter ${current}/${total}: ${chTitle}...`);
+      }
     });
 
     const injectResult = await injectComicWithChapters(comic, comicChaps);

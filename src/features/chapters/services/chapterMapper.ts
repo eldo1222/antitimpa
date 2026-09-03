@@ -15,8 +15,11 @@ export function mapChapterToDb(ch: Partial<Chapter> & { parentComicId?: string }
   if (ch.comicId !== undefined || ch.parentComicId !== undefined) {
     row.comic_id = ch.comicId || ch.parentComicId;
   }
-  if (ch.chapterNumber !== undefined) row.chapter_number = Number(ch.chapterNumber) || 1;
-  if (ch.title !== undefined) row.title = ch.title || `Chapter ${ch.chapterNumber || 1}`;
+  if (ch.chapterNumber !== undefined) {
+    const num = typeof ch.chapterNumber === 'number' ? ch.chapterNumber : parseFloat(String(ch.chapterNumber));
+    row.chapter_number = isNaN(num) ? 1 : num;
+  }
+  if (ch.title !== undefined) row.title = ch.title || `Chapter ${ch.chapterNumber !== undefined ? ch.chapterNumber : 1}`;
   if (ch.slug !== undefined || ch.mangadexChapterId !== undefined || ch.driveUrl !== undefined || ch.externalUrl !== undefined) {
     row.slug = ch.slug || ch.mangadexChapterId || ch.driveUrl || ch.externalUrl || null;
   }

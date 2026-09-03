@@ -157,6 +157,7 @@ interface AppContextType {
     externalNote?: string;
   }) => void;
   updateChapter: (comicId: string, chapterId: string, updates: Partial<Chapter>) => void;
+  batchUpdateChapterPages: (comicId: string, updates: Array<{ chapterId: string; pages: ComicPage[] | string[] | any[] }>) => void;
   deleteChapter: (comicId: string, chapterId: string, reason?: string) => void;
   batchDeleteChapters: (comicId: string, chapterIds: string[], reason?: string) => void;
   updateChapterDriveLink: (comicId: string, chapterId: string, driveUrl: string, driveAccountId?: string, driveNotes?: string) => void;
@@ -2398,6 +2399,26 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   };
 
+  const batchUpdateChapterPages = (comicId: string, updates: Array<{ chapterId: string; pages: ComicPage[] | string[] | any[] }>) => {
+    if (!updates || updates.length === 0) return;
+    const updatesMap = new Map(updates.map(u => [u.chapterId, u.pages]));
+
+    setChapters(prev => {
+      const list = prev[comicId] || [];
+      const updatedList = list.map(ch => {
+        const newPages = updatesMap.get(ch.id);
+        if (newPages && newPages.length > 0) {
+          return { ...ch, pages: newPages, sourceType: 'images' as const };
+        }
+        return ch;
+      });
+      return {
+        ...prev,
+        [comicId]: updatedList
+      };
+    });
+  };
+
   const deleteChapter = async (comicId: string, chapterId: string, reason?: string) => {
     const targetChapter = (chapters[comicId] || []).find(ch => ch.id === chapterId);
     const remainingList = (chapters[comicId] || []).filter(ch => ch.id !== chapterId);
@@ -3452,6 +3473,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         cleanOrphanData,
         addChapter,
         updateChapter,
+        batchUpdateChapterPages,
         deleteChapter,
         batchDeleteChapters,
         updateChapterDriveLink,

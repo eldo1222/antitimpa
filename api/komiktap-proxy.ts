@@ -256,9 +256,22 @@ export async function scrapeKomiktapDetail(slugOrUrl: string): Promise<KomiktapC
     }
   }
 
+function normalizeChapterUrl(rawUrl: string): string {
+  try {
+    const parsed = new URL(rawUrl, 'https://komiktap.info');
+    parsed.search = '';
+    parsed.hash = '';
+    let pathname = parsed.pathname.toLowerCase();
+    if (!pathname.endsWith('/')) pathname += '/';
+    return `${parsed.protocol}//${parsed.hostname}${pathname}`;
+  } catch (_) {
+    return rawUrl.trim().toLowerCase();
+  }
+}
+
   // Chapters list
   // Structure: <li data-num="1"><div class="chbox"><div class="eph-num"><a href="https://komiktap.info/irodori-kazoku-chapter-1/"><span class="chapternum">Chapter 1</span><span class="chapterdate">Agustus 31, 2026</span>
-  const chapters: KomiktapChapterItem[] = [];
+  const rawChapters: KomiktapChapterItem[] = [];
   const chRegex = /<li[^>]*data-num=[\"']([^\"']+)[\"'][\s\S]*?<a href=[\"']([^\"']+)[\"'][\s\S]*?<span class=[\"']chapternum[\"']>([^<]+)<\/span>(?:[\s\S]*?<span class=[\"']chapterdate[\"']>([^<]+)<\/span>)?/gi;
   let cMatch;
 
@@ -268,32 +281,66 @@ export async function scrapeKomiktapDetail(slugOrUrl: string): Promise<KomiktapC
     const chTitle = cMatch[3]?.trim() || `Chapter ${rawNum}`;
     const chDate = cMatch[4]?.trim() || '';
 
-    const chSlug = chUrl.replace(/\/$/, '').split('/').pop() || '';
-    const parsedNum = parseFloat(rawNum) || parseFloat(chTitle.replace(/[^\d.]/g, '')) || chapters.length + 1;
+    const canonicalUrl = normalizeChapterUrl(chUrl);
+    const chSlug = canonicalUrl.replace(/\/$/, '').split('/').pop() || '';
+    
+    // Support decimals like 2.5, 191.2, etc.
+    let parsedNum = parseFloat(rawNum);
+    if (isNaN(parsedNum)) {
+      const matchNum = chTitle.match(/\b\d+(?:\.\d+)?\b/);
+      parsedNum = matchNum ? parseFloat(matchNum[0]) : rawChapters.length + 1;
+    }
 
-    chapters.push({
+    rawChapters.push({
       chapterNumber: parsedNum,
       title: chTitle,
-      url: chUrl,
+      url: canonicalUrl,
       slug: chSlug,
       releaseDate: chDate
     });
   }
 
-  // Deduplicate and disambiguate duplicate chapter numbers (e.g. 191 & 191-2)
+  // Deduplicate by canonical source URL first
+  const urlMap = new Map<string, KomiktapChapterItem>();
+  let duplicateUrlsRemoved = 0;
+  for (const ch of rawChapters) {
+    if (urlMap.has(ch.url)) {
+      duplicateUrlsRemoved++;
+      continue;
+    }
+    urlMap.set(ch.url, ch);
+  }
+  const uniqueUrlChapters = Array.from(urlMap.values());
+
+  // Disambiguate duplicate numbers if different URLs share the same chapter number
   const seenChapterNums = new Map<number, number>();
-  for (const ch of chapters) {
-    if (seenChapterNums.has(ch.chapterNumber)) {
-      const count = seenChapterNums.get(ch.chapterNumber)! + 1;
-      seenChapterNums.set(ch.chapterNumber, count);
-      ch.chapterNumber = Number((ch.chapterNumber + count * 0.1).toFixed(1));
-      if (!ch.title.includes('(')) {
-        ch.title = `${ch.title} (Part ${count + 1})`;
+  const chapters: KomiktapChapterItem[] = [];
+  for (const ch of uniqueUrlChapters) {
+    let finalNum = ch.chapterNumber;
+    let finalTitle = ch.title;
+    if (seenChapterNums.has(finalNum)) {
+      const count = seenChapterNums.get(finalNum)! + 1;
+      seenChapterNums.set(finalNum, count);
+      finalNum = Number((finalNum + count * 0.1).toFixed(2));
+      if (!finalTitle.includes('(')) {
+        finalTitle = `${finalTitle} (Part ${count + 1})`;
       }
     } else {
-      seenChapterNums.set(ch.chapterNumber, 0);
+      seenChapterNums.set(finalNum, 0);
     }
+    chapters.push({
+      ...ch,
+      chapterNumber: finalNum,
+      title: finalTitle
+    });
   }
+
+  console.log(`[KOMIKTAP CHAPTER DISCOVERY AUDIT]`, {
+    rawFound: rawChapters.length,
+    uniqueUrls: uniqueUrlChapters.length,
+    duplicateUrlsRemoved,
+    finalChapters: chapters.length
+  });
 
   // Ensure chapters are sorted in ascending order (Ch 1 first, Ch N last)
   chapters.sort((a, b) => a.chapterNumber - b.chapterNumber);
@@ -323,7 +370,7 @@ export async function scrapeKomiktapDetail(slugOrUrl: string): Promise<KomiktapC
  * Target URL: https://komiktap.info/:slug-chapter-:number/
  * Uses ts_reader.run JSON payload embedded in the page
  */
-export async function scrapeKomiktapChapterPages(chapterUrlOrSlug: string): Promise<{
+export async function scrapeKomiktapChapterPages(chapterUrlOrSlug: string, maxRetries = 3): Promise<{
   pages: Array<{ id: string; pageNumber: number; imageUrl: string; fallbackUrl: string; directUrl: string }>;
   nextUrl: string;
   prevUrl: string;
@@ -336,26 +383,63 @@ export async function scrapeKomiktapChapterPages(chapterUrlOrSlug: string): Prom
     targetUrl = `${KOMIKTAP_BASE_URL}/${clean}/`;
   }
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 14000);
+  let html = '';
+  let attempt = 0;
+  let lastError: any = null;
 
-  const res = await fetch(targetUrl, {
-    headers: DEFAULT_HEADERS,
-    signal: controller.signal
-  });
-  clearTimeout(timeout);
+  while (attempt < maxRetries) {
+    attempt++;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
 
-  if (!res.ok) {
-    throw new Error(`Komiktap chapter reader returned HTTP ${res.status}`);
+    try {
+      const res = await fetch(targetUrl, {
+        headers: DEFAULT_HEADERS,
+        signal: controller.signal
+      });
+      clearTimeout(timeout);
+
+      // Fast-fail permanent client errors
+      if (res.status === 404 || res.status === 403) {
+        throw new Error(`Komiktap chapter reader returned permanent HTTP ${res.status}`);
+      }
+
+      if (!res.ok) {
+        // Transient error (5xx, 429) -> trigger retry
+        if (attempt < maxRetries) {
+          const backoff = attempt * 600;
+          await new Promise(r => setTimeout(r, backoff));
+          continue;
+        }
+        throw new Error(`Komiktap chapter reader returned HTTP ${res.status}`);
+      }
+
+      html = await res.text();
+      break;
+    } catch (err: any) {
+      clearTimeout(timeout);
+      lastError = err;
+      if (err.message?.includes('permanent HTTP')) {
+        throw err;
+      }
+      if (attempt >= maxRetries) {
+        throw new Error(`Komiktap chapter fetch failed after ${attempt} attempts: ${err.message}`);
+      }
+      const backoff = attempt * 600;
+      await new Promise(r => setTimeout(r, backoff));
+    }
   }
 
-  const html = await res.text();
+  if (!html) {
+    throw lastError || new Error('Empty response from Komiktap chapter reader');
+  }
+
   let rawImages: string[] = [];
   let nextUrl = '';
   let prevUrl = '';
 
-  // Extract from ts_reader.run(...)
-  const match = html.match(/ts_reader\.run\((\{[\s\S]*?\})\);/);
+  // 1. Extract from ts_reader.run(...)
+  const match = html.match(/ts_reader\.run\s*\(\s*(\{[\s\S]*?\})\s*\)\s*;?/i);
   if (match) {
     try {
       const data = JSON.parse(match[1]);
@@ -371,29 +455,87 @@ export async function scrapeKomiktapChapterPages(chapterUrlOrSlug: string): Prom
         }
       }
     } catch (e) {
-      console.warn('Failed to parse ts_reader JSON:', e);
-    }
-  }
-
-  // Fallback 1: Extract from <div id="readerarea"><img> tags
-  if (rawImages.length === 0) {
-    const areaMatch = html.match(/<div[^>]*id=[\"']readerarea[\"'][^>]*>([\s\S]*?)<\/div>/i);
-    if (areaMatch) {
-      const imgRegex = /<img[^>]+src=[\"']([^\"']+)[\"'][^>]*>/gi;
-      let m;
-      while ((m = imgRegex.exec(areaMatch[1])) !== null) {
-        const src = m[1];
-        if (!src.includes('komiktap-light') && !src.includes('gravatar') && !src.includes('logo')) {
-          rawImages.push(src);
+      // Fallback JSON-like array extraction from the script block
+      const imagesMatch = match[1].match(/["']images["']\s*:\s*(\[[^\]]+\])/i) || match[1].match(/\bimages\s*:\s*(\[[^\]]+\])/i);
+      if (imagesMatch) {
+        try {
+          const parsedArr = JSON.parse(imagesMatch[1].replace(/'/g, '"'));
+          if (Array.isArray(parsedArr)) {
+            rawImages = parsedArr;
+          }
+        } catch (_) {
+          const urlMatches = imagesMatch[1].matchAll(/["'](https?:[^"']+)["']/g);
+          for (const u of urlMatches) {
+            rawImages.push(u[1]);
+          }
         }
       }
     }
   }
 
-  // Map images with proxy URLs and direct fallback
-  const pages = rawImages.map((imgUrl, idx) => {
-    // Normalise HTTP to HTTPS if possible, or wrap with our internal proxy
-    const directUrl = imgUrl.startsWith('//') ? `https:${imgUrl}` : imgUrl;
+  // 2. Fallback: Extract from scoped DOM containers (#readerarea, .reader-area, .entry-content)
+  if (rawImages.length === 0) {
+    const areaMatch = html.match(/<(?:div|article|section)[^>]*(?:id=[\"']readerarea[\"']|class=[\"'][^\"']*(?:readerarea|reader-area|entry-content|reading-content)[^\"']*)[^>]*>([\s\S]*?)<\/(?:div|article|section)>/i) ||
+      html.match(/<div[^>]*id=[\"']readerarea[\"'][^>]*>([\s\S]*?)<\/div>/i);
+    
+    const searchHtml = areaMatch ? areaMatch[1] : html;
+    const imgTagRegex = /<img\b([^>]+)>/gi;
+    let tagMatch;
+
+    while ((tagMatch = imgTagRegex.exec(searchHtml)) !== null) {
+      const attrs = tagMatch[1];
+
+      // Extract attributes in prioritized order: data-src -> data-lazy-src -> data-original -> data-cfsrc -> srcset -> src
+      const dataSrc = attrs.match(/\bdata-src=[\"']([^\"']+)[\"']/i)?.[1];
+      const dataLazySrc = attrs.match(/\bdata-lazy-src=[\"']([^\"']+)[\"']/i)?.[1];
+      const dataOriginal = attrs.match(/\bdata-original=[\"']([^\"']+)[\"']/i)?.[1];
+      const dataCfSrc = attrs.match(/\bdata-cfsrc=[\"']([^\"']+)[\"']/i)?.[1];
+      const srcset = attrs.match(/\b(?:data-)?srcset=[\"']([^\"']+)[\"']/i)?.[1];
+      const standardSrc = attrs.match(/\bsrc=[\"']([^\"']+)[\"']/i)?.[1];
+
+      let candidateUrl = dataSrc || dataLazySrc || dataOriginal || dataCfSrc || standardSrc || '';
+
+      if (!candidateUrl && srcset) {
+        const parts = srcset.split(',').map(s => s.trim().split(/\s+/)[0]);
+        if (parts.length > 0 && parts[0]) {
+          candidateUrl = parts[parts.length - 1] || parts[0];
+        }
+      }
+
+      candidateUrl = candidateUrl.trim();
+      if (!candidateUrl) continue;
+
+      // Filter out base64 placeholders and non-reader assets
+      const lower = candidateUrl.toLowerCase();
+      if (lower.startsWith('data:image/')) continue;
+      if (lower.includes('komiktap-light') || lower.includes('gravatar') || lower.includes('logo') || 
+          lower.includes('avatar') || lower.includes('emoji') || lower.includes('banner') || 
+          lower.includes('spinner') || lower.includes('ads') || lower.endsWith('.gif')) {
+        continue;
+      }
+
+      rawImages.push(candidateUrl);
+    }
+  }
+
+  // 3. Deduplicate URLs while strictly preserving original reading sequence
+  const seenImageUrls = new Set<string>();
+  const dedupedImages: string[] = [];
+  for (const raw of rawImages) {
+    let clean = raw.trim();
+    if (clean.startsWith('//')) {
+      clean = `https:${clean}`;
+    } else if (clean.startsWith('/') && !clean.startsWith('//')) {
+      clean = `${KOMIKTAP_BASE_URL}${clean}`;
+    }
+
+    if (!clean || seenImageUrls.has(clean)) continue;
+    seenImageUrls.add(clean);
+    dedupedImages.push(clean);
+  }
+
+  // 4. Map images with proxy URLs and direct fallback
+  const pages = dedupedImages.map((directUrl, idx) => {
     const proxiedUrl = `/api/proxy-image?url=${encodeURIComponent(directUrl)}`;
     return {
       id: `kt-page-${idx + 1}`,

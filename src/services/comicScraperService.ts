@@ -1,5 +1,6 @@
 import { Comic, Chapter, ComicContentType, ComicCategoryType } from '../types';
 import { getProfessionalComicSkeletonUrl } from '../components/common/ComicSkeletonBox';
+import { ChapterRepository } from '../features/chapters/services/chapterRepository';
 
 // Helper to determine if a comic is strictly 18+ based on genres, content rating, and metadata
 export const ADULT_GENRE_KEYWORDS = [
@@ -1186,12 +1187,38 @@ export async function fetchKomiktapDetail(slugOrUrl: string): Promise<any> {
   return null;
 }
 
+export async function runControlledConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  taskFn: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  if (items.length === 0) return [];
+  const results: R[] = new Array(items.length);
+  let currentIndex = 0;
+  const actualConcurrency = Math.max(1, Math.min(concurrency, items.length));
+
+  const workers = Array.from({ length: actualConcurrency }, async () => {
+    while (currentIndex < items.length) {
+      const idx = currentIndex++;
+      try {
+        results[idx] = await taskFn(items[idx], idx);
+      } catch (err: any) {
+        results[idx] = null as any;
+      }
+    }
+  });
+
+  await Promise.all(workers);
+  return results;
+}
+
 export async function fetchKomiktapChapterPages(chapterUrlOrSlug: string): Promise<{
   pages: Array<{ id: string; pageNumber: number; imageUrl: string; fallbackUrl: string; directUrl: string }>;
   total: number;
 }> {
+  const baseUrl = typeof window !== 'undefined' ? '' : 'http://localhost:3000';
   try {
-    const res = await fetch(`/api/komiktap/chapter?url=${encodeURIComponent(chapterUrlOrSlug)}`);
+    const res = await fetch(`${baseUrl}/api/komiktap/chapter?url=${encodeURIComponent(chapterUrlOrSlug)}`);
     if (res.ok) {
       const json = await res.json();
       if (json.pages && Array.isArray(json.pages)) {
@@ -1201,7 +1228,7 @@ export async function fetchKomiktapChapterPages(chapterUrlOrSlug: string): Promi
   } catch (e) {}
 
   try {
-    const res = await fetch(`/api/komiktap-proxy?action=chapter&url=${encodeURIComponent(chapterUrlOrSlug)}`);
+    const res = await fetch(`${baseUrl}/api/komiktap-proxy?action=chapter&url=${encodeURIComponent(chapterUrlOrSlug)}`);
     if (res.ok) {
       const json = await res.json();
       if (json.pages && Array.isArray(json.pages)) {
@@ -1463,6 +1490,7 @@ export async function buildComicFromScrapeAsync(
     isVisibleOnHome?: boolean;
     isPublished?: boolean;
     primaryDriveAccountId?: string;
+    onProgress?: (current: number, total: number, chapterTitle: string) => void;
   }
 ): Promise<{ comic: Comic; chapters: Chapter[] }> {
   // If source is Komiktap (Komiktap.info), pull complete detail and all real chapters!
@@ -1514,23 +1542,31 @@ export async function buildComicFromScrapeAsync(
         const seenChapterNums = new Map<number, number>();
         const seenChapterIds = new Set<string>();
 
-        // Preload chapter pages for immediate reading (all chapters if <= 5, or first 3 chapters if more)
+        // Preload chapter pages for all chapters concurrently (zero hard limits)
         const preloadedPagesMap = new Map<number, any[]>();
-        const totalChaps = detail.chapters?.length || 0;
-        const preloadLimit = totalChaps <= 5 ? totalChaps : 3;
-        const chaptersToPreload = (detail.chapters || []).slice(0, preloadLimit);
+        const chaptersToPreload = detail.chapters || [];
+        const totalChaps = chaptersToPreload.length;
 
         if (chaptersToPreload.length > 0) {
           try {
-            const fetchPromises = chaptersToPreload.map(async (ch: any, idx: number) => {
+            let processedPreload = 0;
+            await runControlledConcurrency(chaptersToPreload, 3, async (ch: any, idx: number) => {
               const chTarget = ch.slug || ch.url || '';
-              if (!chTarget) return;
+              if (!chTarget) return null;
               const chPagesRes = await fetchKomiktapChapterPages(chTarget);
               if (chPagesRes && chPagesRes.pages && chPagesRes.pages.length > 0) {
                 preloadedPagesMap.set(idx, chPagesRes.pages);
               }
+              processedPreload++;
+              if (customSettings?.onProgress) {
+                customSettings.onProgress(
+                  processedPreload,
+                  totalChaps,
+                  ch.title || `Chapter ${ch.chapterNumber || idx + 1}`
+                );
+              }
+              return null;
             });
-            await Promise.allSettled(fetchPromises);
           } catch (e) {
             console.warn('Could not prefetch chapter pages:', e);
           }
@@ -2269,6 +2305,126 @@ export async function runClientSideMassScraper(options: ClientScraperOptions): P
   return {
     totalAdded: newlyAdded,
     message: `Berhasil mengimpor ${newlyAdded} komik baru!`
+  };
+}
+
+/**
+ * Repairs missing chapter images for a KomikTap comic using controlled concurrency (3-4 workers)
+ * and directly persists images to Supabase while preserving existing data.
+ */
+export async function repairMissingKomiktapChapterImages(
+  comicId: string,
+  chapters: Chapter[],
+  options?: {
+    comicSlug?: string;
+    comicSourceUrl?: string;
+    comicTitle?: string;
+    concurrency?: number;
+    onProgress?: (p: { current: number; total: number; success: number; failed: number; currentTitle: string }) => void;
+    isCancelled?: () => boolean;
+  }
+): Promise<{
+  attempted: number;
+  success: number;
+  failed: number;
+  totalImagesExtracted: number;
+  failedChapters: Array<{ id: string; chapterNumber: number; title: string; url: string; error: string }>;
+}> {
+  const missing = chapters.filter(c => !c.pages || c.pages.length === 0);
+  const total = missing.length;
+  const concurrency = options?.concurrency || 3;
+  let successCount = 0;
+  let failedCount = 0;
+  let totalImagesExtracted = 0;
+  const failedChapters: Array<{ id: string; chapterNumber: number; title: string; url: string; error: string }> = [];
+
+  if (total === 0) {
+    return {
+      attempted: 0,
+      success: 0,
+      failed: 0,
+      totalImagesExtracted: 0,
+      failedChapters: []
+    };
+  }
+
+  let derivedComicSlug = options?.comicSlug || '';
+  if (!derivedComicSlug && options?.comicSourceUrl && options.comicSourceUrl.includes('komiktap.info/manga/')) {
+    derivedComicSlug = options.comicSourceUrl.replace(/\/$/, '').split('/').pop() || '';
+  }
+  if (!derivedComicSlug && options?.comicTitle) {
+    derivedComicSlug = options.comicTitle.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+  }
+
+  let processedCount = 0;
+
+  await runControlledConcurrency(missing, concurrency, async (ch) => {
+    if (options?.isCancelled && options.isCancelled()) return;
+
+    let targetUrl = ch.slug || ch.driveUrl || ch.externalUrl || '';
+    if (!targetUrl || targetUrl.startsWith('ch-') || !targetUrl.includes('chapter')) {
+      if (derivedComicSlug) {
+        targetUrl = `${derivedComicSlug}-chapter-${ch.chapterNumber}`;
+      }
+    }
+
+    if (!targetUrl) {
+      failedCount++;
+      failedChapters.push({
+        id: ch.id,
+        chapterNumber: ch.chapterNumber,
+        title: ch.title,
+        url: '',
+        error: 'Missing chapter source URL'
+      });
+      return;
+    }
+
+    try {
+      const res = await fetchKomiktapChapterPages(targetUrl);
+      if (res && Array.isArray(res.pages) && res.pages.length > 0) {
+        ch.pages = res.pages;
+        totalImagesExtracted += res.pages.length;
+        successCount++;
+        // Persist directly to Supabase
+        await ChapterRepository.saveChapterPages(ch.id, res.pages);
+      } else {
+        failedCount++;
+        failedChapters.push({
+          id: ch.id,
+          chapterNumber: ch.chapterNumber,
+          title: ch.title,
+          url: targetUrl,
+          error: '0 images extracted from reader'
+        });
+      }
+    } catch (err: any) {
+      failedCount++;
+      failedChapters.push({
+        id: ch.id,
+        chapterNumber: ch.chapterNumber,
+        title: ch.title,
+        url: targetUrl,
+        error: err.message || 'Fetch error'
+      });
+    } finally {
+      processedCount++;
+      options?.onProgress?.({
+        current: processedCount,
+        total,
+        success: successCount,
+        failed: failedCount,
+        currentTitle: ch.title
+      });
+    }
+  });
+
+  return {
+    attempted: total,
+    success: successCount,
+    failed: failedCount,
+    totalImagesExtracted,
+    failedChapters
   };
 }
 

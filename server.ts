@@ -1960,7 +1960,7 @@ async function startServer() {
       const lower = imageUrl.toLowerCase();
       if (lower.includes("mangadex")) {
         referer = "https://mangadex.org/";
-      } else if (lower.includes("komiktap") || lower.includes("cdnasu") || lower.includes("komikindo")) {
+      } else if (lower.includes("komiktap") || lower.includes("cdnasu") || lower.includes("komikindo") || lower.includes("uqni") || lower.includes("desu")) {
         referer = "https://komiktap.info/";
       } else if (lower.includes("komikcast")) {
         referer = "https://komikcast.bz/";
@@ -2019,7 +2019,7 @@ async function startServer() {
       const lower = imageUrl.toLowerCase();
       if (lower.includes("mangadex")) {
         referer = "https://mangadex.org/";
-      } else if (lower.includes("komiktap") || lower.includes("cdnasu") || lower.includes("komikindo")) {
+      } else if (lower.includes("komiktap") || lower.includes("cdnasu") || lower.includes("komikindo") || lower.includes("uqni") || lower.includes("desu")) {
         referer = "https://komiktap.info/";
       } else if (lower.includes("komikcast")) {
         referer = "https://komikcast.bz/";

@@ -7,6 +7,8 @@ import { validateChapterData } from '../../comics/services/comicValidation';
 export interface ChapterWriteResult {
   success: boolean;
   count?: number;
+  rawCount?: number;
+  readBackCount?: number;
   error?: string;
   code?: string;
   details?: string | null;
@@ -112,6 +114,20 @@ export class ChapterRepository {
         columns: Object.keys(row)
       });
 
+      // Rule: Do NOT overwrite existing non-empty pages with empty array []
+      if (!row.pages || row.pages.length === 0) {
+        try {
+          const { data: existing } = await client
+            .from(DATABASE_TABLES.CHAPTERS)
+            .select('pages')
+            .eq('id', chapter.id)
+            .maybeSingle();
+          if (existing && Array.isArray(existing.pages) && existing.pages.length > 0) {
+            row.pages = existing.pages;
+          }
+        } catch (_) {}
+      }
+
       const { error } = await client.from(DATABASE_TABLES.CHAPTERS).upsert(row, { onConflict: 'id' });
       if (error) {
         logDatabaseError({ table: DATABASE_TABLES.CHAPTERS, operation: 'UPSERT', error, details: { chapterId: chapter.id, comicId } });
@@ -197,52 +213,105 @@ export class ChapterRepository {
         rows.push(row);
       }
 
-      // Sanitize: deduplicate rows by id and ensure unique chapter_number per comic to prevent PG 21000
-      const seenRowIds = new Set<string>();
-      const sanitizedRows: Record<string, any>[] = [];
-      const seenComicChNums = new Map<string, Set<number>>();
+      // Sanitize & Deduplicate rows before UPSERT:
+      // Deduplicate using primary key (id) and logical key (comic_id::chapter_number)
+      // Never send multiple rows with conflicting keys in the same batch (prevents PG error 21000)
+      const chaptersBeforeDedupe = rows.length;
+      const dedupeMap = new Map<string, Record<string, any>>();
+      let duplicatesRemoved = 0;
 
       for (const row of rows) {
-        let finalId = String(row.id || '');
-        if (seenRowIds.has(finalId)) {
-          finalId = `${finalId}-v${Math.random().toString(36).substring(2, 6)}`;
-          row.id = finalId;
-        }
-        seenRowIds.add(finalId);
+        const comicId = String(row.comic_id || '');
+        const chNum = Number(row.chapter_number) || 1;
+        const rowId = String(row.id || '');
+        const logicalKey = `${comicId}::${chNum}`;
+        const primaryKey = rowId;
 
-        const comicKey = String(row.comic_id || '');
-        if (!seenComicChNums.has(comicKey)) {
-          seenComicChNums.set(comicKey, new Set<number>());
+        // Check if we already have this chapter by logical key or primary key
+        if (dedupeMap.has(logicalKey)) {
+          duplicatesRemoved++;
+          const existing = dedupeMap.get(logicalKey)!;
+          // If the incoming duplicate has pages while existing doesn't, enrich existing with pages
+          if ((!existing.pages || existing.pages.length === 0) && (row.pages && row.pages.length > 0)) {
+            existing.pages = row.pages;
+          }
+          continue;
         }
-        const chNumSet = seenComicChNums.get(comicKey)!;
-        let num = Number(row.chapter_number) || 1;
-        while (chNumSet.has(num)) {
-          num = Number((num + 0.1).toFixed(1));
-        }
-        row.chapter_number = num;
-        chNumSet.add(num);
 
-        sanitizedRows.push(row);
+        if (dedupeMap.has(primaryKey)) {
+          duplicatesRemoved++;
+          const existing = dedupeMap.get(primaryKey)!;
+          if ((!existing.pages || existing.pages.length === 0) && (row.pages && row.pages.length > 0)) {
+            existing.pages = row.pages;
+          }
+          continue;
+        }
+
+        dedupeMap.set(logicalKey, row);
+        dedupeMap.set(primaryKey, row);
       }
+
+      // Collect unique rows
+      const sanitizedRows = [...new Set(dedupeMap.values())];
+      const chaptersAfterDedupe = sanitizedRows.length;
+
+      console.log(`[CHAPTER DEDUPLICATION AUDIT]`, {
+        chaptersBeforeDedupe,
+        chaptersAfterDedupe,
+        duplicatesRemoved,
+        conflictTarget: 'id'
+      });
 
       const allIds = sanitizedRows.map(r => r.id);
       const allColumns = sanitizedRows.length > 0 ? Object.keys(sanitizedRows[0]) : [];
 
-      console.log(`[SUPABASE CHAPTER UPSERT]`, {
+      console.log(`[SUPABASE CHAPTER BATCH UPSERT START]`, {
         table: DATABASE_TABLES.CHAPTERS,
         operation: 'UPSERT',
-        count: sanitizedRows.length,
-        ids: allIds.slice(0, 10),
+        totalRows: sanitizedRows.length,
+        batchSize: 50,
+        sampleIds: allIds.slice(0, 5),
         columns: allColumns
       });
 
       const CHUNK_SIZE = 50;
+      const totalBatches = Math.ceil(sanitizedRows.length / CHUNK_SIZE);
+
       for (let i = 0; i < sanitizedRows.length; i += CHUNK_SIZE) {
+        const batchNum = Math.floor(i / CHUNK_SIZE) + 1;
         const chunk = sanitizedRows.slice(i, i + CHUNK_SIZE);
         const chunkIds = chunk.map(c => c.id);
+
+        // Rule: Never overwrite existing non-empty pages with empty array []
+        const emptyPagesIds = chunk.filter(r => !r.pages || r.pages.length === 0).map(r => r.id);
+        if (emptyPagesIds.length > 0) {
+          try {
+            const { data: existingRows } = await client
+              .from(DATABASE_TABLES.CHAPTERS)
+              .select('id, pages')
+              .in('id', emptyPagesIds);
+            if (existingRows && existingRows.length > 0) {
+              const existingPagesMap = new Map<string, any[]>();
+              for (const ex of existingRows) {
+                if (Array.isArray(ex.pages) && ex.pages.length > 0) {
+                  existingPagesMap.set(ex.id, ex.pages);
+                }
+              }
+              for (const r of chunk) {
+                if ((!r.pages || r.pages.length === 0) && existingPagesMap.has(r.id)) {
+                  r.pages = existingPagesMap.get(r.id);
+                }
+              }
+            }
+          } catch (exErr) {
+            console.warn('[PRESERVE EXISTING PAGES BATCH CHECK]', exErr);
+          }
+        }
+
         const { error } = await client.from(DATABASE_TABLES.CHAPTERS).upsert(chunk, { onConflict: 'id' });
         if (error) {
-          logDatabaseError({ table: DATABASE_TABLES.CHAPTERS, operation: 'UPSERT', error, details: { chunkIndex: i, total: rows.length, chunkIds } });
+          console.error(`[SUPABASE CHAPTER UPSERT ERROR] Batch ${batchNum}/${totalBatches} (${chunk.length} rows) FAILED:`, error);
+          logDatabaseError({ table: DATABASE_TABLES.CHAPTERS, operation: 'UPSERT', error, details: { batchNum, totalBatches, chunkIndex: i, total: sanitizedRows.length, chunkIds } });
           const diagReport = formatSupabaseDiagnosticError({
             table: DATABASE_TABLES.CHAPTERS,
             operation: 'UPSERT',
@@ -252,7 +321,6 @@ export class ChapterRepository {
             columns: allColumns,
             safePayload: chunk.slice(0, 2)
           });
-          console.error(diagReport.formattedOutput, error);
           return {
             success: false,
             count: i,
@@ -270,8 +338,40 @@ export class ChapterRepository {
             diagnosticReport: diagReport
           };
         }
+
+        console.log(`[SUPABASE CHAPTER UPSERT] Batch ${batchNum}/${totalBatches}: ${chunk.length}/${chunk.length} PASS`);
       }
-      return { success: true, count: chapters.length, isConfigured: true, table: DATABASE_TABLES.CHAPTERS, operation: 'UPSERT', chapterIds: allIds };
+
+      // Read-back verification: verify that written chapters exist in Supabase
+      let readBackCount = sanitizedRows.length;
+      const uniqueComicIds = [...new Set(sanitizedRows.map(r => r.comic_id).filter(Boolean))];
+      if (uniqueComicIds.length === 1) {
+        try {
+          const comicId = uniqueComicIds[0];
+          const { count, error: rbErr } = await client
+            .from(DATABASE_TABLES.CHAPTERS)
+            .select('id', { count: 'exact', head: true })
+            .eq('comic_id', comicId);
+          if (!rbErr && typeof count === 'number') {
+            readBackCount = count;
+          }
+        } catch (rbEx) {
+          console.warn('[SUPABASE CHAPTER READ-BACK ERROR]', rbEx);
+        }
+      }
+
+      console.log(`[SUPABASE CHAPTER READ-BACK VERIFIED] Raw: ${chapters.length}, Unique: ${sanitizedRows.length}, In DB: ${readBackCount}`);
+
+      return {
+        success: true,
+        count: sanitizedRows.length,
+        rawCount: chapters.length,
+        readBackCount,
+        isConfigured: true,
+        table: DATABASE_TABLES.CHAPTERS,
+        operation: 'UPSERT',
+        chapterIds: allIds
+      };
     } catch (err: any) {
       logDatabaseError({ table: DATABASE_TABLES.CHAPTERS, operation: 'UPSERT', error: err, details: { total: chapters.length } });
       const diagReport = formatSupabaseDiagnosticError({
@@ -334,6 +434,117 @@ export class ChapterRepository {
     } catch (err: any) {
       logDatabaseError({ table: DATABASE_TABLES.CHAPTERS, operation: 'DELETE', error: err, details: { ids } });
       return { success: false, count: 0, isConfigured: true, error: err?.message || 'Network error' };
+    }
+  }
+
+  /**
+   * Directly save or update pages for a specific chapter without touching other columns
+   */
+  public static async saveChapterPages(chapterId: string, pages: any[]): Promise<{ success: boolean; count: number; error?: string }> {
+    if (!isSupabaseConfigured()) return { success: false, count: 0, error: 'Supabase not configured' };
+    const client = getSupabaseClient();
+    if (!client) return { success: false, count: 0, error: 'Supabase client is null' };
+
+    // Anti-overwrite guard: do not overwrite with empty or invalid pages
+    if (!pages || !Array.isArray(pages) || pages.length === 0) {
+      return { success: false, count: 0, error: 'Anti-overwrite guard: Refusing to save empty pages array' };
+    }
+
+    try {
+      const { error } = await client
+        .from(DATABASE_TABLES.CHAPTERS)
+        .update({
+          pages,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', chapterId);
+
+      if (error) {
+        logDatabaseError({ table: DATABASE_TABLES.CHAPTERS, operation: 'UPDATE', error, details: { chapterId, pageCount: pages.length } });
+        return { success: false, count: 0, error: error.message };
+      }
+      return { success: true, count: pages.length };
+    } catch (e: any) {
+      return { success: false, count: 0, error: e.message || 'Failed to update pages' };
+    }
+  }
+
+  /**
+   * Diagnostic Image Coverage Query for a Comic
+   * Returns exact metrics across all stored chapters
+   */
+  public static async getImageCoverage(comicId: string): Promise<{
+    total: number;
+    withImages: number;
+    withoutImages: number;
+    minPages: number;
+    maxPages: number;
+    avgPages: number;
+    coveragePercent: number;
+    missingChapterIds: string[];
+    sampleStats?: Array<{ id: string; chapterNumber: number; title: string; pageCount: number }>;
+  }> {
+    const emptyResult = { total: 0, withImages: 0, withoutImages: 0, minPages: 0, maxPages: 0, avgPages: 0, coveragePercent: 0, missingChapterIds: [] };
+    if (!isSupabaseConfigured()) return emptyResult;
+    const client = getSupabaseClient();
+    if (!client) return emptyResult;
+
+    try {
+      const { data, error } = await client
+        .from(DATABASE_TABLES.CHAPTERS)
+        .select('id, chapter_number, title, pages')
+        .eq('comic_id', comicId)
+        .order('chapter_number', { ascending: true });
+
+      if (error || !data) return emptyResult;
+
+      const total = data.length;
+      let withImages = 0;
+      const missingChapterIds: string[] = [];
+      let minPages = total > 0 ? Infinity : 0;
+      let maxPages = 0;
+      let totalPageCount = 0;
+      const sampleStats: Array<{ id: string; chapterNumber: number; title: string; pageCount: number }> = [];
+
+      for (const ch of data) {
+        const pageCount = Array.isArray(ch.pages) ? ch.pages.length : 0;
+        if (pageCount > 0) {
+          withImages++;
+          if (pageCount < minPages) minPages = pageCount;
+          if (pageCount > maxPages) maxPages = pageCount;
+          totalPageCount += pageCount;
+        } else {
+          missingChapterIds.push(ch.id);
+        }
+
+        if (sampleStats.length < 10 || sampleStats.length % 30 === 0) {
+          sampleStats.push({
+            id: ch.id,
+            chapterNumber: Number(ch.chapter_number) || 1,
+            title: ch.title || '',
+            pageCount
+          });
+        }
+      }
+
+      if (minPages === Infinity) minPages = 0;
+      const withoutImages = total - withImages;
+      const avgPages = withImages > 0 ? Number((totalPageCount / withImages).toFixed(1)) : 0;
+      const coveragePercent = total > 0 ? Number(((withImages / total) * 100).toFixed(2)) : 0;
+
+      return {
+        total,
+        withImages,
+        withoutImages,
+        minPages,
+        maxPages,
+        avgPages,
+        coveragePercent,
+        missingChapterIds,
+        sampleStats
+      };
+    } catch (_) {
+      return emptyResult;
     }
   }
 }

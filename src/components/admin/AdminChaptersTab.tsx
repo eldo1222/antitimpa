@@ -6,6 +6,8 @@ import { formatGoogleDriveEmbedUrl, isGoogleDriveUrl } from '../../utils/driveHe
 import { downloadDrivePdf, convertImagesToPdf } from '../../utils/pdfConverter';
 import { getProfessionalComicSkeletonUrl } from '../common/ComicSkeletonBox';
 import { AdminModalPortal } from '../common/AdminModalPortal';
+import { runControlledConcurrency, fetchKomiktapChapterPages } from '../../services/comicScraperService';
+import { ChapterRepository } from '../../features/chapters/services/chapterRepository';
 import { 
   Plus, 
   Trash2, 
@@ -50,6 +52,7 @@ export const AdminChaptersTab: React.FC = () => {
     driveAccounts,
     addChapter, 
     updateChapter, 
+    batchUpdateChapterPages,
     deleteChapter, 
     batchDeleteChapters,
     batchDeleteComics,
@@ -94,6 +97,9 @@ export const AdminChaptersTab: React.FC = () => {
   const [downloadingChapterId, setDownloadingChapterId] = useState<string | null>(null);
   const [fetchingChapterId, setFetchingChapterId] = useState<string | null>(null);
   const [pdfToastMsg, setPdfToastMsg] = useState<string | null>(null);
+  const [isBatchPullingPages, setIsBatchPullingPages] = useState(false);
+  const [batchPullProgress, setBatchPullProgress] = useState<{ current: number; total: number; success: number; currentName: string } | null>(null);
+  const cancelBatchPullRef = useRef(false);
 
   // Form State
   const [chapterNumber, setChapterNumber] = useState<number>(1);
@@ -577,6 +583,77 @@ export const AdminChaptersTab: React.FC = () => {
     } finally {
       setFetchingChapterId(null);
     }
+  };
+
+  const handleBatchPullMissingPages = async () => {
+    if (!currentComic) return;
+    const missing = allCurrentChapters.filter(ch => !ch.pages || ch.pages.length === 0);
+    if (missing.length === 0) {
+      setPdfToastMsg('Semua chapter dalam komik ini sudah memiliki gambar lengkap!');
+      setTimeout(() => setPdfToastMsg(null), 3000);
+      return;
+    }
+
+    setIsBatchPullingPages(true);
+    cancelBatchPullRef.current = false;
+    let successCount = 0;
+    let processedCount = 0;
+    const collectedUpdates: Array<{ chapterId: string; pages: any[] }> = [];
+
+    // Derive canonical comic slug for Komiktap
+    let cSlug = '';
+    if (currentComic.sourceUrl && currentComic.sourceUrl.includes('komiktap.info/manga/')) {
+      cSlug = currentComic.sourceUrl.replace(/\/$/, '').split('/').pop() || '';
+    }
+    if (!cSlug) {
+      cSlug = currentComic.slug || currentComic.title?.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || '';
+    }
+
+    await runControlledConcurrency(missing, 3, async (ch) => {
+      if (cancelBatchPullRef.current) return null;
+
+      let targetUrl = ch.slug || ch.driveUrl || ch.externalUrl || '';
+      if (!targetUrl || targetUrl.startsWith('ch-') || !targetUrl.includes('chapter')) {
+        targetUrl = `${cSlug}-chapter-${ch.chapterNumber}`;
+      }
+
+      try {
+        const data = await fetchKomiktapChapterPages(targetUrl);
+        if (data && Array.isArray(data.pages) && data.pages.length > 0) {
+          await ChapterRepository.saveChapterPages(ch.id, data.pages);
+          collectedUpdates.push({ chapterId: ch.id, pages: data.pages });
+          successCount++;
+        }
+      } catch (err) {
+        console.warn('Batch pull error on chapter:', ch.title, err);
+      } finally {
+        processedCount++;
+        setBatchPullProgress({
+          current: processedCount,
+          total: missing.length,
+          success: successCount,
+          currentName: ch.title || `Chapter ${ch.chapterNumber}`
+        });
+      }
+      return null;
+    });
+
+    if (collectedUpdates.length > 0) {
+      batchUpdateChapterPages(currentComic.id, collectedUpdates);
+    }
+
+    setIsBatchPullingPages(false);
+    setBatchPullProgress(null);
+    setPdfToastMsg(`Selesai! ${successCount} dari ${missing.length} chapter berhasil ditarik & disimpan ke Supabase.`);
+    setTimeout(() => setPdfToastMsg(null), 4000);
+  };
+
+  const handleCancelBatchPull = () => {
+    cancelBatchPullRef.current = true;
+    setIsBatchPullingPages(false);
+    setBatchPullProgress(null);
+    setPdfToastMsg('Pengambilan gambar dibatalkan.');
+    setTimeout(() => setPdfToastMsg(null), 3000);
   };
 
   const handleDownloadChapterPdf = async (ch: Chapter) => {
@@ -1063,6 +1140,113 @@ export const AdminChaptersTab: React.FC = () => {
               Menampilkan: <strong className="text-white">{currentChapters.length}</strong> / {allCurrentChapters.length}
             </div>
           </div>
+
+          {/* Scrape Health Matrix & Image Coverage Repair Center */}
+          {(() => {
+            const total = allCurrentChapters.length;
+            const missingCount = allCurrentChapters.filter(ch => !ch.pages || ch.pages.length === 0).length;
+            const withImagesCount = total - missingCount;
+            const coveragePercent = total > 0 ? Math.round((withImagesCount / total) * 100) : 0;
+            const isFullyCovered = total > 0 && missingCount === 0;
+
+            return (
+              <div className="p-4 bg-gradient-to-r from-[#141420] via-[#161626] to-[#12121c] border border-[#26263c] rounded-2xl shadow-lg space-y-3">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border ${
+                      isFullyCovered 
+                        ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400'
+                        : coveragePercent > 0 
+                        ? 'bg-amber-500/15 border-amber-500/30 text-amber-400' 
+                        : 'bg-rose-500/15 border-rose-500/30 text-rose-400'
+                    }`}>
+                      <Sparkles className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-white flex items-center gap-2">
+                        <span>Scrape Health Matrix & Image Coverage</span>
+                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold uppercase border ${
+                          isFullyCovered 
+                            ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' 
+                            : 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                        }`}>
+                          {coveragePercent}% Coverage
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        {isBatchPullingPages && batchPullProgress
+                          ? `Workers Aktif (Concurrency 3): ${batchPullProgress.currentName} (${batchPullProgress.current}/${batchPullProgress.total}) — Sukses: ${batchPullProgress.success}`
+                          : isFullyCovered
+                          ? 'Semua chapter dalam komik ini memiliki gambar lengkap dan tersimpan aman di Supabase.'
+                          : `Terdapat ${missingCount} chapter yang belum memiliki gambar. Jalankan Repair Mode untuk mengisi gambar secara otomatis.`}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto justify-end">
+                    {isBatchPullingPages ? (
+                      <button
+                        onClick={handleCancelBatchPull}
+                        className="px-3 py-1.5 bg-red-600/80 hover:bg-red-600 text-white rounded-xl text-xs font-bold transition-all cursor-pointer shadow"
+                      >
+                        Batalkan Repair
+                      </button>
+                    ) : (
+                      <button
+                        onClick={handleBatchPullMissingPages}
+                        disabled={missingCount === 0}
+                        className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow cursor-pointer ${
+                          missingCount === 0
+                            ? 'bg-[#1e1e2c] text-slate-500 cursor-not-allowed border border-[#2a2a3c]'
+                            : 'bg-gradient-to-r from-rose-600 to-[#ff5b14] hover:from-rose-500 hover:to-[#ff6d2e] text-white shadow-rose-900/20'
+                        }`}
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        <span>Repair Missing Images ({missingCount})</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Progress bar during batch pull */}
+                {isBatchPullingPages && batchPullProgress && (
+                  <div className="space-y-1.5 pt-1">
+                    <div className="flex justify-between text-[11px] text-slate-400 font-mono">
+                      <span>Proses: {batchPullProgress.current} / {batchPullProgress.total}</span>
+                      <span className="text-emerald-400 font-bold">{batchPullProgress.success} Chapter Berhasil Masuk</span>
+                    </div>
+                    <div className="w-full bg-[#1e1e2c] h-2 rounded-full overflow-hidden">
+                      <div 
+                        className="bg-gradient-to-r from-[#ff5b14] to-emerald-400 h-full transition-all duration-300"
+                        style={{ width: `${Math.round((batchPullProgress.current / batchPullProgress.total) * 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Scrape Health Matrix Metrics Grid */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+                  <div className="p-2.5 rounded-xl bg-[#181826] border border-[#242436]">
+                    <div className="text-[10px] text-slate-400 uppercase font-semibold">Total Chapters</div>
+                    <div className="text-sm font-extrabold text-white font-mono mt-0.5">{total}</div>
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-[#181826] border border-[#242436]">
+                    <div className="text-[10px] text-emerald-400/80 uppercase font-semibold">Images &gt; 0 (Ready)</div>
+                    <div className="text-sm font-extrabold text-emerald-400 font-mono mt-0.5">{withImagesCount}</div>
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-[#181826] border border-[#242436]">
+                    <div className="text-[10px] text-rose-400/80 uppercase font-semibold">Images = 0 (Missing)</div>
+                    <div className="text-sm font-extrabold text-rose-400 font-mono mt-0.5">{missingCount}</div>
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-[#181826] border border-[#242436]">
+                    <div className="text-[10px] text-amber-400/80 uppercase font-semibold">Coverage Status</div>
+                    <div className="text-sm font-extrabold text-amber-400 font-mono mt-0.5">{coveragePercent}%</div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
 
