@@ -1642,7 +1642,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const openLoginModal = (notice?: string) => {
-    setLoginModalRedirectNotice(notice);
+    // Defense-in-depth: Never expose sensitive admin text or role restrictions to the public login modal
+    const safeNotice = notice && !/admin/i.test(notice) ? notice : undefined;
+    setLoginModalRedirectNotice(safeNotice);
     setIsGoogleAuthModalOpen(true);
     setIsLoginModalOpen(false);
   };
@@ -1669,10 +1671,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const startReading = (chapterId: string): boolean => {
+    // Admins always have unrestricted access
+    if (currentUser?.role === 'admin') {
+      setReadingChapterId(chapterId);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return true;
+    }
+
     // Find the comic this chapter belongs to
     let targetComicId: string | null = null;
     (Object.entries(chapters) as [string, Chapter[]][]).forEach(([cId, chList]) => {
-      if (Array.isArray(chList) && chList.some(ch => ch.id === chapterId)) {
+      if (Array.isArray(chList) && chList.some(ch => ch.id === chapterId || ch.slug === chapterId)) {
         targetComicId = cId;
       }
     });
@@ -1683,9 +1692,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         openLoginModal(`🔒 ${check.message || 'Akses komik ini dibatasi untuk paket akun Anda.'}`);
         return false;
       }
-    } else if (!currentUser) {
-      openLoginModal('🔒 Fitur Baca Komik terkunci! Silakan login dengan akun pembaca Anda.');
-      return false;
     }
 
     setReadingChapterId(chapterId);
@@ -1703,15 +1709,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const setIsAdminView = (isAdmin: boolean) => {
     if (isAdmin) {
-      if (!currentUser || currentUser.role !== 'admin') {
-        addLog(
-          currentUser?.username || 'tamu/reader',
-          'Percobaan Akses Panel Admin Ditolak',
-          'unauthorized_attempt',
-          'failed',
-          'Akses Ditolak: Hanya Super Admin yang diizinkan mengakses Dashboard Admin. Akun reader dibatasi di mode pembaca.'
-        );
-        openLoginModal('🔒 Akses Khusus Super Admin: Akun Anda adalah akun pembaca dan tidak memiliki izin mengakses Dashboard Admin. Silakan masuk menggunakan akun Super Admin.');
+      const storedUser = safeParseJson<User | null>(STORAGE_KEYS.CURRENT_USER, null);
+      const effectiveUser = currentUser || storedUser;
+      if (!effectiveUser || effectiveUser.role !== 'admin') {
+        // Silently deny without leaking admin status or triggering unwanted login modals
+        setIsAdminViewState(false);
         return;
       }
     }

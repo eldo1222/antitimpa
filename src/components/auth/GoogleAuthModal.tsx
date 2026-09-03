@@ -135,7 +135,7 @@ export const GoogleAuthModal: React.FC = () => {
         </div>
 
         {/* Notice Prompt if redirected from protected content */}
-        {loginModalRedirectNotice && (
+        {loginModalRedirectNotice && !/admin/i.test(loginModalRedirectNotice) && (
           <div className="mx-6 mt-4 p-3 rounded-2xl bg-[#ff5b14]/10 border border-[#ff5b14]/30 flex items-start gap-2.5 text-xs text-[#ff9055] animate-in fade-in">
             <Lock className="w-4 h-4 shrink-0 mt-0.5 text-[#ff5b14]" />
             <span className="leading-relaxed font-medium">{loginModalRedirectNotice}</span>
@@ -189,10 +189,10 @@ export const GoogleAuthModal: React.FC = () => {
               <div className="p-4 rounded-2xl bg-[#161622] border border-[#27273a] space-y-2 text-xs text-slate-300">
                 <div className="flex items-center gap-2 text-[#ff5b14] font-bold">
                   <Sparkles className="w-4 h-4" />
-                  <span>Akses Langsung Komik & Panel</span>
+                  <span>Akses Langsung Koleksi Komik</span>
                 </div>
                 <p className="text-[11px] text-slate-300 leading-relaxed">
-                  Masuk langsung dengan Akun Google Anda untuk membaca ribuan judul komik, menyimpan riwayat, dan membuka fitur admin/VIP otomatis.
+                  Masuk langsung dengan Akun Google Anda untuk membaca ribuan judul komik, menyimpan riwayat baca, dan bookmark favorit.
                 </p>
               </div>
 

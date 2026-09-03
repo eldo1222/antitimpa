@@ -5,8 +5,6 @@ import {
   Bell, 
   Menu, 
   ShieldCheck, 
-  Smartphone, 
-  Monitor, 
   User, 
   X, 
   Sparkles, 
@@ -46,8 +44,6 @@ export const Header: React.FC = () => {
     comics,
     chapters,
     bookmarks,
-    isMobileDeviceFrame,
-    toggleMobileDeviceFrame,
     setSelectedGenreFilter,
     systemSettings
   } = useApp();
@@ -320,21 +316,8 @@ export const Header: React.FC = () => {
             </nav>
           </div>
 
-          {/* Right Side: Device Frame, Search Icon (beside Notification), Notification & Auth */}
+          {/* Right Side: Search Icon, Notification & Auth */}
           <div className="flex items-center gap-2 sm:gap-2.5">
-            {/* Toggle Device Frame for previewing phone shell on desktop */}
-            <button
-              onClick={toggleMobileDeviceFrame}
-              className={`p-2 rounded-xl border transition-colors hidden lg:flex items-center justify-center cursor-pointer ${
-                isMobileDeviceFrame 
-                  ? 'bg-[#ff5b14]/20 border-[#ff5b14]/40 text-[#ff5b14]' 
-                  : 'bg-[#161622] border-[#252536] text-slate-400 hover:text-white hover:border-slate-500'
-              }`}
-              title={isMobileDeviceFrame ? "Beralih ke Tampilan Penuh Desktop" : "Simulasi Frame HP Mobile"}
-            >
-              <Smartphone className="w-4 h-4" />
-            </button>
-
             {/* 🔍 SEARCH ICON BUTTON (Positioned right beside notification icon) */}
             <div className="relative" ref={searchContainerRef}>
               <button

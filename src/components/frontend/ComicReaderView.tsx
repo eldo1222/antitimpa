@@ -70,20 +70,23 @@ export const ComicReaderView: React.FC = () => {
   const effectiveChapterId = params.chapterId || readingChapterId;
   const effectiveComicId = params.comicId;
 
-  // Find active comic and chapter
+  // Find active comic and chapter with fallback matching by id, slug, or chapter number
   let activeComic = comics.find(c => {
     if (effectiveComicId && (c.id === effectiveComicId || c.slug === effectiveComicId)) return true;
     const list = chapters[c.id] || [];
-    return list.some(ch => ch.id === effectiveChapterId);
+    return list.some(ch => ch.id === effectiveChapterId || ch.slug === effectiveChapterId || String(ch.chapterNumber) === effectiveChapterId);
   }) || comics.find(c => {
     const list = chapters[c.id] || [];
-    return list.some(ch => ch.id === effectiveChapterId);
+    return list.some(ch => ch.id === effectiveChapterId || ch.slug === effectiveChapterId || String(ch.chapterNumber) === effectiveChapterId);
   });
 
-  let activeChapter = activeComic ? (chapters[activeComic.id] || []).find(ch => ch.id === effectiveChapterId) : null;
+  let activeChapter = activeComic 
+    ? (chapters[activeComic.id] || []).find(ch => ch.id === effectiveChapterId || ch.slug === effectiveChapterId || String(ch.chapterNumber) === effectiveChapterId) 
+    : null;
+
   if (!activeChapter && effectiveChapterId) {
     for (const c of comics) {
-      const found = (chapters[c.id] || []).find(ch => ch.id === effectiveChapterId);
+      const found = (chapters[c.id] || []).find(ch => ch.id === effectiveChapterId || ch.slug === effectiveChapterId || String(ch.chapterNumber) === effectiveChapterId);
       if (found) {
         activeComic = c;
         activeChapter = found;
@@ -92,12 +95,20 @@ export const ComicReaderView: React.FC = () => {
     }
   }
 
-  // Ensure state matches router on mount
+  // Ensure state matches router on mount or route changes
   useEffect(() => {
     if (effectiveChapterId && effectiveChapterId !== readingChapterId) {
       startReading(effectiveChapterId);
     }
   }, [effectiveChapterId]);
+
+  // Scroll to top automatically whenever chapter changes
+  useEffect(() => {
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTop = 0;
+    }
+    window.scrollTo({ top: 0, behavior: 'instant' });
+  }, [effectiveChapterId, readingChapterId]);
 
   const handleClose = () => {
     closeReader();
@@ -109,9 +120,26 @@ export const ComicReaderView: React.FC = () => {
   };
 
   const handleNavigateChapter = (newChapterId: string) => {
+    if (!newChapterId) return;
+
+    // Reset pagination and buffer states for the next chapter
+    setCurrentPageIndex(0);
+    setLivePages(null);
+    setIsLoadingPages(false);
+
+    // Scroll to top immediately
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTop = 0;
+    }
+    window.scrollTo({ top: 0, behavior: 'instant' });
+
+    // Sync app context
     startReading(newChapterId);
-    if (activeComic) {
-      navigate(`/read/${activeComic.id}/${newChapterId}`);
+
+    // Update browser URL
+    const targetComicParam = params.comicId || activeComic?.slug || activeComic?.id;
+    if (targetComicParam) {
+      navigate(`/read/${targetComicParam}/${newChapterId}`);
     }
   };
 
@@ -129,9 +157,14 @@ export const ComicReaderView: React.FC = () => {
 
   const comicChaptersList = activeComic ? [...(chapters[activeComic.id] || [])].sort((a, b) => a.chapterNumber - b.chapterNumber) : [];
 
-  const currentChapterIndexInSorted = comicChaptersList.findIndex(ch => ch.id === effectiveChapterId);
+  const currentChapterIndexInSorted = activeChapter 
+    ? comicChaptersList.findIndex(ch => ch.id === activeChapter.id)
+    : comicChaptersList.findIndex(ch => ch.id === effectiveChapterId || ch.slug === effectiveChapterId || String(ch.chapterNumber) === effectiveChapterId);
+
   const prevChapter = currentChapterIndexInSorted > 0 ? comicChaptersList[currentChapterIndexInSorted - 1] : null;
-  const nextChapter = currentChapterIndexInSorted < comicChaptersList.length - 1 ? comicChaptersList[currentChapterIndexInSorted + 1] : null;
+  const nextChapter = (currentChapterIndexInSorted >= 0 && currentChapterIndexInSorted < comicChaptersList.length - 1) 
+    ? comicChaptersList[currentChapterIndexInSorted + 1] 
+    : null;
 
   const sourceType = activeChapter?.sourceType || 'images';
 
@@ -298,6 +331,39 @@ export const ComicReaderView: React.FC = () => {
 
   const rawPages = (livePages && livePages.length > 0) ? livePages : (activeChapter?.pages || []);
   const pages = rawPages.map((p, idx) => typeof p === 'string' ? { id: `p-${idx}`, pageNumber: idx + 1, imageUrl: p } : p);
+
+  // Keyboard navigation support: Left Arrow = Previous, Right Arrow = Next
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement)?.tagName)) {
+        return;
+      }
+      if (e.key === 'ArrowLeft') {
+        if (readingMode === 'paged') {
+          if (currentPageIndex > 0) {
+            handlePrevPage();
+          } else if (prevChapter) {
+            handleNavigateChapter(prevChapter.id);
+          }
+        } else if (prevChapter) {
+          handleNavigateChapter(prevChapter.id);
+        }
+      } else if (e.key === 'ArrowRight') {
+        if (readingMode === 'paged') {
+          if (currentPageIndex < pages.length - 1) {
+            handleNextPage();
+          } else if (nextChapter) {
+            handleNavigateChapter(nextChapter.id);
+          }
+        } else if (nextChapter) {
+          handleNavigateChapter(nextChapter.id);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [readingMode, currentPageIndex, pages.length, prevChapter?.id, nextChapter?.id]);
 
   // Admin PDF Download & Converter Handler
   const handleAdminDownloadPdf = async (e: React.MouseEvent) => {
@@ -548,10 +614,45 @@ export const ComicReaderView: React.FC = () => {
             </button>
           )}
 
+          {/* Quick Prev / Next Chapter Buttons */}
+          <div className="flex items-center gap-1">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                if (prevChapter) handleNavigateChapter(prevChapter.id);
+              }}
+              disabled={!prevChapter}
+              className={`p-2 rounded-xl border text-xs font-semibold flex items-center justify-center transition-all ${
+                prevChapter 
+                  ? 'bg-[#1a1a24] text-slate-300 hover:text-white hover:bg-[#252536] border-[#2b2b3e] cursor-pointer' 
+                  : 'bg-[#12121a] text-slate-600 border-transparent cursor-not-allowed opacity-30'
+              }`}
+              title={prevChapter ? `Ke Ch. ${prevChapter.chapterNumber}` : 'Tidak ada chapter sebelumnya'}
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                if (nextChapter) handleNavigateChapter(nextChapter.id);
+              }}
+              disabled={!nextChapter}
+              className={`p-2 rounded-xl border text-xs font-semibold flex items-center justify-center transition-all ${
+                nextChapter 
+                  ? 'bg-[#ff5b14] text-white hover:bg-[#e04e0e] border-[#ff5b14] shadow cursor-pointer' 
+                  : 'bg-[#12121a] text-slate-600 border-transparent cursor-not-allowed opacity-30'
+              }`}
+              title={nextChapter ? `Ke Ch. ${nextChapter.chapterNumber}` : 'Tidak ada chapter berikutnya'}
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+
           {/* Chapter Picker Drawer Trigger */}
           <button
             onClick={() => setShowChapterDrawer(true)}
-            className="p-2 rounded-xl bg-[#1a1a24] text-slate-300 hover:text-white border border-[#2b2b3e] text-xs font-semibold flex items-center gap-1.5"
+            className="p-2 rounded-xl bg-[#1a1a24] text-slate-300 hover:text-white border border-[#2b2b3e] text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
             title="Pilih Chapter"
           >
             <ListOrdered className="w-4 h-4 text-[#ff5b14]" />
@@ -561,7 +662,7 @@ export const ComicReaderView: React.FC = () => {
           {/* Fullscreen Button */}
           <button
             onClick={toggleFullscreen}
-            className="p-2 rounded-xl bg-[#1a1a24] text-slate-300 hover:text-white border border-[#2b2b3e]"
+            className="p-2 rounded-xl bg-[#1a1a24] text-slate-300 hover:text-white border border-[#2b2b3e] cursor-pointer"
             title="Fullscreen"
           >
             {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
@@ -727,13 +828,25 @@ export const ComicReaderView: React.FC = () => {
               <AdBanner position="reader_bottom_nav" className="my-2" />
 
               <div className="flex flex-wrap gap-2 justify-center pt-1">
+                {prevChapter && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleNavigateChapter(prevChapter.id);
+                    }}
+                    className="px-4 py-2 bg-[#1c1c28] hover:bg-[#252538] text-slate-300 font-semibold text-xs rounded-xl border border-[#2a2a3e] flex items-center gap-1.5 cursor-pointer transition-all"
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                    <span>Prev Ch. {prevChapter.chapterNumber}</span>
+                  </button>
+                )}
                 {nextChapter && (
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      startReading(nextChapter.id);
+                      handleNavigateChapter(nextChapter.id);
                     }}
-                    className="px-4 py-2 bg-[#ff5b14] text-white font-bold text-xs rounded-xl shadow-md flex items-center gap-1.5"
+                    className="px-4 py-2 bg-[#ff5b14] hover:bg-[#e04e0e] text-white font-bold text-xs rounded-xl shadow-md flex items-center gap-1.5 cursor-pointer transition-all"
                   >
                     <span>Lanjut Ch. {nextChapter.chapterNumber}</span>
                     <ChevronRight className="w-3.5 h-3.5" />
@@ -742,9 +855,9 @@ export const ComicReaderView: React.FC = () => {
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    closeReader();
+                    handleClose();
                   }}
-                  className="px-4 py-2 bg-[#1c1c28] text-slate-300 font-semibold text-xs rounded-xl border border-[#2a2a3e]"
+                  className="px-4 py-2 bg-[#1c1c28] hover:bg-[#252538] text-slate-300 font-semibold text-xs rounded-xl border border-[#2a2a3e] cursor-pointer"
                 >
                   Kembali ke Detail
                 </button>
@@ -785,13 +898,25 @@ export const ComicReaderView: React.FC = () => {
               <AdBanner position="reader_bottom_nav" className="my-2" />
 
               <div className="flex flex-wrap gap-2 justify-center pt-2">
+                {prevChapter && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleNavigateChapter(prevChapter.id);
+                    }}
+                    className="px-4 py-2 bg-[#1c1c28] hover:bg-[#252538] text-slate-300 font-semibold text-xs rounded-xl border border-[#2a2a3e] flex items-center gap-1.5 cursor-pointer transition-all"
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                    <span>Prev Ch. {prevChapter.chapterNumber}</span>
+                  </button>
+                )}
                 {nextChapter && (
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
                       handleNavigateChapter(nextChapter.id);
                     }}
-                    className="px-4 py-2 bg-[#ff5b14] text-white font-bold text-xs rounded-xl shadow-md flex items-center gap-1.5"
+                    className="px-4 py-2 bg-[#ff5b14] hover:bg-[#e04e0e] text-white font-bold text-xs rounded-xl shadow-md flex items-center gap-1.5 cursor-pointer transition-all"
                   >
                     <span>Lanjut Ch. {nextChapter.chapterNumber}</span>
                     <ChevronRight className="w-3.5 h-3.5" />
@@ -802,7 +927,7 @@ export const ComicReaderView: React.FC = () => {
                     e.stopPropagation();
                     handleClose();
                   }}
-                  className="px-4 py-2 bg-[#1c1c28] text-slate-300 font-semibold text-xs rounded-xl border border-[#2a2a3e]"
+                  className="px-4 py-2 bg-[#1c1c28] hover:bg-[#252538] text-slate-300 font-semibold text-xs rounded-xl border border-[#2a2a3e] cursor-pointer"
                 >
                   Kembali ke Detail
                 </button>
@@ -837,15 +962,27 @@ export const ComicReaderView: React.FC = () => {
                 </div>
 
                 <div className="flex flex-col sm:flex-row gap-2 justify-center pt-2">
+                  {prevChapter ? (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleNavigateChapter(prevChapter.id);
+                      }}
+                      className="px-4 py-2.5 bg-[#1c1c28] hover:bg-[#252538] text-slate-300 hover:text-white font-semibold text-xs rounded-xl border border-[#2a2a3e] flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                      <span>Prev Ch. {prevChapter.chapterNumber}</span>
+                    </button>
+                  ) : null}
                   {nextChapter ? (
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        startReading(nextChapter.id);
+                        handleNavigateChapter(nextChapter.id);
                       }}
-                      className="px-4 py-2.5 bg-[#ff5b14] hover:bg-[#e04e0e] text-white font-bold text-xs rounded-xl shadow-lg flex items-center justify-center gap-1.5"
+                      className="px-4 py-2.5 bg-[#ff5b14] hover:bg-[#e04e0e] text-white font-bold text-xs rounded-xl shadow-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all"
                     >
-                      <span>Lanjut ke Chapter {nextChapter.chapterNumber}</span>
+                      <span>Lanjut ke Ch. {nextChapter.chapterNumber}</span>
                       <ChevronRight className="w-4 h-4" />
                     </button>
                   ) : null}
@@ -854,7 +991,7 @@ export const ComicReaderView: React.FC = () => {
                       e.stopPropagation();
                       handleClose();
                     }}
-                    className="px-4 py-2.5 bg-[#1c1c28] text-slate-300 hover:text-white font-semibold text-xs rounded-xl border border-[#2a2a3e]"
+                    className="px-4 py-2.5 bg-[#1c1c28] hover:bg-[#252538] text-slate-300 hover:text-white font-semibold text-xs rounded-xl border border-[#2a2a3e] cursor-pointer"
                   >
                     Kembali ke Detail
                   </button>
@@ -903,29 +1040,42 @@ export const ComicReaderView: React.FC = () => {
                 <AdBanner position="reader_bottom_nav" className="my-2" />
 
                 <div className="flex flex-col sm:flex-row gap-2 justify-center pt-2">
+                  {prevChapter ? (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleNavigateChapter(prevChapter.id);
+                      }}
+                      className="px-4 py-2.5 bg-[#1c1c28] hover:bg-[#252538] text-slate-300 hover:text-white font-semibold text-xs rounded-xl border border-[#2a2a3e] flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                      <span>Prev Ch. {prevChapter.chapterNumber}</span>
+                    </button>
+                  ) : null}
+
                   {nextChapter ? (
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        startReading(nextChapter.id);
+                        handleNavigateChapter(nextChapter.id);
                       }}
-                      className="px-5 py-2.5 bg-gradient-to-r from-[#ff5b14] to-[#f97316] text-white font-bold text-xs rounded-xl shadow-lg shadow-[#ff5b14]/30 flex items-center justify-center gap-2"
+                      className="px-5 py-2.5 bg-gradient-to-r from-[#ff5b14] to-[#f97316] text-white font-bold text-xs rounded-xl shadow-lg shadow-[#ff5b14]/30 flex items-center justify-center gap-2 cursor-pointer hover:opacity-95 transition-all"
                     >
-                      <span>Lanjut ke Chapter {nextChapter.chapterNumber}</span>
+                      <span>Lanjut ke Ch. {nextChapter.chapterNumber}</span>
                       <ChevronRight className="w-4 h-4" />
                     </button>
                   ) : (
-                    <div className="text-xs font-semibold text-amber-400 py-1">
-                      Ini adalah chapter terbaru saat ini.
+                    <div className="text-xs font-semibold text-amber-400 py-2.5 px-3 rounded-xl bg-amber-500/10 border border-amber-500/20">
+                      Ini adalah chapter paling akhir saat ini.
                     </div>
                   )}
 
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      closeReader();
+                      handleClose();
                     }}
-                    className="px-4 py-2.5 bg-[#1c1c28] text-slate-300 hover:text-white font-semibold text-xs rounded-xl border border-[#2a2a3e]"
+                    className="px-4 py-2.5 bg-[#1c1c28] hover:bg-[#252538] text-slate-300 hover:text-white font-semibold text-xs rounded-xl border border-[#2a2a3e] cursor-pointer"
                   >
                     Kembali ke Detail
                   </button>
@@ -994,12 +1144,17 @@ export const ComicReaderView: React.FC = () => {
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    handlePrevPage();
+                    if (currentPageIndex > 0) {
+                      handlePrevPage();
+                    } else if (prevChapter) {
+                      handleNavigateChapter(prevChapter.id);
+                    }
                   }}
-                  disabled={currentPageIndex === 0}
-                  className={`absolute left-2 top-1/2 -translate-y-1/2 p-3 rounded-full bg-black/60 text-white backdrop-blur-sm border border-white/10 hover:bg-[#ff5b14] transition-all ${
-                    currentPageIndex === 0 ? 'opacity-20 cursor-not-allowed' : 'opacity-80 hover:opacity-100'
+                  disabled={currentPageIndex === 0 && !prevChapter}
+                  className={`absolute left-2 top-1/2 -translate-y-1/2 p-3 rounded-full bg-black/60 text-white backdrop-blur-sm border border-white/10 hover:bg-[#ff5b14] transition-all cursor-pointer ${
+                    currentPageIndex === 0 && !prevChapter ? 'opacity-20 cursor-not-allowed' : 'opacity-80 hover:opacity-100'
                   }`}
+                  title={currentPageIndex === 0 && prevChapter ? `Ke Ch. Sebelumnya (${prevChapter.chapterNumber})` : 'Halaman Sebelumnya'}
                 >
                   <ChevronLeft className="w-6 h-6" />
                 </button>
@@ -1007,12 +1162,17 @@ export const ComicReaderView: React.FC = () => {
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    handleNextPage();
+                    if (currentPageIndex < pages.length - 1) {
+                      handleNextPage();
+                    } else if (nextChapter) {
+                      handleNavigateChapter(nextChapter.id);
+                    }
                   }}
-                  disabled={currentPageIndex === pages.length - 1}
-                  className={`absolute right-2 top-1/2 -translate-y-1/2 p-3 rounded-full bg-black/60 text-white backdrop-blur-sm border border-white/10 hover:bg-[#ff5b14] transition-all ${
-                    currentPageIndex === pages.length - 1 ? 'opacity-20 cursor-not-allowed' : 'opacity-80 hover:opacity-100'
+                  disabled={currentPageIndex === pages.length - 1 && !nextChapter}
+                  className={`absolute right-2 top-1/2 -translate-y-1/2 p-3 rounded-full bg-black/60 text-white backdrop-blur-sm border border-white/10 hover:bg-[#ff5b14] transition-all cursor-pointer ${
+                    currentPageIndex === pages.length - 1 && !nextChapter ? 'opacity-20 cursor-not-allowed' : 'opacity-80 hover:opacity-100'
                   }`}
+                  title={currentPageIndex === pages.length - 1 && nextChapter ? `Ke Ch. Berikutnya (${nextChapter.chapterNumber})` : 'Halaman Berikutnya'}
                 >
                   <ChevronRight className="w-6 h-6" />
                 </button>
@@ -1032,14 +1192,15 @@ export const ComicReaderView: React.FC = () => {
         <button
           onClick={(e) => {
             e.stopPropagation();
-            if (prevChapter) startReading(prevChapter.id);
+            if (prevChapter) handleNavigateChapter(prevChapter.id);
           }}
           disabled={!prevChapter}
-          className={`px-3 py-1.5 rounded-lg border font-semibold flex items-center gap-1 ${
+          className={`px-3 py-1.5 rounded-lg border font-semibold flex items-center gap-1 transition-all ${
             prevChapter 
-              ? 'bg-[#181824] border-[#29293c] text-slate-200 hover:text-white' 
+              ? 'bg-[#181824] border-[#29293c] text-slate-200 hover:text-white hover:bg-[#232336] cursor-pointer' 
               : 'opacity-30 border-transparent text-slate-600 cursor-not-allowed'
           }`}
+          title={prevChapter ? `Ke Chapter ${prevChapter.chapterNumber}` : 'Tidak ada chapter sebelumnya'}
         >
           <ChevronLeft className="w-3.5 h-3.5" />
           <span className="hidden sm:inline">Prev Ch.</span>
@@ -1054,16 +1215,16 @@ export const ComicReaderView: React.FC = () => {
             <div className="flex bg-[#191924] p-1 rounded-xl border border-[#2b2b3b]">
               <button
                 onClick={() => setReadingMode('vertical')}
-                className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all ${
-                  readingMode === 'vertical' ? 'bg-[#ff5b14] text-white shadow' : 'text-slate-400'
+                className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all cursor-pointer ${
+                  readingMode === 'vertical' ? 'bg-[#ff5b14] text-white shadow' : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
                 Webtoon
               </button>
               <button
                 onClick={() => setReadingMode('paged')}
-                className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all ${
-                  readingMode === 'paged' ? 'bg-[#ff5b14] text-white shadow' : 'text-slate-400'
+                className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all cursor-pointer ${
+                  readingMode === 'paged' ? 'bg-[#ff5b14] text-white shadow' : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
                 Halaman
@@ -1088,14 +1249,15 @@ export const ComicReaderView: React.FC = () => {
         <button
           onClick={(e) => {
             e.stopPropagation();
-            if (nextChapter) startReading(nextChapter.id);
+            if (nextChapter) handleNavigateChapter(nextChapter.id);
           }}
           disabled={!nextChapter}
-          className={`px-3 py-1.5 rounded-lg border font-semibold flex items-center gap-1 ${
+          className={`px-3 py-1.5 rounded-lg border font-semibold flex items-center gap-1 transition-all ${
             nextChapter 
-              ? 'bg-[#ff5b14] border-[#ff5b14] text-white hover:opacity-90 shadow-md shadow-[#ff5b14]/20' 
+              ? 'bg-[#ff5b14] border-[#ff5b14] text-white hover:bg-[#e04e0e] shadow-md shadow-[#ff5b14]/20 cursor-pointer' 
               : 'opacity-30 border-transparent text-slate-600 cursor-not-allowed'
           }`}
+          title={nextChapter ? `Ke Chapter ${nextChapter.chapterNumber}` : 'Tidak ada chapter berikutnya'}
         >
           <span className="hidden sm:inline">Next Ch.</span>
           <ChevronRight className="w-3.5 h-3.5" />
@@ -1128,7 +1290,7 @@ export const ComicReaderView: React.FC = () => {
 
               <div className="my-3 space-y-1.5 max-h-[70vh] overflow-y-auto pr-1">
                 {comicChaptersList.map((ch, idx) => {
-                  const isCurrent = ch.id === readingChapterId;
+                  const isCurrent = ch.id === readingChapterId || ch.id === effectiveChapterId || ch.id === activeChapter?.id || (effectiveChapterId && ch.slug === effectiveChapterId);
                   const st = ch.sourceType || 'images';
                   return (
                     <button
@@ -1137,7 +1299,7 @@ export const ComicReaderView: React.FC = () => {
                         handleNavigateChapter(ch.id);
                         setShowChapterDrawer(false);
                       }}
-                      className={`w-full p-2.5 rounded-xl text-left text-xs font-semibold flex items-center justify-between transition-all ${
+                      className={`w-full p-2.5 rounded-xl text-left text-xs font-semibold flex items-center justify-between transition-all cursor-pointer ${
                         isCurrent 
                           ? 'bg-[#ff5b14] text-white shadow-md' 
                           : 'bg-[#181824] hover:bg-[#202030] text-slate-300 border border-[#262638]'
