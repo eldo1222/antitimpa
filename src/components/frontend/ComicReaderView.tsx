@@ -168,7 +168,7 @@ export const ComicReaderView: React.FC = () => {
 
   const sourceType = activeChapter?.sourceType || 'images';
 
-  // Live fetch real scanlation pages if chapter originates from MangaDex, Komiktap, or Komikcast
+  // Live fetch real scanlation pages if chapter originates from MangaDex, Komiktap, or Komikindo
   useEffect(() => {
     if (!activeChapter) return;
     
@@ -217,6 +217,46 @@ export const ComicReaderView: React.FC = () => {
         })
         .catch(err => {
           console.warn('Failed to load Komiktap pages:', err);
+        })
+        .finally(() => {
+          setIsLoadingPages(false);
+        });
+      return;
+    }
+
+    // 2. KOMIKINDO DETECTION & FETCHING
+    const isKomikindo = (activeChapter.externalUrl && activeChapter.externalUrl.includes('komikindo.ch')) ||
+      (activeChapter.driveUrl && activeChapter.driveUrl.includes('komikindo.ch')) ||
+      (activeComic?.sourceApi?.toLowerCase().includes('komikindo')) ||
+      (activeComic?.sourceUrl?.toLowerCase().includes('komikindo.ch'));
+
+    if (isKomikindo) {
+      setIsLoadingPages(true);
+      let targetUrl = activeChapter.externalUrl || activeChapter.driveUrl || activeChapter.slug || '';
+      if (!targetUrl || targetUrl.startsWith('ch-')) {
+        const cSlug = activeComic?.slug || activeComic?.title?.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || '';
+        targetUrl = `https://komikindo.ch/${cSlug}-chapter-${activeChapter.chapterNumber}/`;
+      }
+
+      const fetchUrl = `/api/komikindo/chapter?url=${encodeURIComponent(targetUrl)}`;
+      const fallbackProxyUrl = `/api/komikindo-proxy?action=chapter&url=${encodeURIComponent(targetUrl)}`;
+
+      fetch(fetchUrl)
+        .then(async r => {
+          if (r.ok) return r.json();
+          const r2 = await fetch(fallbackProxyUrl);
+          return r2.json();
+        })
+        .then(data => {
+          if (data && data.pages && data.pages.length > 0) {
+            setLivePages(data.pages);
+            if (activeComic?.id && activeChapter?.id) {
+              updateChapter(activeComic.id, activeChapter.id, { pages: data.pages, sourceType: 'images' });
+            }
+          }
+        })
+        .catch(err => {
+          console.warn('Failed to load Komikindo pages:', err);
         })
         .finally(() => {
           setIsLoadingPages(false);
@@ -298,22 +338,6 @@ export const ComicReaderView: React.FC = () => {
       loadMangaDexPages().finally(() => {
         setIsLoadingPages(false);
       });
-    } else if (activeChapter.driveUrl && activeChapter.driveUrl.includes('chapter') && !activeChapter.driveUrl.startsWith('http')) {
-      // Komikcast chapter slug stored in driveUrl
-      setIsLoadingPages(true);
-      fetch(`/api/komikcast/chapter?slug=${encodeURIComponent(activeChapter.driveUrl)}`)
-        .then(res => res.json())
-        .then(data => {
-          if (data && data.pages && data.pages.length > 0) {
-            setLivePages(data.pages);
-          }
-        })
-        .catch(err => {
-          console.warn('Failed to load Komikcast pages:', err);
-        })
-        .finally(() => {
-          setIsLoadingPages(false);
-        });
     }
   }, [activeChapter?.id, activeChapter?.slug, activeChapter?.mangadexChapterId, activeChapter?.driveUrl, activeChapter?.externalUrl]);
 

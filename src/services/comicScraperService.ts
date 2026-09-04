@@ -213,12 +213,12 @@ export async function searchMangaDex(
     console.warn('Direct MangaDex fetch failed:', directErr);
   }
 
-  // Attempt 3: If user searched a title and MangaDex returned empty, try Komikcast & Jikan
+  // Attempt 3: If user searched a title and MangaDex returned empty, try Komikindo & Jikan
   if (qTitle) {
     try {
-      const kcResults = await searchKomikcast(qTitle, categoryFilter);
-      if (kcResults && kcResults.length > 0) {
-        return kcResults;
+      const kiResults = await searchKomikindo(qTitle, categoryFilter as any);
+      if (kiResults && kiResults.length > 0) {
+        return kiResults;
       }
     } catch {
       // Continue to next fallback smoothly
@@ -475,99 +475,156 @@ export async function searchJikanManga(query: string = '', limit: number = 16): 
   }
 }
 
-// 4. Live Scraper from Komikcast (Indonesian Manga, Manhwa, Manhua, Doujin source)
-export async function searchKomikcast(
+// 4. Live Scraper from Komikindo (komikindo.ch - Manga, Manhwa, Manhua Indo)
+export async function searchKomikindo(
   query: string = '', 
-  categoryFilter: 'all' | 'manga' | 'manhwa' | 'manhua' | 'doujin' | '18plus' = 'all',
-  order: 'popular' | 'latest' | 'update' = 'popular'
+  categoryFilter: 'all' | 'manga' | 'manhwa' | 'manhua' | '18plus' = 'all',
+  order: 'popular' | 'latest' | 'update' = 'popular',
+  page: number = 1
 ): Promise<ScrapedComicResult[]> {
-  try {
-    const params = new URLSearchParams();
-    if (query.trim()) params.append('q', query.trim());
-    if (categoryFilter !== 'all' && categoryFilter !== '18plus') {
-      params.append('type', categoryFilter);
-    }
-    params.append('order', order);
-
-    const res = await fetch(`/api/komikcast/search?${params.toString()}`);
-    if (!res.ok) return [];
-
-    const json = await res.json();
-    if (!json.data || !Array.isArray(json.data)) return [];
-
-    return json.data.map((item: any) => {
-      let comicType: ComicCategoryType = 'manga';
-      if (item.type === 'manhwa') comicType = 'manhwa';
-      else if (item.type === 'manhua') comicType = 'manhua';
-      else if (item.type === 'doujin') comicType = 'doujin';
-
-      const isAdult = categoryFilter === '18plus' || /18\+|dewasa|adult|ecchi|hentai|erotica/i.test(item.title);
-
-      return {
-        title: item.title,
-        slug: item.slug || item.title.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-        coverImage: item.coverImage || item.rawCover || getFallbackCover(item.title),
-        bannerImage: item.coverImage || item.rawCover || getFallbackCover(item.title),
-        synopsis: `Komik ${item.title} terjemahan Bahasa Indonesia dari server Komikcast. Status ${item.latestChapter}.`,
-        genres: [comicType === 'manhwa' ? 'Manhwa' : 'Action', 'Drama', isAdult ? 'Romance 18+' : 'Adventure'],
-        status: 'ongoing',
-        storyWriter: 'Komikcast Studio',
-        artist: 'Komikcast Team',
-        rating: item.rating || 4.85,
-        totalChapters: 30,
-        contentType: isAdult ? '18plus' : 'normal',
-        comicType,
-        isFree: !isAdult,
-        isVisibleOnHome: true,
-        isPublished: true,
-        sourceApi: 'Komikcast API',
-        sourceUrl: item.link
-      };
-    });
-  } catch {
-    return [];
+  const qStr = query.trim();
+  const params = new URLSearchParams();
+  if (qStr) params.append('q', qStr);
+  if (categoryFilter !== 'all' && categoryFilter !== '18plus') {
+    params.append('category', categoryFilter);
   }
+  params.append('page', String(page));
+  params.append('order', order);
+
+  // Try internal Express proxy first
+  try {
+    const res = await fetch(`/api/komikindo/search?${params.toString()}`);
+    if (res.ok) {
+      const json = await res.json();
+      if (json.data && Array.isArray(json.data) && json.data.length > 0) {
+        return json.data.map((item: any) => {
+          let comicType: ComicCategoryType = item.comicType || 'manga';
+          const isAdult = categoryFilter === '18plus' || /18\+|dewasa|adult|ecchi|hentai/i.test(item.title);
+
+          return {
+            title: item.title,
+            slug: item.slug || item.title.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+            coverImage: item.coverImage || getFallbackCover(item.title, comicType),
+            bannerImage: item.coverImage || getFallbackCover(item.title, comicType),
+            synopsis: `Komik ${item.title} terjemahan Bahasa Indonesia dari Komikindo. Status ${item.latestChapter || 'Chapter Terbaru'}.`,
+            genres: [comicType === 'manhwa' ? 'Manhwa' : 'Action', 'Drama', isAdult ? 'Romance 18+' : 'Adventure'],
+            status: 'ongoing',
+            storyWriter: 'Komikindo Author',
+            artist: 'Komikindo Artist',
+            rating: item.rating || 4.8,
+            totalChapters: 30,
+            contentType: isAdult ? '18plus' : 'normal',
+            comicType,
+            isFree: !isAdult,
+            isVisibleOnHome: true,
+            isPublished: true,
+            sourceApi: 'Komikindo API (komikindo.ch)',
+            sourceUrl: item.url || `https://komikindo.ch/komik/${item.slug}/`
+          };
+        });
+      }
+    }
+  } catch (e) {
+    console.warn('Komikindo search error via Express proxy:', e);
+  }
+
+  // Fallback to serverless route /api/komikindo-proxy
+  try {
+    params.set('action', 'search');
+    const res = await fetch(`/api/komikindo-proxy?${params.toString()}`);
+    if (res.ok) {
+      const json = await res.json();
+      if (json.data && Array.isArray(json.data) && json.data.length > 0) {
+        return json.data.map((item: any) => {
+          let comicType: ComicCategoryType = item.comicType || 'manga';
+          const isAdult = categoryFilter === '18plus' || /18\+|dewasa|adult|ecchi|hentai/i.test(item.title);
+
+          return {
+            title: item.title,
+            slug: item.slug || item.title.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+            coverImage: item.coverImage || getFallbackCover(item.title, comicType),
+            bannerImage: item.coverImage || getFallbackCover(item.title, comicType),
+            synopsis: `Komik ${item.title} terjemahan Bahasa Indonesia dari Komikindo. Status ${item.latestChapter || 'Chapter Terbaru'}.`,
+            genres: [comicType === 'manhwa' ? 'Manhwa' : 'Action', 'Drama', isAdult ? 'Romance 18+' : 'Adventure'],
+            status: 'ongoing',
+            storyWriter: 'Komikindo Author',
+            artist: 'Komikindo Artist',
+            rating: item.rating || 4.8,
+            totalChapters: 30,
+            contentType: isAdult ? '18plus' : 'normal',
+            comicType,
+            isFree: !isAdult,
+            isVisibleOnHome: true,
+            isPublished: true,
+            sourceApi: 'Komikindo API (komikindo.ch)',
+            sourceUrl: item.url || `https://komikindo.ch/komik/${item.slug}/`
+          };
+        });
+      }
+    }
+  } catch (e) {
+    console.warn('Komikindo search error via Serverless proxy:', e);
+  }
+
+  return [];
 }
 
-// 5. Fetch Full Detail + Chapters from Komikcast
-export async function getKomikcastDetail(slug: string): Promise<ScrapedComicResult | null> {
-  try {
-    const res = await fetch(`/api/komikcast/detail?slug=${encodeURIComponent(slug)}`);
-    if (!res.ok) return null;
-    const json = await res.json();
-    if (!json.data) return null;
+// 5. Fetch Full Detail + Chapters from Komikindo
+export async function fetchKomikindoDetail(slugOrUrl: string): Promise<any> {
+  const cleanSlug = slugOrUrl.startsWith('http')
+    ? (slugOrUrl.replace(/\/$/, '').split('/').pop() || '')
+    : slugOrUrl.replace(/^\/|\/$/g, '');
 
-    const data = json.data;
-    return {
-      title: data.title,
-      slug: data.slug,
-      coverImage: data.coverImage || data.rawCover || getFallbackCover(data.title),
-      bannerImage: data.coverImage || data.rawCover || getFallbackCover(data.title),
-      synopsis: data.synopsis,
-      genres: data.genres,
-      status: data.status,
-      storyWriter: data.storyWriter,
-      artist: data.artist,
-      rating: 4.9,
-      totalChapters: data.chapters?.length || 20,
-      contentType: data.contentType,
-      comicType: data.comicType,
-      isFree: data.contentType !== '18plus',
-      isVisibleOnHome: true,
-      isPublished: true,
-      sourceApi: 'Komikcast API',
-      chapters: (data.chapters || []).map((ch: any) => ({
-        chapterNumber: ch.chapterNumber,
-        title: ch.title,
-        releaseDate: ch.releaseDate,
-        pagesCount: 15,
-        driveUrl: ch.chapterSlug // stored for fetching pages
-      }))
-    };
-  } catch (err) {
-    console.warn('Komikcast detail fetch error:', err);
-    return null;
-  }
+  try {
+    const res = await fetch(`/api/komikindo/comic/${encodeURIComponent(cleanSlug)}`);
+    if (res.ok) {
+      const json = await res.json();
+      if (json.data) return json.data;
+    }
+  } catch (e) {}
+
+  try {
+    const res = await fetch(`/api/komikindo-proxy?action=detail&slug=${encodeURIComponent(cleanSlug)}`);
+    if (res.ok) {
+      const json = await res.json();
+      if (json.data) return json.data;
+    }
+  } catch (e) {}
+
+  return null;
+}
+
+export async function getKomikindoDetail(slug: string): Promise<ScrapedComicResult | null> {
+  const data = await fetchKomikindoDetail(slug);
+  if (!data) return null;
+
+  return {
+    title: data.title,
+    slug: data.slug,
+    coverImage: data.coverImage || getFallbackCover(data.title, data.comicType),
+    bannerImage: data.bannerImage || data.coverImage || getFallbackCover(data.title, data.comicType),
+    synopsis: data.synopsis,
+    genres: data.genres || ['Manga', 'Action'],
+    status: data.status || 'ongoing',
+    storyWriter: data.storyWriter || 'Komikindo Author',
+    artist: data.artist || 'Komikindo Artist',
+    rating: data.rating || 4.8,
+    totalChapters: data.chapters?.length || 0,
+    contentType: data.contentType || 'normal',
+    comicType: data.comicType || 'manga',
+    isFree: data.contentType !== '18plus',
+    isVisibleOnHome: true,
+    isPublished: true,
+    sourceApi: 'Komikindo API (komikindo.ch)',
+    sourceUrl: data.url || `https://komikindo.ch/komik/${data.slug}/`,
+    chapters: (data.chapters || []).map((ch: any) => ({
+      chapterNumber: ch.chapterNumber,
+      title: ch.title,
+      releaseDate: ch.releaseDate,
+      pagesCount: 15,
+      driveUrl: ch.url || ch.slug
+    }))
+  };
 }
 
 // 7. Live Scraper from Doujindesu API (18+ Doujinshi, Netorare, Hentai, Manhwa 18+)
@@ -1240,6 +1297,34 @@ export async function fetchKomiktapChapterPages(chapterUrlOrSlug: string): Promi
   return { pages: [], total: 0 };
 }
 
+export async function fetchKomikindoChapterPages(chapterUrlOrSlug: string): Promise<{
+  pages: Array<{ id: string; pageNumber: number; imageUrl: string; fallbackUrl: string; directUrl: string }>;
+  total: number;
+}> {
+  const baseUrl = typeof window !== 'undefined' ? '' : 'http://localhost:3000';
+  try {
+    const res = await fetch(`${baseUrl}/api/komikindo/chapter?url=${encodeURIComponent(chapterUrlOrSlug)}`);
+    if (res.ok) {
+      const json = await res.json();
+      if (json.pages && Array.isArray(json.pages)) {
+        return json;
+      }
+    }
+  } catch (e) {}
+
+  try {
+    const res = await fetch(`${baseUrl}/api/komikindo-proxy?action=chapter&url=${encodeURIComponent(chapterUrlOrSlug)}`);
+    if (res.ok) {
+      const json = await res.json();
+      if (json.pages && Array.isArray(json.pages)) {
+        return json;
+      }
+    }
+  } catch (e) {}
+
+  return { pages: [], total: 0 };
+}
+
 // Fetch real chapters from MangaDex API
 export async function fetchMangaDexChapters(mangaId: string): Promise<any[]> {
   // Attempt 1: Express Server API Proxy
@@ -1452,7 +1537,7 @@ export function buildComicFromScrape(
     primaryDriveAccountId: customSettings?.primaryDriveAccountId
   };
 
-  // If real chapters are provided from source (Komikcast, Doujindesu, etc.)
+  // If real chapters are provided from source (Komikindo, Doujindesu, etc.)
   const seenChapterIds = new Set<string>();
   const chapters: Chapter[] = rawChapters.map((ch, idx) => {
     const chNum = ch.chapterNumber || (idx + 1);
@@ -1493,6 +1578,131 @@ export async function buildComicFromScrapeAsync(
     onProgress?: (current: number, total: number, chapterTitle: string) => void;
   }
 ): Promise<{ comic: Comic; chapters: Chapter[] }> {
+  // If source is Komikindo (komikindo.ch), pull complete detail and all real chapters!
+  if (scraped.sourceApi?.toLowerCase().includes('komikindo') || scraped.sourceUrl?.includes('komikindo.ch')) {
+    try {
+      const detail = await fetchKomikindoDetail(scraped.slug || scraped.sourceUrl || '');
+      if (detail) {
+        const comicId = `comic-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+        const now = new Date().toISOString().split('T')[0];
+        const isAdult = detail.contentType === '18plus' || /18\+|dewasa/i.test(detail.title) || (detail.genres || []).some((g: string) => /18\+|dewasa/i.test(g));
+        const defaultType: ComicContentType = isAdult ? '18plus' : 'normal';
+        const requestedContentType = customSettings?.contentType ?? defaultType;
+        const finalContentType: ComicContentType = requestedContentType === 'auto' ? defaultType : requestedContentType;
+        const isFree = customSettings?.isFree ?? (finalContentType === 'normal');
+        const isVisibleOnHome = customSettings?.isVisibleOnHome ?? true;
+        const isPublished = customSettings?.isPublished ?? true;
+        const comicType = customSettings?.comicType ?? detail.comicType ?? 'manga';
+
+        const comic: Comic = {
+          id: comicId,
+          title: detail.title || scraped.title,
+          slug: detail.slug || scraped.slug || (detail.title || scraped.title).toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+          coverImage: detail.coverImage || scraped.coverImage || getFallbackCover(scraped.title, comicType),
+          bannerImage: detail.bannerImage || detail.coverImage || scraped.coverImage || getFallbackCover(scraped.title, comicType),
+          synopsis: detail.synopsis || scraped.synopsis || `Komik ${detail.title} dari Komikindo`,
+          genres: detail.genres && detail.genres.length > 0 ? detail.genres : ['Action', 'Fantasy', 'Manga'],
+          status: detail.status || 'ongoing',
+          storyWriter: detail.storyWriter || 'Komikindo Author',
+          artist: detail.artist || 'Komikindo Artist',
+          rating: detail.rating || 4.8,
+          ratingCount: 0,
+          totalChapters: detail.chapters?.length || 0,
+          totalReaders: 0,
+          createdAt: now,
+          updatedAt: now,
+          isTrending: true,
+          isFeatured: isVisibleOnHome,
+          contentType: finalContentType,
+          comicType,
+          type: comicType,
+          isFree,
+          isVisibleOnHome,
+          showOnHome: isVisibleOnHome,
+          isPublished,
+          sourceApi: 'Komikindo API (komikindo.ch)',
+          sourceUrl: detail.url || scraped.sourceUrl || `https://komikindo.ch/komik/${detail.slug}/`,
+          primaryDriveAccountId: customSettings?.primaryDriveAccountId
+        };
+
+        const seenChapterNums = new Map<number, number>();
+        const seenChapterIds = new Set<string>();
+
+        const preloadedPagesMap = new Map<number, any[]>();
+        const chaptersToPreload = detail.chapters || [];
+        const totalChaps = chaptersToPreload.length;
+
+        if (chaptersToPreload.length > 0) {
+          try {
+            let processedPreload = 0;
+            await runControlledConcurrency(chaptersToPreload, 3, async (ch: any, idx: number) => {
+              const chTarget = ch.url || ch.slug || '';
+              if (!chTarget) return null;
+              const chPagesRes = await fetchKomikindoChapterPages(chTarget);
+              if (chPagesRes && chPagesRes.pages && chPagesRes.pages.length > 0) {
+                preloadedPagesMap.set(idx, chPagesRes.pages);
+              }
+              processedPreload++;
+              if (customSettings?.onProgress) {
+                customSettings.onProgress(
+                  processedPreload,
+                  totalChaps,
+                  ch.title || `Chapter ${ch.chapterNumber || idx + 1}`
+                );
+              }
+              return null;
+            });
+          } catch (e) {
+            console.warn('Komikindo chapter pages preloading encountered error:', e);
+          }
+        }
+
+        const chapters: Chapter[] = (detail.chapters || []).map((ch: any, idx: number) => {
+          let baseNum = ch.chapterNumber ?? (idx + 1);
+          if (isNaN(baseNum) || baseNum <= 0) baseNum = idx + 1;
+
+          let finalChapterNum = baseNum;
+          if (seenChapterNums.has(baseNum)) {
+            const collisionCount = seenChapterNums.get(baseNum)! + 1;
+            seenChapterNums.set(baseNum, collisionCount);
+            finalChapterNum = Number((baseNum + collisionCount * 0.1).toFixed(2));
+          } else {
+            seenChapterNums.set(baseNum, 0);
+          }
+
+          let baseId = `ch-${comicId}-${finalChapterNum}`;
+          let finalChapterId = baseId;
+          let idSuffix = 1;
+          while (seenChapterIds.has(finalChapterId)) {
+            finalChapterId = `${baseId}-${idSuffix++}`;
+          }
+          seenChapterIds.add(finalChapterId);
+
+          const preloadedPages = preloadedPagesMap.get(idx) || [];
+          const pagesCount = preloadedPages.length > 0 ? preloadedPages.length : 15;
+
+          return {
+            id: finalChapterId,
+            comicId,
+            chapterNumber: finalChapterNum,
+            title: ch.title || `Chapter ${finalChapterNum}`,
+            slug: ch.slug || `${comic.slug}-chapter-${finalChapterNum}`,
+            releaseDate: ch.releaseDate || now,
+            pagesCount,
+            sourceType: 'images' as const,
+            pages: preloadedPages,
+            externalUrl: ch.url || '',
+            driveUrl: ch.url || ch.slug || ''
+          };
+        });
+
+        return { comic, chapters };
+      }
+    } catch (kiErr) {
+      console.warn('Komikindo async scrape detail error:', kiErr);
+    }
+  }
+
   // If source is Komiktap (Komiktap.info), pull complete detail and all real chapters!
   if (scraped.sourceApi?.includes('Komiktap') || scraped.sourceUrl?.includes('komiktap.info')) {
     try {
@@ -2382,6 +2592,126 @@ export async function repairMissingKomiktapChapterImages(
 
     try {
       const res = await fetchKomiktapChapterPages(targetUrl);
+      if (res && Array.isArray(res.pages) && res.pages.length > 0) {
+        ch.pages = res.pages;
+        totalImagesExtracted += res.pages.length;
+        successCount++;
+        // Persist directly to Supabase
+        await ChapterRepository.saveChapterPages(ch.id, res.pages);
+      } else {
+        failedCount++;
+        failedChapters.push({
+          id: ch.id,
+          chapterNumber: ch.chapterNumber,
+          title: ch.title,
+          url: targetUrl,
+          error: '0 images extracted from reader'
+        });
+      }
+    } catch (err: any) {
+      failedCount++;
+      failedChapters.push({
+        id: ch.id,
+        chapterNumber: ch.chapterNumber,
+        title: ch.title,
+        url: targetUrl,
+        error: err.message || 'Fetch error'
+      });
+    } finally {
+      processedCount++;
+      options?.onProgress?.({
+        current: processedCount,
+        total,
+        success: successCount,
+        failed: failedCount,
+        currentTitle: ch.title
+      });
+    }
+  });
+
+  return {
+    attempted: total,
+    success: successCount,
+    failed: failedCount,
+    totalImagesExtracted,
+    failedChapters
+  };
+}
+
+/**
+ * Repairs missing chapter images for a Komikindo comic using controlled concurrency (3-4 workers)
+ * and directly persists images to Supabase while preserving existing data.
+ */
+export async function repairMissingKomikindoChapterImages(
+  comicId: string,
+  chapters: Chapter[],
+  options?: {
+    comicSlug?: string;
+    comicSourceUrl?: string;
+    comicTitle?: string;
+    concurrency?: number;
+    onProgress?: (p: { current: number; total: number; success: number; failed: number; currentTitle: string }) => void;
+    isCancelled?: () => boolean;
+  }
+): Promise<{
+  attempted: number;
+  success: number;
+  failed: number;
+  totalImagesExtracted: number;
+  failedChapters: Array<{ id: string; chapterNumber: number; title: string; url: string; error: string }>;
+}> {
+  const missing = chapters.filter(c => !c.pages || c.pages.length === 0);
+  const total = missing.length;
+  const concurrency = options?.concurrency || 3;
+  let successCount = 0;
+  let failedCount = 0;
+  let totalImagesExtracted = 0;
+  const failedChapters: Array<{ id: string; chapterNumber: number; title: string; url: string; error: string }> = [];
+
+  if (total === 0) {
+    return {
+      attempted: 0,
+      success: 0,
+      failed: 0,
+      totalImagesExtracted: 0,
+      failedChapters: []
+    };
+  }
+
+  let derivedComicSlug = options?.comicSlug || '';
+  if (!derivedComicSlug && options?.comicSourceUrl && options.comicSourceUrl.includes('komikindo.ch/komik/')) {
+    derivedComicSlug = options.comicSourceUrl.replace(/\/$/, '').split('/').pop() || '';
+  }
+  if (!derivedComicSlug && options?.comicTitle) {
+    derivedComicSlug = options.comicTitle.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+  }
+
+  let processedCount = 0;
+
+  await runControlledConcurrency(missing, concurrency, async (ch) => {
+    if (options?.isCancelled && options.isCancelled()) return;
+
+    let targetUrl = ch.externalUrl || ch.driveUrl || ch.slug || '';
+    if (!targetUrl || targetUrl.startsWith('ch-') || !targetUrl.includes('chapter')) {
+      if (derivedComicSlug) {
+        targetUrl = `https://komikindo.ch/${derivedComicSlug}-chapter-${ch.chapterNumber}/`;
+      }
+    }
+
+    if (!targetUrl) {
+      failedCount++;
+      failedChapters.push({
+        id: ch.id,
+        chapterNumber: ch.chapterNumber,
+        title: ch.title,
+        url: '',
+        error: 'Missing chapter source URL'
+      });
+      return;
+    }
+
+    try {
+      const res = await fetchKomikindoChapterPages(targetUrl);
       if (res && Array.isArray(res.pages) && res.pages.length > 0) {
         ch.pages = res.pages;
         totalImagesExtracted += res.pages.length;

@@ -1944,7 +1944,7 @@ export const AdminChaptersTab: React.FC = () => {
                         <option value="MangaDex">MangaDex (mangadex.org)</option>
                         <option value="MangaPlus">MangaPlus Shueisha</option>
                         <option value="Bato.to">Bato.to</option>
-                        <option value="Komikcast">Komikcast</option>
+                        <option value="Komikindo">Komikindo</option>
                         <option value="Crunchyroll">Crunchyroll</option>
                         <option value="Webtoon">LINE Webtoon</option>
                         <option value="Lainnya">Lainnya / Custom</option>

@@ -24,16 +24,28 @@
       "destination": "/api/jikan-proxy"
     },
     {
-      "source": "/api/komikcast/detail",
-      "destination": "/api/komikcast-proxy?action=detail"
+      "source": "/api/komiktap/detail",
+      "destination": "/api/komiktap-proxy?action=detail"
     },
     {
-      "source": "/api/komikcast/chapter",
-      "destination": "/api/komikcast-proxy?action=chapter"
+      "source": "/api/komiktap/chapter",
+      "destination": "/api/komiktap-proxy?action=chapter"
     },
     {
-      "source": "/api/komikcast/:path*",
-      "destination": "/api/komikcast-proxy"
+      "source": "/api/komiktap/:path*",
+      "destination": "/api/komiktap-proxy"
+    },
+    {
+      "source": "/api/komikindo/detail",
+      "destination": "/api/komikindo-proxy?action=detail"
+    },
+    {
+      "source": "/api/komikindo/chapter",
+      "destination": "/api/komikindo-proxy?action=chapter"
+    },
+    {
+      "source": "/api/komikindo/:path*",
+      "destination": "/api/komikindo-proxy"
     },
     {
       "source": "/api/doujindesu/:path*",

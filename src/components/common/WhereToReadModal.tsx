@@ -110,13 +110,13 @@ export function getPlatformBadgeInfo(platformName: string = '', url: string = ''
       label: 'MyAnimeList (Database & Hub)'
     };
   }
-  if (p.includes('komikcast') || u.includes('komikcast.cz')) {
+  if (p.includes('komikindo') || u.includes('komikindo.ch')) {
     return {
       color: 'text-yellow-400',
       bgColor: 'bg-yellow-950/60 hover:bg-yellow-900/60',
       borderColor: 'border-yellow-500/40',
       iconType: 'comic',
-      label: 'Komikcast (Bahasa Indonesia)'
+      label: 'Komikindo (Bahasa Indonesia)'
     };
   }
   if (p.includes('toptoon') || p.includes('lezhin') || p.includes('kakaopage') || p.includes('webtoon')) {
@@ -202,7 +202,7 @@ export const WhereToReadModal: React.FC<WhereToReadModalProps> = ({
       else if (comic.sourceUrl.includes('mangadex.org')) srcName = 'MangaDex';
       else if (comic.sourceUrl.includes('doujin.desu') || comic.sourceUrl.includes('doujindesu')) srcName = 'DoujinDesu';
       else if (comic.sourceUrl.includes('myanimelist.net')) srcName = 'MyAnimeList';
-      else if (comic.sourceUrl.includes('komikcast')) srcName = 'Komikcast';
+      else if (comic.sourceUrl.includes('komikindo')) srcName = 'Komikindo';
 
       list.push({
         name: srcName,

@@ -72,7 +72,8 @@ export const getComicProjectType = (comic?: Partial<Comic> | null, chaptersList?
   if (
     comic.mangaDexId ||
     comic.sourceApi === 'mangadex' ||
-    comic.sourceApi === 'komikcast' ||
+    comic.sourceApi?.toLowerCase().includes('komikindo') ||
+    comic.sourceApi?.toLowerCase().includes('komiktap') ||
     (chaptersList && chaptersList.some(ch => ch.mangadexChapterId || (ch.driveUrl && ch.driveUrl.includes('chapter'))))
   ) {
     return 'scraped_ready';

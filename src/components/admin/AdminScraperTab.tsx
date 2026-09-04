@@ -3,8 +3,9 @@ import { useApp } from '../../context/AppContext';
 import { 
   searchMangaDex, 
   searchJikanManga,
-  searchKomikcast,
-  getKomikcastDetail,
+  searchKomikindo,
+  fetchKomikindoDetail,
+  getKomikindoDetail,
   searchDoujindesu,
   searchKomiktap,
   fetchKomiktapDetail,
@@ -54,7 +55,7 @@ import { AdminDiagnosticModal } from './AdminDiagnosticModal';
 export const AdminScraperTab: React.FC = () => {
   const { comics, chapters, injectComicWithChapters, batchInjectComicsWithChapters, driveAccounts, addActivityLog } = useApp();
 
-  const [activeSource, setActiveSource] = useState<'komikcast' | 'mangadex' | 'komiktap' | 'jikan' | 'presets' | 'pdf_converter' | 'custom'>('komikcast');
+  const [activeSource, setActiveSource] = useState<'komikindo' | 'mangadex' | 'komiktap' | 'jikan' | 'presets' | 'pdf_converter'>('komikindo');
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [searchResults, setSearchResults] = useState<ScrapedComicResult[]>([]);
@@ -63,9 +64,10 @@ export const AdminScraperTab: React.FC = () => {
   const [isDiagnosticOpen, setIsDiagnosticOpen] = useState(false);
 
 
-  // Komikcast filters
-  const [komikcastCategoryFilter, setKomikcastCategoryFilter] = useState<'all' | 'manga' | 'manhwa' | 'manhua' | 'doujin' | '18plus'>('all');
-  const [komikcastOrder, setKomikcastOrder] = useState<'popular' | 'latest' | 'update'>('popular');
+  // Komikindo filters
+  const [komikindoCategoryFilter, setKomikindoCategoryFilter] = useState<'all' | 'manga' | 'manhwa' | 'manhua' | '18plus'>('all');
+  const [komikindoOrder, setKomikindoOrder] = useState<'popular' | 'latest' | 'update'>('popular');
+  const [komikindoPage, setKomikindoPage] = useState<number>(1);
 
   // Komiktap filters & direct URL scraper input
   const [komiktapCategoryFilter, setKomiktapCategoryFilter] = useState<'all' | 'manhwa' | 'manga' | 'manhua'>('all');
@@ -79,9 +81,6 @@ export const AdminScraperTab: React.FC = () => {
   const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
   const [doujindesuCategoryFilter, setDoujindesuCategoryFilter] = useState<'all' | '18plus' | 'doujin' | 'netorare' | 'milf' | 'harem'>('all');
   const [presetCategoryFilter, setPresetCategoryFilter] = useState<'all' | 'manga' | 'manhwa' | 'manhua' | '18plus'>('all');
-
-  // Custom JSON input
-  const [customJson, setCustomJson] = useState('');
 
   // Default import configuration settings (auto = smart selective genre detection)
   const [defaultContentType, setDefaultContentType] = useState<'auto' | 'normal' | '18plus'>('auto');
@@ -288,37 +287,39 @@ export const AdminScraperTab: React.FC = () => {
     }));
   };
 
-  // Initial mount: load Komikcast popular
+  // Initial mount: load Komikindo popular
   React.useEffect(() => {
-    if (searchResults.length === 0 && activeSource === 'komikcast') {
-      handleSearchKomikcast(undefined, '', 'all', 'popular');
+    if (searchResults.length === 0 && activeSource === 'komikindo') {
+      handleSearchKomikindo(undefined, '', 'all', 'popular', 1);
     }
   }, []);
 
-  // 1. Live Komikcast Scraper Search
-  const handleSearchKomikcast = async (
+  // 1. Live Komikindo Scraper Search
+  const handleSearchKomikindo = async (
     e?: React.FormEvent, 
     customQ?: string, 
-    catFilter?: 'all' | 'manga' | 'manhwa' | 'manhua' | 'doujin' | '18plus',
-    orderFilter?: 'popular' | 'latest' | 'update'
+    catFilter?: 'all' | 'manga' | 'manhwa' | 'manhua' | '18plus',
+    orderFilter?: 'popular' | 'latest' | 'update',
+    pageNum: number = 1
   ) => {
     if (e) e.preventDefault();
     const q = customQ !== undefined ? customQ : searchQuery;
-    const cat = catFilter !== undefined ? catFilter : komikcastCategoryFilter;
-    const ord = orderFilter !== undefined ? orderFilter : komikcastOrder;
+    const cat = catFilter !== undefined ? catFilter : komikindoCategoryFilter;
+    const ord = orderFilter !== undefined ? orderFilter : komikindoOrder;
 
     setIsSearching(true);
     setErrorMsg('');
     try {
-      const results = await searchKomikcast(q, cat, ord);
+      const results = await searchKomikindo(q, cat, ord, pageNum);
       setSearchResults(results);
+      setKomikindoPage(pageNum);
       setHasSearched(true);
       if (results.length === 0) {
-        setErrorMsg(`Tidak ditemukan komik di Komikcast untuk "${q || cat}".`);
+        setErrorMsg(`Tidak ditemukan komik di Komikindo untuk "${q || cat}".`);
       }
     } catch (err: any) {
       console.error(err);
-      setErrorMsg('Gagal terhubung ke Komikcast Scraper.');
+      setErrorMsg('Gagal terhubung ke Komikindo Scraper.');
     } finally {
       setIsSearching(false);
     }
@@ -477,19 +478,20 @@ export const AdminScraperTab: React.FC = () => {
     }
   };
 
-  // 5. Import single scraped item (fetches full details if from Komikcast or Komiktap)
+  // 5. Import single scraped item (fetches full details if from Komikindo or Komiktap)
   const handleImportSingle = async (item: ScrapedComicResult, overrideOptions?: { isVisibleOnHome?: boolean; contentType?: ComicContentType; comicType?: ComicCategoryType }) => {
     let itemToUse = item;
 
-    // If Komikcast, fetch full chapter list from detail scraper
-    if (item.sourceApi === 'Komikcast API' && item.slug) {
+    // If Komikindo, fetch full chapter list from detail scraper
+    if ((item.sourceApi?.toLowerCase().includes('komikindo') || item.sourceUrl?.includes('komikindo.ch')) && (item.slug || item.sourceUrl)) {
       try {
-        const fullDetail = await getKomikcastDetail(item.slug);
+        setBatchStatus(`⏳ Mengambil struktur chapter lengkap Komikindo untuk "${item.title}"...`);
+        const fullDetail = await getKomikindoDetail(item.slug || item.sourceUrl || '');
         if (fullDetail) {
           itemToUse = fullDetail;
         }
       } catch (e) {
-        console.warn('Failed to load full Komikcast details, using basic item:', e);
+        console.warn('Failed to load full Komikindo details, using basic item:', e);
       }
     }
 
@@ -645,39 +647,6 @@ export const AdminScraperTab: React.FC = () => {
     }
   };
 
-  // 7. Custom JSON Importer
-  const handleImportCustomJson = async () => {
-    try {
-      const parsed = JSON.parse(customJson);
-      const items: ScrapedComicResult[] = Array.isArray(parsed) ? parsed : [parsed];
-      setBatchStatus(`⏳ Memproses impor ${items.length} komik dari custom JSON...`);
-      const itemsToInject = await Promise.all(
-        items.map(item => {
-          const finalContentType = item.contentType ?? (defaultContentType === 'auto' ? undefined : defaultContentType);
-          const isNormal = finalContentType === 'normal';
-          return buildComicFromScrapeAsync(item, {
-            contentType: finalContentType,
-            comicType: item.comicType || 'manga',
-            isFree: isNormal ? true : defaultIsFree,
-            isVisibleOnHome: defaultIsVisibleOnHome,
-            primaryDriveAccountId: defaultDriveAccountId
-          });
-        })
-      );
-
-      const batchRes = await batchInjectComicsWithChapters(itemsToInject);
-      if (batchRes.success) {
-        setBatchStatus(`✅ Berhasil mengimpor ${itemsToInject.length} komik dari data JSON custom ke Supabase & web!`);
-        setCustomJson('');
-        setTimeout(() => setBatchStatus(null), 4000);
-      } else {
-        setBatchStatus(`❌ JSON Import Gagal ke Supabase: ${batchRes.error}`);
-      }
-    } catch (err) {
-      alert('Format JSON tidak valid! Pastikan format JSON sesuai struktur komik.');
-    }
-  };
-
   // 8. Admin Download Google Drive PDF Tool
   const handleDownloadDrivePdfTool = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -785,7 +754,7 @@ export const AdminScraperTab: React.FC = () => {
             <span>Pengaturan Impor</span>
           </button>
 
-          {activeSource !== 'pdf_converter' && activeSource !== 'custom' && (
+          {activeSource !== 'pdf_converter' && (
             <button
               onClick={handleImportAllVisible}
               className="px-4 py-2 bg-gradient-to-r from-[#ff5b14] to-[#e04e0e] hover:opacity-95 active:scale-95 text-white text-xs font-bold rounded-xl shadow-md shadow-[#ff5b14]/20 flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap"
@@ -1156,17 +1125,17 @@ export const AdminScraperTab: React.FC = () => {
       <div className="flex border-b border-[#202030] gap-2 text-xs overflow-x-auto pb-1 scrollbar-none">
         <button
           onClick={() => {
-            setActiveSource('komikcast');
-            if (searchResults.length === 0) handleSearchKomikcast(undefined, '', 'all', 'popular');
+            setActiveSource('komikindo');
+            if (searchResults.length === 0) handleSearchKomikindo(undefined, '', 'all', 'popular', 1);
           }}
           className={`pb-2.5 px-3.5 font-bold transition-all border-b-2 flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
-            activeSource === 'komikcast'
+            activeSource === 'komikindo'
               ? 'border-[#ff5b14] text-white bg-white/5 rounded-t-lg'
               : 'border-transparent text-slate-400 hover:text-slate-200'
           }`}
         >
           <Flame className="w-3.5 h-3.5 text-[#ff5b14]" />
-          <span>Komikcast Indo</span>
+          <span>Komikindo (Manga &amp; Manhwa Indo)</span>
         </button>
 
         <button
@@ -1227,24 +1196,12 @@ export const AdminScraperTab: React.FC = () => {
           <ArrowDownToLine className="w-3.5 h-3.5 text-rose-400" />
           <span>Alat PDF &amp; Drive</span>
         </button>
-
-        <button
-          onClick={() => setActiveSource('custom')}
-          className={`pb-2.5 px-3.5 font-bold transition-all border-b-2 flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
-            activeSource === 'custom'
-              ? 'border-[#ff5b14] text-white bg-white/5 rounded-t-lg'
-              : 'border-transparent text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <FileJson className="w-3.5 h-3.5 text-purple-400" />
-          <span>Custom JSON</span>
-        </button>
       </div>
 
       {/* ============================================================ */}
-      {/* TAB 1: KOMIKCAST LIVE API (INDONESIA)                         */}
+      {/* TAB 1: KOMIKINDO LIVE SCRAPER (INDONESIA)                    */}
       {/* ============================================================ */}
-      {activeSource === 'komikcast' && (
+      {activeSource === 'komikindo' && (
         <div className="space-y-4">
           {/* Category & Order Pills */}
           <div className="flex flex-wrap items-center justify-between gap-3 bg-[#11111a] p-3 rounded-2xl border border-[#202030]">
@@ -1254,23 +1211,22 @@ export const AdminScraperTab: React.FC = () => {
                 Kategori:
               </span>
 
-              {(['all', 'manga', 'manhwa', 'manhua', 'doujin', '18plus'] as const).map((cat) => {
+              {(['all', 'manga', 'manhwa', 'manhua', '18plus'] as const).map((cat) => {
                 const label = 
                   cat === 'all' ? '⚡ Semua' :
                   cat === 'manga' ? '🇯🇵 Manga' :
                   cat === 'manhwa' ? '🇰🇷 Manhwa' :
-                  cat === 'manhua' ? '🇨🇳 Manhua' :
-                  cat === 'doujin' ? '🌸 Doujin' : '🔞 18+ Dewasa';
+                  cat === 'manhua' ? '🇨🇳 Manhua' : '🔞 18+ Dewasa';
 
                 return (
                   <button
                     key={cat}
                     onClick={() => {
-                      setKomikcastCategoryFilter(cat);
-                      handleSearchKomikcast(undefined, searchQuery, cat, komikcastOrder);
+                      setKomikindoCategoryFilter(cat);
+                      handleSearchKomikindo(undefined, searchQuery, cat, komikindoOrder, 1);
                     }}
                     className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-all cursor-pointer flex items-center gap-1 ${
-                      komikcastCategoryFilter === cat
+                      komikindoCategoryFilter === cat
                         ? cat === '18plus' 
                           ? 'bg-rose-600 text-white shadow-md shadow-rose-600/30'
                           : 'bg-[#ff5b14] text-white shadow-md shadow-[#ff5b14]/30'
@@ -1289,11 +1245,11 @@ export const AdminScraperTab: React.FC = () => {
                 <button
                   key={ord}
                   onClick={() => {
-                    setKomikcastOrder(ord);
-                    handleSearchKomikcast(undefined, searchQuery, komikcastCategoryFilter, ord);
+                    setKomikindoOrder(ord);
+                    handleSearchKomikindo(undefined, searchQuery, komikindoCategoryFilter, ord, 1);
                   }}
                   className={`px-2.5 py-1 rounded-lg text-[11px] font-bold cursor-pointer transition-all ${
-                    komikcastOrder === ord
+                    komikindoOrder === ord
                       ? 'bg-white/15 text-white border border-white/25'
                       : 'text-slate-400 hover:text-slate-200'
                   }`}
@@ -1305,14 +1261,14 @@ export const AdminScraperTab: React.FC = () => {
           </div>
 
           {/* Search Input */}
-          <form onSubmit={(e) => handleSearchKomikcast(e)} className="flex gap-2">
+          <form onSubmit={(e) => handleSearchKomikindo(e, undefined, undefined, undefined, 1)} className="flex gap-2">
             <div className="relative flex-1">
               <Search className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Cari komik di Komikcast (contoh: Solo Leveling, Eleceed, Secret Class, Magic Emperor)..."
+                placeholder="Cari komik di Komikindo (contoh: Solo Leveling, Eleceed, Magic Emperor, Martial Peak)..."
                 className="w-full pl-10 pr-4 py-2.5 bg-[#11111a] border border-[#222234] rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#ff5b14]"
               />
             </div>
@@ -1322,26 +1278,48 @@ export const AdminScraperTab: React.FC = () => {
               className="px-4 py-2.5 bg-[#ff5b14] hover:bg-[#e04e0e] disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow flex items-center gap-1.5 cursor-pointer transition-all"
             >
               {isSearching ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
-              <span>Cari Komikcast</span>
+              <span>Cari Komikindo</span>
             </button>
           </form>
 
-          {/* Recommendation Tags */}
-          <div className="flex items-center gap-1.5 flex-wrap text-xs">
-            <span className="text-[11px] text-slate-500 font-semibold">Rekomendasi:</span>
-            {['Solo Leveling', 'Secret Class', 'Boarding Diary', 'Magic Emperor', 'Wind Breaker', 'Martial Peak', 'Return of Mount Hua'].map(tag => (
+          {/* Recommendation Tags and Page Pagination */}
+          <div className="flex items-center justify-between gap-2 flex-wrap text-xs">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-[11px] text-slate-500 font-semibold">Rekomendasi:</span>
+              {['Solo Leveling', 'Magic Emperor', 'Martial Peak', 'Return of Mount Hua', 'Eleceed', 'Nano Machine', 'Damn Reincarnation'].map(tag => (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={() => {
+                    setSearchQuery(tag);
+                    handleSearchKomikindo(undefined, tag, undefined, undefined, 1);
+                  }}
+                  className="px-2.5 py-0.5 bg-[#161622] hover:bg-[#202032] border border-[#262638] rounded-full text-[10px] text-slate-300 cursor-pointer transition-colors"
+                >
+                  {tag}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-slate-400">Hal. <strong className="text-white">{komikindoPage}</strong></span>
               <button
-                key={tag}
                 type="button"
-                onClick={() => {
-                  setSearchQuery(tag);
-                  handleSearchKomikcast(undefined, tag);
-                }}
-                className="px-2.5 py-0.5 bg-[#161622] hover:bg-[#202032] border border-[#262638] rounded-full text-[10px] text-slate-300 cursor-pointer transition-colors"
+                disabled={komikindoPage <= 1 || isSearching}
+                onClick={() => handleSearchKomikindo(undefined, searchQuery, komikindoCategoryFilter, komikindoOrder, komikindoPage - 1)}
+                className="px-2.5 py-1 bg-[#171724] border border-[#27273a] hover:bg-[#202032] disabled:opacity-30 rounded-lg text-[11px] text-slate-300 hover:text-white font-medium cursor-pointer transition-all"
               >
-                {tag}
+                &larr; Prev
               </button>
-            ))}
+              <button
+                type="button"
+                disabled={isSearching || searchResults.length === 0}
+                onClick={() => handleSearchKomikindo(undefined, searchQuery, komikindoCategoryFilter, komikindoOrder, komikindoPage + 1)}
+                className="px-2.5 py-1 bg-[#171724] border border-[#27273a] hover:bg-[#202032] disabled:opacity-30 rounded-lg text-[11px] text-slate-300 hover:text-white font-medium cursor-pointer transition-all"
+              >
+                Next &rarr;
+              </button>
+            </div>
           </div>
 
           {errorMsg && (
@@ -2113,32 +2091,6 @@ export const AdminScraperTab: React.FC = () => {
               )}
             </button>
           </div>
-        </div>
-      )}
-
-      {/* ============================================================ */}
-      {/* TAB 6: CUSTOM JSON                                           */}
-      {/* ============================================================ */}
-      {activeSource === 'custom' && (
-        <div className="p-5 bg-[#11111a] rounded-2xl border border-[#222234] space-y-3.5 shadow-xl">
-          <label className="text-xs font-bold text-slate-300 block">
-            Paste Data JSON Komik / Webhook Data
-          </label>
-          <textarea
-            value={customJson}
-            onChange={(e) => setCustomJson(e.target.value)}
-            rows={8}
-            placeholder={`[\n  {\n    "title": "Secret Stepmother",\n    "comicType": "manhwa",\n    "storyWriter": "Kim Min-Woo",\n    "artist": "Park Jin-Ah",\n    "genres": ["Romance 18+", "Drama Dewasa", "Milf / Noona"],\n    "synopsis": "Cerita seru...",\n    "coverImage": "https://...",\n    "status": "ongoing",\n    "totalChapters": 45,\n    "contentType": "18plus"\n  }\n]`}
-            className="w-full p-3 bg-[#171724] border border-[#2b2b3e] rounded-xl text-xs text-white font-mono focus:outline-none focus:border-[#ff5b14]"
-          />
-          <button
-            onClick={handleImportCustomJson}
-            disabled={!customJson.trim()}
-            className="px-4 py-2.5 bg-[#ff5b14] hover:bg-[#e04e0e] disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow flex items-center gap-1.5 cursor-pointer transition-all"
-          >
-            <Download className="w-4 h-4" />
-            <span>Impor Data JSON ke Katalog</span>
-          </button>
         </div>
       )}
 

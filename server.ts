@@ -16,6 +16,7 @@ import {
 } from "./src/data/initialData";
 import { Comic, Chapter, User, Banner, DriveAccount, ActivityLog, SystemSettings, Comment, AdItem, AdSettings } from "./src/types";
 import { scrapeKomiktapSearch, scrapeKomiktapDetail, scrapeKomiktapChapterPages } from "./api/komiktap-proxy";
+import { scrapeKomikindoSearch, scrapeKomikindoDetail, scrapeKomikindoChapterPages } from "./api/komikindo-proxy";
 
 interface CentralDB {
   comics: Comic[];
@@ -912,6 +913,71 @@ async function startServer() {
       res.json({ data: items, total: items.length });
     } catch (error: any) {
       res.status(500).json({ error: "Failed to fetch from Komiktap", message: error.message, data: [] });
+    }
+  });
+
+  // ----------------------------------------------------
+  // KOMIKINDO SCRAPER & PROXY API ENDPOINTS (komikindo.ch)
+  // ----------------------------------------------------
+
+  // Search or browse catalog from komikindo.ch
+  app.get("/api/komikindo/search", async (req, res) => {
+    try {
+      const { q = "", category = "all", page = "1", order = "popular" } = req.query;
+      const items = await scrapeKomikindoSearch(
+        String(q),
+        String(category),
+        Math.max(1, parseInt(String(page)) || 1),
+        String(order)
+      );
+      res.json({ data: items, total: items.length });
+    } catch (error: any) {
+      console.error("Komikindo search error:", error.message);
+      res.status(500).json({ error: "Failed to fetch from Komikindo", message: error.message, data: [] });
+    }
+  });
+
+  // Get comic details & chapters list from komikindo.ch
+  app.get("/api/komikindo/comic/:slug", async (req, res) => {
+    try {
+      const { slug } = req.params;
+      const detail = await scrapeKomikindoDetail(slug);
+      res.json({ data: detail });
+    } catch (error: any) {
+      console.error("Komikindo comic detail error:", error.message);
+      res.status(500).json({ error: "Failed to fetch comic detail from Komikindo", message: error.message });
+    }
+  });
+
+  // Detail alias endpoint with query params
+  app.get("/api/komikindo/detail", async (req, res) => {
+    try {
+      const { slug = "", url = "" } = req.query;
+      const target = String(slug || url).trim();
+      if (!target) {
+        return res.status(400).json({ error: "Slug or url parameter is required" });
+      }
+      const detail = await scrapeKomikindoDetail(target);
+      res.json({ data: detail });
+    } catch (error: any) {
+      console.error("Komikindo comic detail error:", error.message);
+      res.status(500).json({ error: "Failed to fetch comic detail from Komikindo", message: error.message });
+    }
+  });
+
+  // Get chapter image pages from komikindo.ch
+  app.get("/api/komikindo/chapter", async (req, res) => {
+    try {
+      const { url = "", slug = "" } = req.query;
+      const target = String(url || slug).trim();
+      if (!target) {
+        return res.status(400).json({ error: "Chapter url or slug parameter is required" });
+      }
+      const result = await scrapeKomikindoChapterPages(target);
+      res.json(result);
+    } catch (error: any) {
+      console.error("Komikindo chapter pages error:", error.message);
+      res.status(500).json({ error: "Failed to fetch chapter pages from Komikindo", message: error.message, pages: [] });
     }
   });
 
@@ -1960,10 +2026,10 @@ async function startServer() {
       const lower = imageUrl.toLowerCase();
       if (lower.includes("mangadex")) {
         referer = "https://mangadex.org/";
-      } else if (lower.includes("komiktap") || lower.includes("cdnasu") || lower.includes("komikindo") || lower.includes("uqni") || lower.includes("desu")) {
+      } else if (lower.includes("komikindo") || lower.includes("imageainewgeneration") || lower.includes("himmga") || lower.includes("gaimgame") || lower.includes("indocontentaising") || lower.includes("aicontentwow") || lower.includes("contentkerewnrorai")) {
+        referer = "https://komikindo.ch/";
+      } else if (lower.includes("komiktap") || lower.includes("cdnasu") || lower.includes("uqni") || lower.includes("desu")) {
         referer = "https://komiktap.info/";
-      } else if (lower.includes("komikcast")) {
-        referer = "https://komikcast.bz/";
       } else if (lower.includes("myanimelist") || lower.includes("jikan")) {
         referer = "https://myanimelist.net/";
       } else if (lower.includes("wp.com") || lower.includes("blogspot") || lower.includes("googleusercontent")) {
@@ -2019,10 +2085,10 @@ async function startServer() {
       const lower = imageUrl.toLowerCase();
       if (lower.includes("mangadex")) {
         referer = "https://mangadex.org/";
-      } else if (lower.includes("komiktap") || lower.includes("cdnasu") || lower.includes("komikindo") || lower.includes("uqni") || lower.includes("desu")) {
+      } else if (lower.includes("komikindo") || lower.includes("imageainewgeneration") || lower.includes("himmga") || lower.includes("gaimgame") || lower.includes("indocontentaising") || lower.includes("aicontentwow") || lower.includes("contentkerewnrorai")) {
+        referer = "https://komikindo.ch/";
+      } else if (lower.includes("komiktap") || lower.includes("cdnasu") || lower.includes("uqni") || lower.includes("desu")) {
         referer = "https://komiktap.info/";
-      } else if (lower.includes("komikcast")) {
-        referer = "https://komikcast.bz/";
       } else if (lower.includes("myanimelist") || lower.includes("jikan")) {
         referer = "https://myanimelist.net/";
       } else {
