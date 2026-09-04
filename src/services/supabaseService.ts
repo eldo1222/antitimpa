@@ -237,8 +237,25 @@ export class SupabaseService {
         // 2. Fetch Chapters Grouped
         const { data: chaptersMap } = await ChapterRepository.getAllGrouped();
 
-        // 3. Fetch Users
+        // 3. Fetch Users (Merge Supabase users with backend server to prevent newly registered users from dropping)
         const { data: users } = await UserRepository.getAll();
+        let mergedUsers = users || [];
+        try {
+          const sRes = await fetch('/api/data', { cache: 'no-store' });
+          if (sRes.ok) {
+            const sData = await sRes.json();
+            if (Array.isArray(sData.users)) {
+              const uMap = new Map<string, any>();
+              mergedUsers.forEach(u => { if (u && u.id) uMap.set(u.id, u); });
+              sData.users.forEach((u: any) => {
+                if (u && u.id && !uMap.has(u.id)) {
+                  uMap.set(u.id, u);
+                }
+              });
+              mergedUsers = Array.from(uMap.values());
+            }
+          }
+        } catch (_) {}
 
         // 4. Fetch Banners
         const { data: banners } = await BannerRepository.getAll();
@@ -265,7 +282,7 @@ export class SupabaseService {
           return {
             comics: comics || [],
             chapters: chaptersMap || {},
-            users: users || [],
+            users: mergedUsers || [],
             banners: banners || [],
             driveAccounts: driveAccounts || [],
             activityLogs: activityLogs || [],

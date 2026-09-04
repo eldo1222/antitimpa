@@ -69,6 +69,7 @@ export const AdminReadersTab: React.FC = () => {
 
   const filteredUsers = readerUsers.filter(u => {
     const matchesSearch = u.username.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (u.email && u.email.toLowerCase().includes(searchQuery.toLowerCase())) ||
       (u.priceNote && u.priceNote.toLowerCase().includes(searchQuery.toLowerCase()));
 
     if (!matchesSearch) return false;

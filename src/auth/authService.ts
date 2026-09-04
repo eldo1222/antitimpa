@@ -89,6 +89,18 @@ export class AuthService {
           needsUpdate = true;
         }
 
+        // Always grant Google users Full 15K Unlimited Access
+        if (updated.planType !== 'plan_15k_all' || updated.accessType !== 'all' || !updated.isVip) {
+          updated.planType = 'plan_15k_all';
+          updated.accessType = 'all';
+          updated.durationType = 'unlimited';
+          updated.tier = 'Premium';
+          updated.isVip = true;
+          updated.priceNote = 'Paket 15K Unlimited (Full Akses Semua Komik)';
+          updated.allowedComicIds = [];
+          needsUpdate = true;
+        }
+
         // Update photoURL if missing
         const metaPhoto = authUser.user_metadata?.avatar_url || authUser.user_metadata?.picture;
         if (metaPhoto && (!updated.avatar || !updated.photoURL)) {
@@ -99,6 +111,13 @@ export class AuthService {
 
         if (needsUpdate) {
           await UserRepository.save(updated);
+          try {
+            await fetch('/api/data/users', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(updated)
+            });
+          } catch (_) {}
         }
 
         return updated;
@@ -111,6 +130,13 @@ export class AuthService {
     const newProfile = createDefaultUserProfileFromAuth(authUser);
     try {
       await UserRepository.save(newProfile);
+      try {
+        await fetch('/api/data/users', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newProfile)
+        });
+      } catch (_) {}
     } catch (err) {
       console.warn('[AuthService] Failed to auto-save new user profile:', err);
     }

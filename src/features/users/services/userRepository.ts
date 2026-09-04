@@ -35,7 +35,25 @@ export class UserRepository {
 
     try {
       const row = mapUserToDb(user);
-      const { error } = await client.from(DATABASE_TABLES.USERS).upsert(row, { onConflict: 'id' });
+      let { error } = await client.from(DATABASE_TABLES.USERS).upsert(row, { onConflict: 'id' });
+      
+      // If error indicates column does not exist or schema issue, retry with standard base columns
+      if (error && (error.message?.includes('column') || (error as any).code === '42703' || error.message?.includes('does not exist'))) {
+        const baseRow: Record<string, any> = {
+          id: row.id,
+          username: row.username,
+          email: row.email,
+          role: row.role || 'reader',
+          package_type: row.package_type || 'vip',
+          avatar: row.avatar || '',
+          is_active: row.is_active ?? true,
+          created_at: row.created_at,
+          updated_at: row.updated_at
+        };
+        const retryRes = await client.from(DATABASE_TABLES.USERS).upsert(baseRow, { onConflict: 'id' });
+        error = retryRes.error;
+      }
+
       if (error) {
         logDatabaseError({ table: DATABASE_TABLES.USERS, operation: 'UPSERT', error, details: { userId: user.id, username: user.username } });
         const parsed = parseSupabaseError(error);

@@ -519,17 +519,55 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             setChapters(sanitizedRemote);
           }
           if (Array.isArray(supabaseData.users) && supabaseData.users.length > 0) {
-            setUsers(supabaseData.users);
+            setUsers(prev => {
+              const uMap = new Map<string, User>();
+              supabaseData.users.forEach(u => {
+                if (u && u.id) uMap.set(u.id, u);
+              });
+              // Keep any local/recently created users that might not be in remote yet
+              prev.forEach(u => {
+                if (u && u.id) {
+                  if (!uMap.has(u.id)) {
+                    uMap.set(u.id, u);
+                  } else {
+                    const remote = uMap.get(u.id)!;
+                    // Preserve 15k full access if user already has it
+                    if (u.planType === 'plan_15k_all' || u.tier === 'Premium' || u.isVip || u.loginMethod === 'google') {
+                      uMap.set(u.id, {
+                        ...remote,
+                        planType: 'plan_15k_all',
+                        accessType: 'all',
+                        durationType: 'unlimited',
+                        tier: 'Premium',
+                        isVip: true,
+                        priceNote: remote.priceNote || 'Paket 15K Unlimited (Full Akses Semua Komik)'
+                      });
+                    }
+                  }
+                }
+              });
+              return Array.from(uMap.values());
+            });
             setCurrentUser(prev => {
               if (!prev) return null;
               const match = supabaseData.users?.find(u => 
                 u.id === prev.id || 
                 (u.role === 'admin' && prev.role === 'admin') || 
-                ((u.username || '').toLowerCase() === (prev.username || '').toLowerCase())
+                ((u.username || '').toLowerCase() === (prev.username || '').toLowerCase()) ||
+                (Boolean(u.email) && (u.email || '').toLowerCase() === (prev.email || '').toLowerCase())
               );
               if (!match) return prev;
-              safeSetItem(STORAGE_KEYS.CURRENT_USER, match);
-              return match;
+              const updatedUser: User = (prev.loginMethod === 'google' || prev.provider === 'google' || prev.planType === 'plan_15k_all') ? {
+                ...match,
+                planType: 'plan_15k_all' as PlanType,
+                accessType: 'all' as AccessType,
+                durationType: 'unlimited' as DurationType,
+                tier: 'Premium' as const,
+                isVip: true,
+                priceNote: match.priceNote || 'Paket 15K Unlimited (Full Akses Semua Komik)'
+              } : match;
+              safeSetItem(STORAGE_KEYS.CURRENT_USER, updatedUser);
+              return updatedUser;
             });
           }
           if (Array.isArray(supabaseData.banners)) {
@@ -788,6 +826,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         try {
           const appUser = await AuthService.linkOrCreatePublicUserProfile(authUser);
           if (isMounted && appUser) {
+            // Ensure full 15k unlimited access
+            appUser.planType = 'plan_15k_all';
+            appUser.accessType = 'all';
+            appUser.durationType = 'unlimited';
+            appUser.tier = 'Premium';
+            appUser.isVip = true;
+            appUser.priceNote = 'Paket 15K Unlimited (Full Akses Semua Komik)';
+            appUser.allowedComicIds = [];
+
             setCurrentUser(appUser);
             safeSetItem(STORAGE_KEYS.CURRENT_USER, appUser);
             setUsers(prev => {
@@ -995,7 +1042,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
 
     // Plan & Title Permissions Logic
-    const isAllAccess = targetUser.accessType === 'all' || targetUser.planType === 'plan_15k_all' || (!targetUser.accessType && !targetUser.allowedComicIds);
+    const isGoogleUser = targetUser.loginMethod === 'google' || targetUser.provider === 'google' || Boolean(targetUser.email && (targetUser.email.includes('@') || targetUser.email.includes('gmail')));
+    const isAllAccess = isGoogleUser || targetUser.accessType === 'all' || targetUser.planType === 'plan_15k_all' || targetUser.tier === 'Premium' || targetUser.isVip || (!targetUser.accessType && (!targetUser.allowedComicIds || targetUser.allowedComicIds.length === 0));
 
     if (isAllAccess) {
       return { allowed: true };
@@ -1310,14 +1358,20 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         }
       }
 
-      // CASE A: User sudah terdaftar -> Langsung Login!
+      // CASE A: User sudah terdaftar -> Langsung Login & Upgrade ke Paket 15K Full Akses!
       if (existingUser) {
-        if (isAdminEmail && existingUser.role !== 'admin') {
+        existingUser.planType = 'plan_15k_all';
+        existingUser.accessType = 'all';
+        existingUser.durationType = 'unlimited';
+        existingUser.tier = 'Premium';
+        existingUser.isVip = true;
+        existingUser.status = 'active';
+        existingUser.priceNote = 'Paket 15K Unlimited (Full Akses Semua Komik)';
+        existingUser.allowedComicIds = [];
+        if (isAdminEmail) {
           existingUser.role = 'admin';
-          existingUser.isVip = true;
-          existingUser.tier = 'Premium';
-          SupabaseService.saveUser(existingUser).catch(() => {});
         }
+        await SupabaseService.saveUser(existingUser).catch(() => {});
 
         const gUserData: GoogleAuthUser = {
           uid: userUid,
@@ -1334,11 +1388,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         safeSetItem(STORAGE_KEYS.CURRENT_USER, existingUser);
 
         setUsers(prev => {
-          const exists = prev.some(u => u.id === existingUser!.id);
-          if (exists) {
-            return prev.map(u => u.id === existingUser!.id ? existingUser! : u);
-          }
-          return [...prev, existingUser!];
+          const filtered = prev.filter(u => u.id !== existingUser!.id && (u.email || '').toLowerCase() !== (existingUser!.email || '').toLowerCase());
+          return [existingUser!, ...filtered];
         });
 
         setIsLoginModalOpen(false);
@@ -1350,19 +1401,19 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           setIsAdminView(true);
         }
 
-        showAdminToast('Login Google Berhasil', `Selamat datang kembali, ${existingUser.username}!`, 'success');
+        showAdminToast('Login Google Berhasil', `Selamat datang kembali, ${existingUser.username}! Akun Anda aktif dengan Paket 15K Full Akses.`, 'success');
         addLog(
           existingUser.username,
           'Login Akun Google Berhasil',
           'login_success',
           'success',
-          `Akun ${existingUser.username} (${userEmail}) berhasil masuk via Google.`
+          `Akun ${existingUser.username} (${userEmail}) berhasil masuk via Google dengan Paket 15K Unlimited.`
         );
 
         return { success: true, user: existingUser };
       }
 
-      // CASE B: User Baru -> Otomatis Buat Akun Langsung & Login 1-Klik!
+      // CASE B: User Baru -> Otomatis Buat Akun Langsung & Diberikan Paket 15K Full Akses!
       const baseUsername = userName.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 15) || 'reader';
       let finalUsername = baseUsername;
       let suffix = 1;
@@ -1380,9 +1431,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         photoURL: userAvatar,
         role: isAdminEmail ? 'admin' : 'reader',
         status: 'active',
-        tier: isAdminEmail ? 'Premium' : 'Free Tier',
-        planType: isAdminEmail ? 'plan_15k_all' : 'none',
-        isVip: isAdminEmail ? true : false,
+        tier: 'Premium',
+        planType: 'plan_15k_all',
+        accessType: 'all',
+        durationType: 'unlimited',
+        isVip: true,
+        priceNote: 'Paket 15K Unlimited (Full Akses Semua Komik)',
+        allowedComicIds: [],
         loginMethod: 'google',
         provider: 'google',
         createdAt: new Date().toISOString(),
@@ -1393,7 +1448,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         favorites: []
       };
 
-      // Save user to backend & Supabase
+      // Simpan user ke central backend server dan Supabase
       await SupabaseService.saveUser(newUser);
 
       const gUserData: GoogleAuthUser = {
@@ -1410,7 +1465,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       safeSetItem(STORAGE_KEYS.GOOGLE_USER, gUserData);
       safeSetItem(STORAGE_KEYS.CURRENT_USER, newUser);
 
-      setUsers(prev => [newUser, ...prev]);
+      setUsers(prev => {
+        const filtered = prev.filter(u => u.id !== newUser.id && (u.email || '').toLowerCase() !== (newUser.email || '').toLowerCase());
+        return [newUser, ...filtered];
+      });
 
       setIsLoginModalOpen(false);
       setIsGoogleAuthModalOpen(false);
