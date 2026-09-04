@@ -36,6 +36,14 @@
       "destination": "/api/komiktap-proxy"
     },
     {
+      "source": "/api/komikindo/search",
+      "destination": "/api/komikindo-proxy?action=search"
+    },
+    {
+      "source": "/api/komikindo/comic/:slug",
+      "destination": "/api/komikindo-proxy?action=detail&slug=:slug"
+    },
+    {
       "source": "/api/komikindo/detail",
       "destination": "/api/komikindo-proxy?action=detail"
     },

@@ -482,22 +482,42 @@ export async function searchKomikindo(
   order: 'popular' | 'latest' | 'update' = 'popular',
   page: number = 1
 ): Promise<ScrapedComicResult[]> {
-  const qStr = query.trim();
+  const rawQ = query.trim();
+  const isAll = rawQ.toLowerCase() === 'all' || rawQ.toLowerCase() === 'semua';
+  const cleanQ = isAll ? '' : rawQ;
+
   const params = new URLSearchParams();
-  if (qStr) params.append('q', qStr);
-  if (categoryFilter !== 'all' && categoryFilter !== '18plus') {
-    params.append('category', categoryFilter);
+  if (cleanQ) {
+    params.append('q', cleanQ);
+    params.append('searchQuery', cleanQ);
   }
+  params.append('category', categoryFilter);
   params.append('page', String(page));
   params.append('order', order);
 
-  // Try internal Express proxy first
+  let lastStatus: string = '';
+  let lastMessage: string = '';
+  let lastDiagnostics: any = null;
+  let lastError: any = null;
+
+  // Attempt 1: Standard endpoint /api/komikindo/search
   try {
     const res = await fetch(`/api/komikindo/search?${params.toString()}`);
     if (res.ok) {
       const json = await res.json();
+      lastStatus = json.status || '';
+      lastMessage = json.message || '';
+      lastDiagnostics = json.diagnostics || null;
+
+      if (json.status === 'KOMIKINDO_FETCH_FAILED') {
+        throw new Error(`[KOMIKINDO_FETCH_FAILED] ${json.message || json.error || 'Gagal terhubung ke KomikIndo'}`);
+      }
+      if (json.status === 'KOMIKINDO_PARSER_FAILED') {
+        throw new Error(`[KOMIKINDO_PARSER_FAILED] ${json.message || json.error || 'Parser KomikIndo gagal memproses HTML'}`);
+      }
+
       if (json.data && Array.isArray(json.data) && json.data.length > 0) {
-        return json.data.map((item: any) => {
+        const mapped = json.data.map((item: any) => {
           let comicType: ComicCategoryType = item.comicType || 'manga';
           const isAdult = categoryFilter === '18plus' || /18\+|dewasa|adult|ecchi|hentai/i.test(item.title);
 
@@ -522,20 +542,46 @@ export async function searchKomikindo(
             sourceUrl: item.url || `https://komikindo.ch/komik/${item.slug}/`
           };
         });
+        (mapped as any).status = 'KOMIKINDO_OK';
+        (mapped as any).diagnostics = json.diagnostics;
+        return mapped;
+      }
+
+      if (json.status === 'KOMIKINDO_SEARCH_EMPTY') {
+        const empty: ScrapedComicResult[] = [];
+        (empty as any).status = 'KOMIKINDO_SEARCH_EMPTY';
+        (empty as any).statusMessage = json.message || (cleanQ ? `Tidak ditemukan komik untuk "${cleanQ}".` : `Tidak ditemukan komik pada kategori "${categoryFilter}".`);
+        (empty as any).diagnostics = json.diagnostics;
+        return empty;
       }
     }
-  } catch (e) {
-    console.warn('Komikindo search error via Express proxy:', e);
+  } catch (e: any) {
+    lastError = e;
+    if (e.message?.startsWith('[KOMIKINDO_')) {
+      throw e;
+    }
+    console.warn('Komikindo search error via /api/komikindo/search:', e);
   }
 
-  // Fallback to serverless route /api/komikindo-proxy
+  // Attempt 2: Direct serverless route /api/komikindo-proxy?action=search
   try {
     params.set('action', 'search');
     const res = await fetch(`/api/komikindo-proxy?${params.toString()}`);
     if (res.ok) {
       const json = await res.json();
+      lastStatus = json.status || '';
+      lastMessage = json.message || '';
+      lastDiagnostics = json.diagnostics || null;
+
+      if (json.status === 'KOMIKINDO_FETCH_FAILED') {
+        throw new Error(`[KOMIKINDO_FETCH_FAILED] ${json.message || json.error || 'Gagal terhubung ke KomikIndo'}`);
+      }
+      if (json.status === 'KOMIKINDO_PARSER_FAILED') {
+        throw new Error(`[KOMIKINDO_PARSER_FAILED] ${json.message || json.error || 'Parser KomikIndo gagal memproses HTML'}`);
+      }
+
       if (json.data && Array.isArray(json.data) && json.data.length > 0) {
-        return json.data.map((item: any) => {
+        const mapped = json.data.map((item: any) => {
           let comicType: ComicCategoryType = item.comicType || 'manga';
           const isAdult = categoryFilter === '18plus' || /18\+|dewasa|adult|ecchi|hentai/i.test(item.title);
 
@@ -560,13 +606,41 @@ export async function searchKomikindo(
             sourceUrl: item.url || `https://komikindo.ch/komik/${item.slug}/`
           };
         });
+        (mapped as any).status = 'KOMIKINDO_OK';
+        (mapped as any).diagnostics = json.diagnostics;
+        return mapped;
+      }
+
+      if (json.status === 'KOMIKINDO_SEARCH_EMPTY') {
+        const empty: ScrapedComicResult[] = [];
+        (empty as any).status = 'KOMIKINDO_SEARCH_EMPTY';
+        (empty as any).statusMessage = json.message || (cleanQ ? `Tidak ditemukan komik untuk "${cleanQ}".` : `Tidak ditemukan komik pada kategori "${categoryFilter}".`);
+        (empty as any).diagnostics = json.diagnostics;
+        return empty;
       }
     }
-  } catch (e) {
-    console.warn('Komikindo search error via Serverless proxy:', e);
+  } catch (e: any) {
+    lastError = e;
+    if (e.message?.startsWith('[KOMIKINDO_')) {
+      throw e;
+    }
+    console.warn('Komikindo search error via /api/komikindo-proxy:', e);
   }
 
-  return [];
+  if (lastError && lastError.message?.startsWith('[KOMIKINDO_')) {
+    throw lastError;
+  }
+
+  if (lastStatus === 'KOMIKINDO_SEARCH_EMPTY') {
+    const empty: ScrapedComicResult[] = [];
+    (empty as any).status = 'KOMIKINDO_SEARCH_EMPTY';
+    (empty as any).statusMessage = lastMessage || (cleanQ ? `Tidak ditemukan komik untuk "${cleanQ}".` : `Tidak ditemukan komik pada kategori "${categoryFilter}".`);
+    (empty as any).diagnostics = lastDiagnostics;
+    return empty;
+  }
+
+  // If both endpoints failed completely
+  throw new Error(`[KOMIKINDO_FETCH_FAILED] Server tidak dapat menjangkau proxy KomikIndo (${lastError?.message || 'Network unreachable'})`);
 }
 
 // 5. Fetch Full Detail + Chapters from Komikindo

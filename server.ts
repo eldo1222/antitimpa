@@ -16,7 +16,7 @@ import {
 } from "./src/data/initialData";
 import { Comic, Chapter, User, Banner, DriveAccount, ActivityLog, SystemSettings, Comment, AdItem, AdSettings } from "./src/types";
 import { scrapeKomiktapSearch, scrapeKomiktapDetail, scrapeKomiktapChapterPages } from "./api/komiktap-proxy";
-import { scrapeKomikindoSearch, scrapeKomikindoDetail, scrapeKomikindoChapterPages } from "./api/komikindo-proxy";
+import { scrapeKomikindoSearch, scrapeKomikindoSearchWithDiagnostics, scrapeKomikindoDetail, scrapeKomikindoChapterPages } from "./api/komikindo-proxy";
 
 interface CentralDB {
   comics: Comic[];
@@ -923,14 +923,15 @@ async function startServer() {
   // Search or browse catalog from komikindo.ch
   app.get("/api/komikindo/search", async (req, res) => {
     try {
-      const { q = "", category = "all", page = "1", order = "popular" } = req.query;
-      const items = await scrapeKomikindoSearch(
-        String(q),
-        String(category),
-        Math.max(1, parseInt(String(page)) || 1),
-        String(order)
-      );
-      res.json({ data: items, total: items.length });
+      const rawQ = String(req.query.searchQuery || req.query.q || req.query.search || "").trim();
+      const isAll = rawQ.toLowerCase() === "all" || rawQ.toLowerCase() === "semua";
+      const q = isAll ? "" : rawQ;
+      const category = String(req.query.category || "all");
+      const page = Math.max(1, parseInt(String(req.query.page || "1")) || 1);
+      const order = String(req.query.order || "popular");
+
+      const result = await scrapeKomikindoSearchWithDiagnostics(q, category, page, order);
+      res.json(result);
     } catch (error: any) {
       console.error("Komikindo search error:", error.message);
       res.status(500).json({ error: "Failed to fetch from Komikindo", message: error.message, data: [] });

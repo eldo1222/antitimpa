@@ -76,11 +76,27 @@ export default async function handler(req: any, res: any) {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 9000);
+    const lowerUrl = parsedUrl.toString().toLowerCase();
+    let referer = parsedUrl.origin + '/';
+    if (
+      lowerUrl.includes('komikindo') ||
+      lowerUrl.includes('imageainewgeneration') ||
+      lowerUrl.includes('himmga') ||
+      lowerUrl.includes('gaimgame') ||
+      lowerUrl.includes('indocontentaising') ||
+      lowerUrl.includes('aicontentwow') ||
+      lowerUrl.includes('contentkerewnrorai')
+    ) {
+      referer = 'https://komikindo.ch/';
+    } else if (lowerUrl.includes('komiktap') || lowerUrl.includes('komikcdn')) {
+      referer = 'https://komiktap.info/';
+    }
+
     const response = await fetch(parsedUrl.toString(), {
       signal: controller.signal,
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 AntiTimpa/1.0',
-        'Referer': parsedUrl.origin + '/',
+        'Referer': referer,
         'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8'
       }
     });

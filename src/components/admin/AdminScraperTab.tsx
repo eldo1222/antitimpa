@@ -303,23 +303,32 @@ export const AdminScraperTab: React.FC = () => {
     pageNum: number = 1
   ) => {
     if (e) e.preventDefault();
-    const q = customQ !== undefined ? customQ : searchQuery;
+    const rawQ = (customQ !== undefined ? customQ : searchQuery).trim();
+    const isAll = rawQ.toLowerCase() === 'all' || rawQ.toLowerCase() === 'semua';
+    const cleanQ = isAll ? '' : rawQ;
     const cat = catFilter !== undefined ? catFilter : komikindoCategoryFilter;
     const ord = orderFilter !== undefined ? orderFilter : komikindoOrder;
 
     setIsSearching(true);
     setErrorMsg('');
     try {
-      const results = await searchKomikindo(q, cat, ord, pageNum);
+      const results = await searchKomikindo(cleanQ, cat, ord, pageNum);
       setSearchResults(results);
       setKomikindoPage(pageNum);
       setHasSearched(true);
       if (results.length === 0) {
-        setErrorMsg(`Tidak ditemukan komik di Komikindo untuk "${q || cat}".`);
+        const customStatusMsg = (results as any).statusMessage;
+        if (customStatusMsg) {
+          setErrorMsg(customStatusMsg);
+        } else if (cleanQ) {
+          setErrorMsg(`🔍 [KOMIKINDO_SEARCH_EMPTY] Tidak ada komik yang cocok untuk judul "${cleanQ}".`);
+        } else {
+          setErrorMsg(`🔍 [KOMIKINDO_SEARCH_EMPTY] Tidak ada komik yang ditemukan pada kategori "${cat}".`);
+        }
       }
     } catch (err: any) {
-      console.error(err);
-      setErrorMsg('Gagal terhubung ke Komikindo Scraper.');
+      console.error('Komikindo search error:', err);
+      setErrorMsg(err.message || 'Gagal terhubung ke Komikindo Scraper.');
     } finally {
       setIsSearching(false);
     }

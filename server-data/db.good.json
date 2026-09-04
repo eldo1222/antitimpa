@@ -1506,32 +1506,39 @@
   },
   "users": [
     {
-      "id": "user-admin",
-      "username": "admin",
-      "passwordHash": "$2b$10$cHkmXzEiZV5bNpyULbHBMuyhIVQRTZgTUamKzos/t/Hvf4AEhdtXu",
+      "id": "3f97a893-64cc-4740-9826-f2d7dc86df48",
+      "username": "jef_aruan",
+      "displayName": "jef_aruan",
+      "email": "jefaruan627@gmail.com",
+      "phone": "",
+      "phoneNumber": "",
+      "bio": "",
+      "passwordHash": "",
       "role": "admin",
       "status": "active",
-      "createdAt": "2023-01-01T00:00:00.000Z",
-      "firstLoginAt": "2023-01-01T00:00:00.000Z",
-      "expiresAt": null,
-      "durationType": "1_year",
-      "failedAttempts": 0,
-      "avatar": "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
+      "avatar": "https://lh3.googleusercontent.com/a/ACg8ocIVJjLjYOPcvK-WsdBjOA6zp_J5XvV0y_rM5PWEbMKrAG5U3Q=s96-c",
+      "photoURL": "https://lh3.googleusercontent.com/a/ACg8ocIVJjLjYOPcvK-WsdBjOA6zp_J5XvV0y_rM5PWEbMKrAG5U3Q=s96-c",
       "tier": "Premium",
       "planType": "plan_15k_all",
       "accessType": "all",
-      "priceNote": "Super Admin Lifetime Access",
-      "bio": "AntiTimpa Super Administrator",
+      "isVip": true,
+      "durationType": "unlimited",
+      "allowedComicIds": [],
+      "priceNote": "Paket 15K Unlimited (Full Akses Semua Komik)",
+      "expiresAt": null,
+      "firstLoginAt": null,
+      "failedAttempts": 0,
+      "createdAt": "2026-09-02T14:22:58.36+00:00",
       "stats": {
-        "comicsRead": 250,
-        "chaptersRead": 2400,
-        "daysActive": 620
+        "comicsRead": 0,
+        "chaptersRead": 2,
+        "daysActive": 1
       }
     },
     {
       "id": "user-1",
       "username": "CyberReader_01",
-      "passwordHash": "$2b$10$JBhSHv9ZoTCr8/VU3n2gN.PtlwRVNVM4sodsnyTB9ZZTP72cwQU1q",
+      "passwordHash": "$2b$10$GNgY7mTj9eQLXrOew.kVjem3fM4UNcouaCWIHVhwM5fng9r5J0Jee",
       "role": "reader",
       "status": "active",
       "createdAt": "2022-06-15T10:00:00.000Z",
@@ -1554,7 +1561,7 @@
     {
       "id": "user-2",
       "username": "shadow_reader_99",
-      "passwordHash": "$2b$10$tSYtNrVQyK.Dtyyf6.2J8utmaB.WbewscBtnmT9mmwNbg8ZYi9j8C",
+      "passwordHash": "$2b$10$rzABw4czy5oiSzgBasucU.krsuu5MHFrJAAzd7uKMsQL5MxqOUg2O",
       "role": "reader",
       "status": "active",
       "createdAt": "2024-08-01T08:00:00.000Z",
@@ -1580,7 +1587,7 @@
     {
       "id": "user-3",
       "username": "manga_queen_xx",
-      "passwordHash": "$2b$10$wQO7qLqpNR980VjKg6MV4eSBBO6k8M.WLNHmNJZBlnmlBs7Ghquea",
+      "passwordHash": "$2b$10$0VBwt2qQnw7XS21Xe4SlfuY00j4n9PTBxKqFUTUX5DwuYyTfZp7m6",
       "role": "reader",
       "status": "active",
       "createdAt": "2024-05-10T12:00:00.000Z",
@@ -1603,7 +1610,7 @@
     {
       "id": "user-4",
       "username": "zero_x_hero",
-      "passwordHash": "$2b$10$I/29NgbVNrG0wArahdupxez1s6HgOf/OoYHp2oyBHSEd8Dm1roese",
+      "passwordHash": "$2b$10$BEynGX3uQ8bIPCGRPwMQ.uVRTgbPO6V5tYaw7B8rO8SHHoZcnTlDa",
       "role": "reader",
       "status": "expired",
       "createdAt": "2024-09-01T10:00:00.000Z",
@@ -1629,7 +1636,7 @@
     {
       "id": "user-5",
       "username": "bot_scraper_882",
-      "passwordHash": "$2b$10$Lkk/h7oWF1Ey4CCuMxLe5.88vd7sDGWhEmHPyQrIRPNcpf8zIcOqW",
+      "passwordHash": "$2b$10$TCX8s7iUDyO4seFDDdm9n.9Ukvz7ve.M9Qu7OnMhZ7Gx.8a.42eb.",
       "role": "reader",
       "status": "locked",
       "createdAt": "2024-10-01T04:00:00.000Z",
@@ -2071,5 +2078,5 @@
     "floatingBottomEnabled": true,
     "showAdLabel": true
   },
-  "version": 1788357967911
+  "version": 1788543533863
 }

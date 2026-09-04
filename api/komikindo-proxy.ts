@@ -90,16 +90,51 @@ function normalizeChapterUrl(rawUrl: string): string {
   }
 }
 
+export type KomikindoScrapeStatus = 
+  | 'KOMIKINDO_OK' 
+  | 'KOMIKINDO_FETCH_FAILED' 
+  | 'KOMIKINDO_PARSER_FAILED' 
+  | 'KOMIKINDO_SEARCH_EMPTY';
+
+export interface KomikindoDiagnostics {
+  targetUrl: string;
+  httpStatus: number | null;
+  contentType: string | null;
+  htmlLength: number;
+  parserMatches: number;
+  redirected: boolean;
+  finalUrl: string;
+  timestamp: string;
+  runtime: 'vercel_serverless' | 'express_dev';
+}
+
+export interface KomikindoScrapeResult {
+  status: KomikindoScrapeStatus;
+  data: KomikindoSearchResult[];
+  total: number;
+  page: number;
+  query: string;
+  category: string;
+  error?: string;
+  message?: string;
+  diagnostics: KomikindoDiagnostics;
+}
+
 /**
- * Searches Komikindo catalog or browse by order/category
+ * Searches Komikindo catalog or browse by order/category with detailed diagnostic tracking
  */
-export async function scrapeKomikindoSearch(
+export async function scrapeKomikindoSearchWithDiagnostics(
   query = '',
   category = 'all',
   page = 1,
   order = 'popular'
-): Promise<KomikindoSearchResult[]> {
-  const cleanQuery = String(query || '').trim();
+): Promise<KomikindoScrapeResult> {
+  const rawQ = String(query || '').trim();
+  const isAllKeyword = rawQ.toLowerCase() === 'all' || rawQ.toLowerCase() === 'semua';
+  const cleanQuery = isAllKeyword ? '' : rawQ;
+  const isVercel = typeof process.env.VERCEL !== 'undefined';
+  const runtimeType = isVercel ? 'vercel_serverless' : 'express_dev';
+
   let targetUrl = '';
 
   if (cleanQuery) {
@@ -133,81 +168,290 @@ export async function scrapeKomikindoSearch(
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 12000);
+  const timeout = setTimeout(() => controller.abort(), 14000);
 
-  const res = await fetch(targetUrl, {
-    headers: DEFAULT_HEADERS,
-    signal: controller.signal
-  });
-  clearTimeout(timeout);
-
-  if (!res.ok) {
-    throw new Error(`Komikindo returned HTTP ${res.status}`);
-  }
-
-  const html = await res.text();
-  const results: KomikindoSearchResult[] = [];
-
-  // Match each manga card: <div class="animepost">
-  const cardRegex = /<div class=[\"']animepost[\"']>([\s\S]*?)<\/div>\s*<\/div>\s*<\/div>/gi;
-  let match;
-
-  while ((match = cardRegex.exec(html)) !== null) {
-    const cardHtml = match[1];
-
-    // Link & Title
-    const linkMatch = cardHtml.match(/<a\b[^>]*href=[\"'](https?:\/\/[^\"']*komikindo\.ch\/komik\/[^\"']+)[\"'][^>]*>/i) ||
-      cardHtml.match(/<a\b[^>]*href=[\"']([^\"']+)[\"'][^>]*itemprop=[\"']url[\"'][^>]*>/i);
-    const rawUrl = linkMatch?.[1] || '';
-    if (!rawUrl) continue;
-
-    const titleAttrMatch = cardHtml.match(/title=[\"']([^\"']+)[\"']/i);
-    const titleTextMatch = cardHtml.match(/<div class=[\"']tt[\"']>[\s\S]*?<h3>([\s\S]*?)<\/h3>/i);
-    const rawTitle = titleTextMatch?.[1] || titleAttrMatch?.[1] || '';
-    const cleanTitle = cleanComicTitle(rawTitle);
-
-    if (!cleanTitle) continue;
-
-    // Extract slug from URL e.g. https://komikindo.ch/komik/solo-leveling/ -> solo-leveling
-    const slug = rawUrl.replace(/\/$/, '').split('/').pop() || '';
-
-    // Extract cover image
-    const imgMatch = cardHtml.match(/<img[^>]+(?:src|data-src)=[\"']([^\"']+)[\"']/i);
-    let coverImage = imgMatch?.[1] || '';
-    if (coverImage.startsWith('//')) coverImage = `https:${coverImage}`;
-
-    // Extract type (Manga / Manhwa / Manhua)
-    const typeMatch = cardHtml.match(/<span class=[\"']typeflag\s+([^\"']+)[\"']/i);
-    const rawType = (typeMatch?.[1] || '').toLowerCase();
-    let comicType: 'manga' | 'manhwa' | 'manhua' | 'doujin' = 'manga';
-    if (rawType.includes('manhwa')) comicType = 'manhwa';
-    else if (rawType.includes('manhua')) comicType = 'manhua';
-    else if (rawType.includes('doujin')) comicType = 'doujin';
-
-    // Extract latest chapter
-    const chMatch = cardHtml.match(/<div class=[\"']lsch[\"\']>[\s\S]*?<a[^>]*>([\s\S]*?)<\/a>/i);
-    const latestChapter = chMatch ? cleanHtmlText(chMatch[1]) : '';
-
-    // Extract rating score
-    const scoreMatch = cardHtml.match(/<div class=[\"']rating[\"\']>[\s\S]*?<i>([^<]+)<\/i>/i);
-    const rating = scoreMatch ? Math.min(5, Math.max(0, (parseFloat(scoreMatch[1]) || 8.0) / 2)) : 4.8;
-
-    const isAdult = /18\+|dewasa|adult|ecchi|hentai/i.test(cleanTitle) || category === '18plus';
-
-    results.push({
-      title: cleanTitle,
-      slug,
-      url: rawUrl,
-      coverImage,
-      comicType,
-      contentType: isAdult ? '18plus' : 'normal',
-      rating,
-      latestChapter,
-      sourceApi: 'Komikindo API (komikindo.ch)'
+  try {
+    const res = await fetch(targetUrl, {
+      headers: DEFAULT_HEADERS,
+      signal: controller.signal
     });
-  }
+    clearTimeout(timeout);
 
-  return results;
+    const contentType = res.headers.get('content-type') || '';
+    const redirected = res.redirected;
+    const finalUrl = res.url || targetUrl;
+
+    // CASE A: HTTP Status Not OK (e.g. 403, 429, 500, 503)
+    if (!res.ok) {
+      console.error(`[KOMIKINDO][PROD][SEARCH][CASE_A_FETCH_FAILED]`);
+      console.error(`query: ${cleanQuery || '(empty - browse catalog)'}`);
+      console.error(`category: ${category}`);
+      console.error(`request URL: ${targetUrl}`);
+      console.error(`HTTP status: ${res.status}`);
+      console.error(`content-type: ${contentType}`);
+      console.error(`redirected: ${redirected}`);
+      console.error(`final URL: ${finalUrl}`);
+
+      return {
+        status: 'KOMIKINDO_FETCH_FAILED',
+        data: [],
+        total: 0,
+        page,
+        query: cleanQuery,
+        category,
+        error: `Komikindo returned HTTP ${res.status} (${res.statusText})`,
+        message: `KomikIndo gagal diakses dari server production (${res.status} ${res.statusText}). ${
+          res.status === 403 ? 'Proteksi Cloudflare upstream membatasi akses datacenter.' : ''
+        }`,
+        diagnostics: {
+          targetUrl,
+          httpStatus: res.status,
+          contentType,
+          htmlLength: 0,
+          parserMatches: 0,
+          redirected,
+          finalUrl,
+          timestamp: new Date().toISOString(),
+          runtime: runtimeType
+        }
+      };
+    }
+
+    const html = await res.text();
+
+    // Check if Cloudflare returned an actual challenge HTML page
+    const titleMatch = html.match(/<title>(.*?)<\/title>/i)?.[1] || '';
+    const isCfChallenge = (
+      titleMatch.includes('Just a moment...') ||
+      titleMatch.includes('Attention Required!') ||
+      titleMatch.includes('Security Check') ||
+      html.includes('id="challenge-error-title"') ||
+      html.includes('cf-browser-verification')
+    );
+
+    if (isCfChallenge) {
+      console.error(`[KOMIKINDO][PROD][SEARCH][CASE_A_FETCH_FAILED] Cloudflare verification challenge detected in HTML`);
+      return {
+        status: 'KOMIKINDO_FETCH_FAILED',
+        data: [],
+        total: 0,
+        page,
+        query: cleanQuery,
+        category,
+        error: 'Cloudflare bot verification challenge detected',
+        message: 'KomikIndo menampilkan Cloudflare verification challenge ke server production.',
+        diagnostics: {
+          targetUrl,
+          httpStatus: res.status,
+          contentType,
+          htmlLength: html.length,
+          parserMatches: 0,
+          redirected,
+          finalUrl,
+          timestamp: new Date().toISOString(),
+          runtime: runtimeType
+        }
+      };
+    }
+
+    // Run Parser Regex
+    const results: KomikindoSearchResult[] = [];
+    const cardRegex = /<div class=[\"']animepost[\"']>([\s\S]*?)<\/div>\s*<\/div>\s*<\/div>/gi;
+    let match;
+
+    while ((match = cardRegex.exec(html)) !== null) {
+      const cardHtml = match[1];
+
+      // Link & Title
+      const linkMatch = cardHtml.match(/<a\b[^>]*href=[\"'](https?:\/\/[^\"']*komikindo\.ch\/komik\/[^\"']+)[\"'][^>]*>/i) ||
+        cardHtml.match(/<a\b[^>]*href=[\"']([^\"']+)[\"'][^>]*itemprop=[\"']url[\"'][^>]*>/i);
+      const rawUrl = linkMatch?.[1] || '';
+      if (!rawUrl) continue;
+
+      const titleAttrMatch = cardHtml.match(/title=[\"']([^\"']+)[\"']/i);
+      const titleTextMatch = cardHtml.match(/<div class=[\"']tt[\"']>[\s\S]*?<h3>([\s\S]*?)<\/h3>/i);
+      const rawTitle = titleTextMatch?.[1] || titleAttrMatch?.[1] || '';
+      const cleanTitle = cleanComicTitle(rawTitle);
+
+      if (!cleanTitle) continue;
+
+      // Extract slug from URL e.g. https://komikindo.ch/komik/solo-leveling/ -> solo-leveling
+      const slug = rawUrl.replace(/\/$/, '').split('/').pop() || '';
+
+      // Extract cover image
+      const imgMatch = cardHtml.match(/<img[^>]+(?:src|data-src)=[\"']([^\"']+)[\"']/i);
+      let coverImage = imgMatch?.[1] || '';
+      if (coverImage.startsWith('//')) coverImage = `https:${coverImage}`;
+
+      // Extract type (Manga / Manhwa / Manhua)
+      const typeMatch = cardHtml.match(/<span class=[\"']typeflag\s+([^\"']+)[\"']/i);
+      const rawType = (typeMatch?.[1] || '').toLowerCase();
+      let comicType: 'manga' | 'manhwa' | 'manhua' | 'doujin' = 'manga';
+      if (rawType.includes('manhwa')) comicType = 'manhwa';
+      else if (rawType.includes('manhua')) comicType = 'manhua';
+      else if (rawType.includes('doujin')) comicType = 'doujin';
+
+      // Extract latest chapter
+      const chMatch = cardHtml.match(/<div class=[\"']lsch[\"\']>[\s\S]*?<a[^>]*>([\s\S]*?)<\/a>/i);
+      const latestChapter = chMatch ? cleanHtmlText(chMatch[1]) : '';
+
+      // Extract rating score
+      const scoreMatch = cardHtml.match(/<div class=[\"']rating[\"\']>[\s\S]*?<i>([^<]+)<\/i>/i);
+      const rating = scoreMatch ? Math.min(5, Math.max(0, (parseFloat(scoreMatch[1]) || 8.0) / 2)) : 4.8;
+
+      const isAdult = /18\+|dewasa|adult|ecchi|hentai/i.test(cleanTitle) || category === '18plus';
+
+      results.push({
+        title: cleanTitle,
+        slug,
+        url: rawUrl,
+        coverImage,
+        comicType,
+        contentType: isAdult ? '18plus' : 'normal',
+        rating,
+        latestChapter,
+        sourceApi: 'Komikindo API (komikindo.ch)'
+      });
+    }
+
+    // Diagnostic Logging Output
+    console.log(`[KOMIKINDO][PROD][SEARCH]`);
+    console.log(`query: ${cleanQuery || '(empty - browse catalog)'}`);
+    console.log(`category: ${category}`);
+    console.log(`request URL: ${targetUrl}`);
+    console.log(`HTTP status: ${res.status}`);
+    console.log(`content-type: ${contentType}`);
+    console.log(`response length: ${html.length}`);
+    console.log(`redirected: ${redirected}`);
+    console.log(`final URL: ${finalUrl}`);
+    console.log(`parser: animepost`);
+    console.log(`results: ${results.length}`);
+
+    // OK: Found results
+    if (results.length > 0) {
+      return {
+        status: 'KOMIKINDO_OK',
+        data: results,
+        total: results.length,
+        page,
+        query: cleanQuery,
+        category,
+        diagnostics: {
+          targetUrl,
+          httpStatus: res.status,
+          contentType,
+          htmlLength: html.length,
+          parserMatches: results.length,
+          redirected,
+          finalUrl,
+          timestamp: new Date().toISOString(),
+          runtime: runtimeType
+        }
+      };
+    }
+
+    // CASE C: Legitimate Empty Search
+    const isExplicitNotFound = (
+      html.includes('notfound') ||
+      html.includes('Nothing Found') ||
+      html.includes('tidak ada') ||
+      html.includes('Tidak ditemukan')
+    );
+
+    if (Boolean(cleanQuery) || isExplicitNotFound) {
+      console.log(`[KOMIKINDO][PROD][SEARCH][CASE_C_SEARCH_EMPTY] Query: "${cleanQuery}" returned 0 results`);
+      return {
+        status: 'KOMIKINDO_SEARCH_EMPTY',
+        data: [],
+        total: 0,
+        page,
+        query: cleanQuery,
+        category,
+        message: cleanQuery
+          ? `KomikIndo aktif dan parser berjalan, namun tidak ada komik untuk judul "${cleanQuery}".`
+          : `KomikIndo aktif, namun tidak ditemukan komik pada kategori "${category}".`,
+        diagnostics: {
+          targetUrl,
+          httpStatus: res.status,
+          contentType,
+          htmlLength: html.length,
+          parserMatches: 0,
+          redirected,
+          finalUrl,
+          timestamp: new Date().toISOString(),
+          runtime: runtimeType
+        }
+      };
+    }
+
+    // CASE B: Parser Failed (HTML retrieved with length > 2000, but 0 matches)
+    console.error(`[KOMIKINDO][PROD][SEARCH][CASE_B_PARSER_FAILED] HTML length: ${html.length}, 0 matches`);
+    return {
+      status: 'KOMIKINDO_PARSER_FAILED',
+      data: [],
+      total: 0,
+      page,
+      query: cleanQuery,
+      category,
+      error: `KomikIndo HTML berhasil diterima (${html.length} bytes), namun pola parser tidak menemukan kartu komik`,
+      message: `KomikIndo berhasil diakses (${html.length} bytes), namun parser tidak menemukan hasil pencarian.`,
+      diagnostics: {
+        targetUrl,
+        httpStatus: res.status,
+        contentType,
+        htmlLength: html.length,
+        parserMatches: 0,
+        redirected,
+        finalUrl,
+        timestamp: new Date().toISOString(),
+        runtime: runtimeType
+      }
+    };
+  } catch (err: any) {
+    clearTimeout(timeout);
+    const isTimeout = err.name === 'AbortError';
+    console.error(`[KOMIKINDO][PROD][SEARCH][CASE_A_FETCH_FAILED] ${isTimeout ? 'Timeout 14s' : err.message}`);
+
+    return {
+      status: 'KOMIKINDO_FETCH_FAILED',
+      data: [],
+      total: 0,
+      page,
+      query: cleanQuery,
+      category,
+      error: isTimeout ? 'Timeout koneksi 14 detik ke Komikindo' : err.message,
+      message: `Gagal terhubung ke KomikIndo dari server (${isTimeout ? 'Connection Timeout 14s' : err.message}).`,
+      diagnostics: {
+        targetUrl,
+        httpStatus: null,
+        contentType: null,
+        htmlLength: 0,
+        parserMatches: 0,
+        redirected: false,
+        finalUrl: targetUrl,
+        timestamp: new Date().toISOString(),
+        runtime: runtimeType
+      }
+    };
+  }
+}
+
+/**
+ * Backward-compatible wrapper that returns KomikindoSearchResult[] with status metadata attached
+ */
+export async function scrapeKomikindoSearch(
+  query = '',
+  category = 'all',
+  page = 1,
+  order = 'popular'
+): Promise<KomikindoSearchResult[]> {
+  const result = await scrapeKomikindoSearchWithDiagnostics(query, category, page, order);
+  const arr = result.data;
+  (arr as any).status = result.status;
+  (arr as any).statusMessage = result.message;
+  (arr as any).error = result.error;
+  (arr as any).diagnostics = result.diagnostics;
+  return arr;
 }
 
 /**
@@ -571,7 +815,34 @@ export async function scrapeKomikindoChapterPages(chapterUrlOrSlug: string, maxR
  */
 export default async function handler(req: any, res: any) {
   const query = req.query || req.queryStringParameters || {};
-  const action = String(query.action || 'search').toLowerCase();
+  let action = String(query.action || '').toLowerCase();
+
+  // Resolve action and params from path if routed via /api/komikindo/:path*
+  const pathVal = query.path;
+  let pathStr = '';
+  if (Array.isArray(pathVal)) {
+    pathStr = pathVal.join('/');
+  } else if (typeof pathVal === 'string') {
+    pathStr = pathVal;
+  }
+
+  if (!action) {
+    if (pathStr.startsWith('search') || pathStr === 'search') {
+      action = 'search';
+    } else if (pathStr.startsWith('detail') || pathStr === 'detail') {
+      action = 'detail';
+    } else if (pathStr.startsWith('chapter') || pathStr === 'chapter') {
+      action = 'chapter';
+    } else if (pathStr.startsWith('comic') || pathStr === 'comic') {
+      action = 'detail';
+      if (!query.slug) {
+        const parts = pathStr.split('/');
+        if (parts[1]) query.slug = parts[1];
+      }
+    } else {
+      action = 'search';
+    }
+  }
 
   const sendResponse = (statusCode: number, data: any) => {
     if (res && typeof res.status === 'function') {
@@ -601,13 +872,17 @@ export default async function handler(req: any, res: any) {
 
   try {
     if (action === 'search' || action === 'list') {
-      const q = String(query.q || query.search || query.title || '').trim();
+      // Strictly separate search query from category filter
+      const rawQ = String(query.searchQuery || query.q || query.search || query.title || '').trim();
+      const isAllKeyword = rawQ.toLowerCase() === 'all' || rawQ.toLowerCase() === 'semua';
+      const q = isAllKeyword ? '' : rawQ;
+
       const category = String(query.category || 'all').toLowerCase();
       const page = Math.max(1, parseInt(query.page || '1') || 1);
       const order = String(query.order || 'popular').toLowerCase();
 
-      const items = await scrapeKomikindoSearch(q, category, page, order);
-      return sendResponse(200, { data: items, total: items.length, page });
+      const result = await scrapeKomikindoSearchWithDiagnostics(q, category, page, order);
+      return sendResponse(200, result);
     }
 
     if (action === 'detail') {
