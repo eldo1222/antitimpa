@@ -89,16 +89,18 @@ export class AuthService {
           needsUpdate = true;
         }
 
-        // Always grant Google users Full 15K Unlimited Access
-        if (updated.planType !== 'plan_15k_all' || updated.accessType !== 'all' || !updated.isVip) {
-          updated.planType = 'plan_15k_all';
-          updated.accessType = 'all';
-          updated.durationType = 'unlimited';
-          updated.tier = 'Premium';
-          updated.isVip = true;
-          updated.priceNote = 'Paket 15K Unlimited (Full Akses Semua Komik)';
-          updated.allowedComicIds = [];
-          needsUpdate = true;
+        // Grant Google users Full 15K Unlimited Access (unless administrator assigned 5k single plan)
+        if (updated.planType !== 'plan_5k_single' && updated.accessType !== 'specific') {
+          if (updated.planType !== 'plan_15k_all' || updated.accessType !== 'all' || !updated.isVip) {
+            updated.planType = 'plan_15k_all';
+            updated.accessType = 'all';
+            updated.durationType = 'unlimited';
+            updated.tier = 'Premium';
+            updated.isVip = true;
+            updated.priceNote = 'Paket 15K Unlimited (Full Akses Semua Komik)';
+            updated.allowedComicIds = [];
+            needsUpdate = true;
+          }
         }
 
         // Update photoURL if missing

@@ -531,13 +531,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                     uMap.set(u.id, u);
                   } else {
                     const remote = uMap.get(u.id)!;
-                    // Preserve 15k full access if user already has it
-                    if (u.planType === 'plan_15k_all' || u.tier === 'Premium' || u.isVip || u.loginMethod === 'google') {
+                    // If remote has specific plan settings, prioritize remote authoritative state
+                    if (remote.planType === 'plan_5k_single' || remote.accessType === 'specific') {
+                      uMap.set(u.id, remote);
+                    } else if (u.planType === 'plan_15k_all' || u.tier === 'Premium' || u.isVip || u.loginMethod === 'google') {
                       uMap.set(u.id, {
                         ...remote,
                         planType: 'plan_15k_all',
                         accessType: 'all',
-                        durationType: 'unlimited',
                         tier: 'Premium',
                         isVip: true,
                         priceNote: remote.priceNote || 'Paket 15K Unlimited (Full Akses Semua Komik)'
@@ -557,15 +558,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 (Boolean(u.email) && (u.email || '').toLowerCase() === (prev.email || '').toLowerCase())
               );
               if (!match) return prev;
-              const updatedUser: User = (prev.loginMethod === 'google' || prev.provider === 'google' || prev.planType === 'plan_15k_all') ? {
-                ...match,
-                planType: 'plan_15k_all' as PlanType,
-                accessType: 'all' as AccessType,
-                durationType: 'unlimited' as DurationType,
-                tier: 'Premium' as const,
-                isVip: true,
-                priceNote: match.priceNote || 'Paket 15K Unlimited (Full Akses Semua Komik)'
-              } : match;
+              const updatedUser: User = (match.planType === 'plan_5k_single' || match.accessType === 'specific') 
+                ? match
+                : ((prev.loginMethod === 'google' || prev.provider === 'google' || prev.planType === 'plan_15k_all') ? {
+                    ...match,
+                    planType: 'plan_15k_all' as PlanType,
+                    accessType: 'all' as AccessType,
+                    tier: 'Premium' as const,
+                    isVip: true,
+                    priceNote: match.priceNote || 'Paket 15K Unlimited (Full Akses Semua Komik)'
+                  } : match);
               safeSetItem(STORAGE_KEYS.CURRENT_USER, updatedUser);
               return updatedUser;
             });
@@ -1042,14 +1044,35 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
 
     // Plan & Title Permissions Logic
-    const isGoogleUser = targetUser.loginMethod === 'google' || targetUser.provider === 'google' || Boolean(targetUser.email && (targetUser.email.includes('@') || targetUser.email.includes('gmail')));
+    const isExplicitSinglePlan = targetUser.planType === 'plan_5k_single' || targetUser.accessType === 'specific';
+
+    if (isExplicitSinglePlan) {
+      // Specific comic access (e.g. 5k Single Title Plan or custom list)
+      const allowedIds = targetUser.allowedComicIds || [];
+      const isAllowed = allowedIds.includes(comicId);
+
+      if (isAllowed) {
+        return { allowed: true };
+      }
+
+      const allowedTitles = comics.filter(c => allowedIds.includes(c.id)).map(c => c.title);
+
+      return {
+        allowed: false,
+        reason: 'restricted_plan',
+        message: `Akun Anda terdaftar pada Paket Khusus 1 Judul. Anda tidak memiliki izin untuk membaca komik ini.${allowedTitles.length > 0 ? ` Judul yang terdaftar pada akun Anda: "${allowedTitles.join(', ')}".` : ''}`,
+        allowedComicTitles: allowedTitles
+      };
+    }
+
+    const isGoogleUser = targetUser.loginMethod === 'google' || targetUser.provider === 'google';
     const isAllAccess = isGoogleUser || targetUser.accessType === 'all' || targetUser.planType === 'plan_15k_all' || targetUser.tier === 'Premium' || targetUser.isVip || (!targetUser.accessType && (!targetUser.allowedComicIds || targetUser.allowedComicIds.length === 0));
 
     if (isAllAccess) {
       return { allowed: true };
     }
 
-    // Specific comic access (e.g. 5k Single Title Plan or custom list)
+    // Default fallback check
     const allowedIds = targetUser.allowedComicIds || [];
     const isAllowed = allowedIds.includes(comicId);
 
@@ -2700,7 +2723,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const newUser: User = {
       id: `user-${Date.now()}`,
       username: cleanUsername,
-      passwordHash: userData.password,
+      passwordHash: hashPassword(userData.password),
       phone: userData.phone || userData.phoneNumber || '',
       phoneNumber: userData.phone || userData.phoneNumber || '',
       role: 'reader',

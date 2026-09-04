@@ -17,16 +17,17 @@ export function mapUserToDb(u: Partial<User>): Record<string, any> {
   if (u.bio !== undefined) row.bio = u.bio;
   if (u.passwordHash !== undefined) row.password_hash = u.passwordHash;
   if (u.role !== undefined) row.role = u.role;
-  const isVipUser = u.planType === 'plan_15k_all' || 
+  const isExplicitSingle = u.planType === 'plan_5k_single' || u.accessType === 'specific';
+  const isVipUser = !isExplicitSingle && (
+    u.planType === 'plan_15k_all' || 
     u.tier === 'Premium' || 
     u.isVip === true || 
-    u.loginMethod === 'google' || 
-    u.provider === 'google' || 
-    u.role === 'admin' || 
-    (Boolean(u.email) && (u.email || '').includes('@'));
-  row.package_type = isVipUser ? 'vip' : (u.planType === 'plan_5k_single' ? 'free' : 'vip');
-  row.plan_type = u.planType || (isVipUser ? 'plan_15k_all' : 'plan_15k_all');
-  row.access_type = u.accessType || 'all';
+    u.role === 'admin' ||
+    (u.loginMethod === 'google' || u.provider === 'google')
+  );
+  row.package_type = isExplicitSingle ? 'free' : (isVipUser ? 'vip' : 'free');
+  row.plan_type = u.planType || (isExplicitSingle ? 'plan_5k_single' : (isVipUser ? 'plan_15k_all' : 'plan_5k_single'));
+  row.access_type = u.accessType || (isExplicitSingle ? 'specific' : 'all');
   if (u.avatar !== undefined || u.photoURL !== undefined) {
     row.avatar = u.avatar || u.photoURL;
   }
@@ -52,14 +53,15 @@ export function mapUserToDb(u: Partial<User>): Record<string, any> {
 
 export function mapDbToUser(u: Record<string, any>): User {
   const phoneVal = u.phone || u.phone_number || '';
-  const isGoogleOrVip = u.role === 'admin' || 
+  const isExplicitSingle = u.plan_type === 'plan_5k_single' || u.access_type === 'specific' || u.package_type === 'free';
+  const isGoogleOrVip = !isExplicitSingle && (
+    u.role === 'admin' || 
     u.package_type === 'vip' || 
     u.plan_type === 'plan_15k_all' || 
     u.tier === 'Premium' || 
     u.login_method === 'google' || 
-    u.provider === 'google' || 
-    (Boolean(u.email) && (u.email || '').includes('@')) ||
-    (!u.allowed_comic_ids || (Array.isArray(u.allowed_comic_ids) && u.allowed_comic_ids.length === 0));
+    u.provider === 'google'
+  );
 
   return {
     id: u.id,
@@ -74,13 +76,13 @@ export function mapDbToUser(u: Record<string, any>): User {
     status: (u.status || (u.is_active === false ? 'inactive' : 'active')),
     avatar: u.avatar || '',
     photoURL: u.avatar || '',
-    tier: isGoogleOrVip ? 'Premium' : 'Free Tier',
-    planType: isGoogleOrVip ? 'plan_15k_all' : (u.plan_type || 'plan_15k_all'),
-    accessType: isGoogleOrVip ? 'all' : (u.access_type || 'all'),
-    isVip: isGoogleOrVip,
+    tier: isExplicitSingle ? 'Pro Member' : (isGoogleOrVip ? 'Premium' : 'Free Tier'),
+    planType: isExplicitSingle ? 'plan_5k_single' : (isGoogleOrVip ? 'plan_15k_all' : (u.plan_type || 'plan_15k_all')),
+    accessType: isExplicitSingle ? 'specific' : (isGoogleOrVip ? 'all' : (u.access_type || 'all')),
+    isVip: !isExplicitSingle && isGoogleOrVip,
     durationType: u.duration_type || 'unlimited',
     allowedComicIds: Array.isArray(u.allowed_comic_ids) ? u.allowed_comic_ids : (u.allowed_comic_ids ? JSON.parse(u.allowed_comic_ids) : []),
-    priceNote: u.price_note || (isGoogleOrVip ? 'Paket 15K Unlimited (Full Akses Semua Komik)' : ''),
+    priceNote: u.price_note || (isExplicitSingle ? 'Rp 5.000 / 1 Judul' : (isGoogleOrVip ? 'Paket 15K Unlimited (Full Akses Semua Komik)' : '')),
     expiresAt: u.expires_at || null,
     firstLoginAt: u.first_login_at || null,
     failedAttempts: typeof u.failed_attempts === 'number' ? u.failed_attempts : (u.failedAttempts || 0),
