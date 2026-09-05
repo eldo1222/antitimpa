@@ -960,9 +960,9 @@ export const ComicReaderView: React.FC = () => {
           </div>
         ) : readingMode === 'vertical' ? (
           /* CASE 3: Vertical Webtoon Scroll Mode (JPG / Image Pages) */
-          <div className="w-full max-w-2xl mx-auto flex flex-col items-center py-12 px-1 sm:px-2 space-y-3">
+          <div className="w-full max-w-2xl mx-auto flex flex-col items-center py-6 px-0 sm:px-2">
             {/* Top Reader Ad Banner (Paling Atas Sebelum Halaman 1) */}
-            <div className="w-full mb-2">
+            <div className="w-full mb-4 px-2 sm:px-0">
               <AdBanner position="reader_top_bar" />
             </div>
 
@@ -1023,86 +1023,92 @@ export const ComicReaderView: React.FC = () => {
               </div>
             ) : null}
 
-            {pages.map((page, idx) => {
-              const pageUrl = typeof page === 'string' ? page : page.imageUrl;
-              const pageId = typeof page === 'string' ? `page-${idx}` : page.id;
-              const fallbackUrl = typeof page === 'object' && page ? (page as any).fallbackUrl || (page as any).directUrl : undefined;
-              return (
-                <div 
-                  key={pageId} 
-                  className="w-full relative shadow-2xl rounded-lg overflow-hidden bg-[#101017] border border-[#1f1f2d]"
-                  style={{ maxWidth: `${zoomLevel}%` }}
-                >
-                  <img 
-                    src={pageUrl} 
-                    alt={`Halaman ${idx + 1}`}
-                    className="w-full h-auto block object-cover"
-                    loading="lazy" 
-                    referrerPolicy="no-referrer"
-                    onError={(e) => handlePageImageError(e, fallbackUrl)}
-                  />
-                  <div className="absolute bottom-2 right-2 px-2 py-0.5 rounded bg-black/60 backdrop-blur-md text-[10px] text-slate-400 font-mono">
-                    {idx + 1} / {pages.length}
-                  </div>
-                </div>
-              );
-            })}
+            {/* Continuous Webtoon Pages Strip (0px gap, normal document flow, no clipping) */}
+            {pages.length > 0 && (
+              <div 
+                className="w-full flex flex-col items-center m-0 p-0 border-0"
+                style={{ maxWidth: `${zoomLevel}%` }}
+              >
+                {pages.map((page, idx) => {
+                  const pageUrl = typeof page === 'string' ? page : page.imageUrl;
+                  const pageId = typeof page === 'string' ? `page-${idx}` : page.id;
+                  const fallbackUrl = typeof page === 'object' && page ? (page as any).fallbackUrl || (page as any).directUrl : undefined;
+                  return (
+                    <div 
+                      key={pageId} 
+                      className="w-full m-0 p-0 border-0 block bg-[#070709] leading-none"
+                    >
+                      <img 
+                        src={pageUrl} 
+                        alt={`Halaman ${idx + 1}`}
+                        className="w-full h-auto block m-0 p-0 border-0"
+                        loading={idx < 4 ? "eager" : "lazy"} 
+                        referrerPolicy="no-referrer"
+                        onError={(e) => handlePageImageError(e, fallbackUrl)}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            )}
 
             {/* End of Chapter Card */}
             {pages.length > 0 && (
-              <div className="w-full p-6 my-8 rounded-2xl bg-[#13131c] border border-[#252538] text-center space-y-4 shadow-xl">
-                <div className="w-12 h-12 rounded-full bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 mx-auto">
-                  <CheckCircle2 className="w-6 h-6" />
-                </div>
+              <div className="w-full px-2 sm:px-0">
+                <div className="w-full p-6 my-8 rounded-2xl bg-[#13131c] border border-[#252538] text-center space-y-4 shadow-xl">
+                  <div className="w-12 h-12 rounded-full bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 mx-auto">
+                    <CheckCircle2 className="w-6 h-6" />
+                  </div>
 
-                <div>
-                  <h4 className="font-extrabold text-base text-white">Chapter {activeChapter.chapterNumber} Selesai!</h4>
-                  <p className="text-xs text-slate-400 mt-1">Kamu telah menyelesaikan membaca chapter ini.</p>
-                </div>
+                  <div>
+                    <h4 className="font-extrabold text-base text-white">Chapter {activeChapter.chapterNumber} Selesai!</h4>
+                    <p className="text-xs text-slate-400 mt-1">Kamu telah menyelesaikan membaca chapter ini.</p>
+                  </div>
 
-                {/* Ad Banner: Bawah Chapter */}
-                <AdBanner position="reader_bottom_nav" className="my-2" />
+                  {/* Ad Banner: Bawah Chapter */}
+                  <AdBanner position="reader_bottom_nav" className="my-2" />
 
-                <div className="flex flex-col sm:flex-row gap-2 justify-center pt-2">
-                  {prevChapter ? (
+                  <div className="flex flex-col sm:flex-row gap-2 justify-center pt-2">
+                    {prevChapter ? (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleNavigateChapter(prevChapter.id);
+                        }}
+                        className="px-4 py-2.5 bg-[#1c1c28] hover:bg-[#252538] text-slate-300 hover:text-white font-semibold text-xs rounded-xl border border-[#2a2a3e] flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+                      >
+                        <ChevronLeft className="w-4 h-4" />
+                        <span>Prev Ch. {prevChapter.chapterNumber}</span>
+                      </button>
+                    ) : null}
+
+                    {nextChapter ? (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleNavigateChapter(nextChapter.id);
+                        }}
+                        className="px-5 py-2.5 bg-gradient-to-r from-[#ff5b14] to-[#f97316] text-white font-bold text-xs rounded-xl shadow-lg shadow-[#ff5b14]/30 flex items-center justify-center gap-2 cursor-pointer hover:opacity-95 transition-all"
+                      >
+                        <span>Lanjut ke Ch. {nextChapter.chapterNumber}</span>
+                        <ChevronRight className="w-4 h-4" />
+                      </button>
+                    ) : (
+                      <div className="text-xs font-semibold text-amber-400 py-2.5 px-3 rounded-xl bg-amber-500/10 border border-amber-500/20">
+                        Ini adalah chapter paling akhir saat ini.
+                      </div>
+                    )}
+
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        handleNavigateChapter(prevChapter.id);
+                        handleClose();
                       }}
-                      className="px-4 py-2.5 bg-[#1c1c28] hover:bg-[#252538] text-slate-300 hover:text-white font-semibold text-xs rounded-xl border border-[#2a2a3e] flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+                      className="px-4 py-2.5 bg-[#1c1c28] hover:bg-[#252538] text-slate-300 hover:text-white font-semibold text-xs rounded-xl border border-[#2a2a3e] cursor-pointer"
                     >
-                      <ChevronLeft className="w-4 h-4" />
-                      <span>Prev Ch. {prevChapter.chapterNumber}</span>
+                      Kembali ke Detail
                     </button>
-                  ) : null}
-
-                  {nextChapter ? (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleNavigateChapter(nextChapter.id);
-                      }}
-                      className="px-5 py-2.5 bg-gradient-to-r from-[#ff5b14] to-[#f97316] text-white font-bold text-xs rounded-xl shadow-lg shadow-[#ff5b14]/30 flex items-center justify-center gap-2 cursor-pointer hover:opacity-95 transition-all"
-                    >
-                      <span>Lanjut ke Ch. {nextChapter.chapterNumber}</span>
-                      <ChevronRight className="w-4 h-4" />
-                    </button>
-                  ) : (
-                    <div className="text-xs font-semibold text-amber-400 py-2.5 px-3 rounded-xl bg-amber-500/10 border border-amber-500/20">
-                      Ini adalah chapter paling akhir saat ini.
-                    </div>
-                  )}
-
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleClose();
-                    }}
-                    className="px-4 py-2.5 bg-[#1c1c28] hover:bg-[#252538] text-slate-300 hover:text-white font-semibold text-xs rounded-xl border border-[#2a2a3e] cursor-pointer"
-                  >
-                    Kembali ke Detail
-                  </button>
+                  </div>
                 </div>
               </div>
             )}
