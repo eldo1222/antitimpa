@@ -7,3 +7,4 @@ export * from '../features/comments/types/comment.types';
 export * from '../features/settings/types/settings.types';
 export * from '../features/drive/types/drive.types';
 export * from '../features/bookmarks/types/bookmark.types';
+export * from '../features/analytics/types/analytics.types';

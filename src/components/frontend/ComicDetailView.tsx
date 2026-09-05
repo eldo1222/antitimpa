@@ -44,13 +44,21 @@ export const ComicDetailView: React.FC = () => {
     openLoginModal,
     startReading,
     canUserReadComic,
-    navigateToGenre
+    navigateToGenre,
+    recordComicView
   } = useApp();
 
   const isUserAuthenticated = !!currentUser || !!googleUser;
 
   // Resolve comic by ID or slug
   const comic = comics.find(c => c.id === comicId || c.slug === comicId);
+
+  // Real Analytics Tracking: Track comic view event
+  useEffect(() => {
+    if (comic) {
+      recordComicView(comic.id, comic.title);
+    }
+  }, [comic?.id]);
 
   const [isSynopsisExpanded, setIsSynopsisExpanded] = useState(false);
   const [chapterSearch, setChapterSearch] = useState('');
@@ -355,7 +363,7 @@ export const ComicDetailView: React.FC = () => {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">Total Pembaca:</span>
-                  <span className="font-semibold text-slate-200">{(comic.totalReaders || 0).toLocaleString()} Kali</span>
+                  <span className="font-semibold text-slate-200">{(comic.totalReaders || 0).toLocaleString()} Pembaca</span>
                 </div>
               </div>
 

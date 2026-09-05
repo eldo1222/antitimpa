@@ -54,7 +54,7 @@ export function useSystemSettings() {
       timestamp: new Date().toISOString()
     };
     setActivityLogs(prev => {
-      const updated = [newLog, ...prev].slice(0, 200);
+      const updated = [newLog, ...prev].slice(0, 2000);
       LocalStorageWrapper.setItem(STORAGE_KEYS.LOGS, updated);
       return updated;
     });

@@ -560,14 +560,89 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  // 19. Add Activity Log
+  // 19. Add Activity Log (No 200 record truncation)
   app.post("/api/data/logs", (req, res) => {
     const log: ActivityLog = req.body;
     if (log && log.id) {
-      dbState.activityLogs = [log, ...dbState.activityLogs.slice(0, 199)];
+      dbState.activityLogs = [log, ...dbState.activityLogs];
       broadcastDatabaseUpdate({ activityLogs: dbState.activityLogs });
     }
     res.json({ success: true });
+  });
+
+  // 19b. Get Paginated Activity Logs
+  app.get("/api/data/logs/paginated", (req, res) => {
+    const page = Math.max(1, parseInt(String(req.query.page || '1'), 10) || 1);
+    const pageSize = Math.max(1, Math.min(100, parseInt(String(req.query.pageSize || '20'), 10) || 20));
+    const search = String(req.query.search || '').trim().toLowerCase();
+    const status = String(req.query.status || 'all');
+    const type = String(req.query.type || 'all');
+
+    let logs = dbState.activityLogs || [];
+
+    if (status !== 'all') {
+      logs = logs.filter(l => l.status === status);
+    }
+    if (type !== 'all') {
+      logs = logs.filter(l => l.type === type);
+    }
+    if (search) {
+      logs = logs.filter(l => 
+        (l.username || '').toLowerCase().includes(search) ||
+        (l.action || '').toLowerCase().includes(search) ||
+        (l.details || '').toLowerCase().includes(search)
+      );
+    }
+
+    const totalCount = logs.length;
+    const totalPages = Math.ceil(totalCount / pageSize) || 1;
+    const from = (page - 1) * pageSize;
+    const data = logs.slice(from, from + pageSize);
+
+    res.json({
+      data,
+      totalCount,
+      page,
+      pageSize,
+      totalPages
+    });
+  });
+
+  // 20. Analytics Events (Central Server In-Memory & Persistence)
+  const serverAnalyticsEvents: any[] = [];
+
+  app.post("/api/analytics/events", (req, res) => {
+    const event = req.body;
+    if (event && event.id) {
+      serverAnalyticsEvents.unshift(event);
+      if (serverAnalyticsEvents.length > 5000) {
+        serverAnalyticsEvents.pop();
+      }
+
+      // If chapter read, atomically increment in dbState
+      if (event.eventType === 'chapter_read') {
+        if (event.comicId) {
+          const comic = dbState.comics.find(c => c.id === event.comicId);
+          if (comic) {
+            comic.totalReaders = (comic.totalReaders || 0) + 1;
+          }
+        }
+        if (event.chapterId && event.comicId) {
+          const chList = dbState.chapters[event.comicId];
+          if (Array.isArray(chList)) {
+            const ch = chList.find(c => c.id === event.chapterId);
+            if (ch) {
+              ch.viewsCount = (ch.viewsCount || 0) + 1;
+            }
+          }
+        }
+      }
+    }
+    res.json({ success: true });
+  });
+
+  app.get("/api/analytics/events", (_req, res) => {
+    res.json(serverAnalyticsEvents);
   });
 
   // ----------------------------------------------------

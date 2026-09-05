@@ -453,6 +453,29 @@ CREATE TABLE IF NOT EXISTS public.activity_logs (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE INDEX IF NOT EXISTS idx_activity_logs_created_at ON public.activity_logs(created_at DESC);
+
+-- 6b. TABEL ANALYTICS_EVENTS (Pelacakan Baca & Kunjungan Real-Time)
+CREATE TABLE IF NOT EXISTS public.analytics_events (
+    id TEXT PRIMARY KEY,
+    event_type TEXT NOT NULL,
+    comic_id TEXT,
+    comic_title TEXT,
+    chapter_id TEXT,
+    chapter_number NUMERIC(8, 2),
+    user_id TEXT,
+    username TEXT,
+    session_id TEXT NOT NULL,
+    device_type TEXT DEFAULT 'desktop',
+    user_agent TEXT,
+    ip_address TEXT DEFAULT '127.0.0.1',
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_analytics_events_created_at ON public.analytics_events(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_analytics_events_comic_id ON public.analytics_events(comic_id);
+CREATE INDEX IF NOT EXISTS idx_analytics_events_chapter_id ON public.analytics_events(chapter_id);
+
 -- 7. TABEL COMMENTS
 CREATE TABLE IF NOT EXISTS public.comments (
     id TEXT PRIMARY KEY,

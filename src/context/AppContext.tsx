@@ -38,6 +38,7 @@ import {
 import { formatGoogleDriveEmbedUrl } from '../utils/driveHelper';
 import { updateFavicon } from '../utils/favicon';
 import { SupabaseService, RealtimeDiagnosticState } from '../services/supabaseService';
+import { AnalyticsRepository } from '../features/analytics/services/analyticsRepository';
 import { isSupabaseConfigured, saveCustomSupabaseConfig, fetchUniversalSupabaseConfig } from '../lib/supabase';
 import { 
   AuthService, 
@@ -219,6 +220,10 @@ interface AppContextType {
   isBookmarked: (comicId: string) => boolean;
   saveReadingProgress: (comicId: string, chapterId: string, chapterNumber: number, pageNumber: number, totalPages: number) => void;
   getReadingProgress: (comicId: string) => ReadingHistory | undefined;
+
+  // Actions - Analytics & Read Tracking
+  recordChapterRead: (comicId: string, chapterId: string, chapterNumber?: number) => void;
+  recordComicView: (comicId: string, comicTitle?: string) => void;
 
   // Actions - Admin Notifications Toast
   adminToasts: AdminToastItem[];
@@ -3388,6 +3393,51 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   };
 
+  const recordChapterRead = (comicId: string, chapterId: string, chapterNumber?: number) => {
+    // 1. Locally increment comic totalReaders
+    setComics(prev => prev.map(c => {
+      if (c.id === comicId) {
+        return { ...c, totalReaders: (c.totalReaders || 0) + 1 };
+      }
+      return c;
+    }));
+
+    // 2. Locally increment chapter viewsCount
+    setChapters(prev => {
+      const list = prev[comicId];
+      if (!Array.isArray(list)) return prev;
+      const updated = list.map(ch => {
+        if (ch.id === chapterId) {
+          return { ...ch, viewsCount: (ch.viewsCount || 0) + 1 };
+        }
+        return ch;
+      });
+      return { ...prev, [comicId]: updated };
+    });
+
+    // 3. Persist analytics event to Supabase & Central Server
+    const activeComic = comics.find(c => c.id === comicId);
+    AnalyticsRepository.trackEvent({
+      eventType: 'chapter_read',
+      comicId,
+      comicTitle: activeComic?.title,
+      chapterId,
+      chapterNumber,
+      userId: currentUser?.id,
+      username: currentUser?.username,
+    }).catch(() => {});
+  };
+
+  const recordComicView = (comicId: string, comicTitle?: string) => {
+    AnalyticsRepository.trackEvent({
+      eventType: 'comic_view',
+      comicId,
+      comicTitle,
+      userId: currentUser?.id,
+      username: currentUser?.username,
+    }).catch(() => {});
+  };
+
   const clearActivityLogs = (reason?: string) => {
     const adminName = currentUser?.username || 'admin';
     const auditNotice: ActivityLog = {
@@ -3595,6 +3645,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         isBookmarked,
         saveReadingProgress,
         getReadingProgress,
+        recordChapterRead,
+        recordComicView,
         adminToasts,
         showAdminToast,
         removeAdminToast,

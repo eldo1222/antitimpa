@@ -45,7 +45,8 @@ export const ComicReaderView: React.FC = () => {
     startReading, 
     saveReadingProgress,
     getReadingProgress,
-    updateChapter
+    updateChapter,
+    recordChapterRead
   } = useApp();
 
   const [readingMode, setReadingMode] = useState<'vertical' | 'paged'>('vertical');
@@ -101,6 +102,17 @@ export const ComicReaderView: React.FC = () => {
       startReading(effectiveChapterId);
     }
   }, [effectiveChapterId]);
+
+  // Real Analytics Tracking: Track chapter read
+  useEffect(() => {
+    if (activeComic && activeChapter) {
+      recordChapterRead(
+        activeComic.id, 
+        activeChapter.id, 
+        Number(activeChapter.chapterNumber) || 1
+      );
+    }
+  }, [activeComic?.id, activeChapter?.id]);
 
   // Scroll to top automatically whenever chapter changes
   useEffect(() => {

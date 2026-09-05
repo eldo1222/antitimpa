@@ -219,6 +219,34 @@ CREATE TABLE IF NOT EXISTS public.activity_logs (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE INDEX IF NOT EXISTS idx_activity_logs_created_at ON public.activity_logs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_activity_logs_status ON public.activity_logs(status);
+CREATE INDEX IF NOT EXISTS idx_activity_logs_type ON public.activity_logs(type);
+
+-- 6b. TABEL ANALYTICS_EVENTS (Pelacakan Baca & Kunjungan Real-Time)
+CREATE TABLE IF NOT EXISTS public.analytics_events (
+    id TEXT PRIMARY KEY,
+    event_type TEXT NOT NULL, -- 'chapter_read', 'comic_view', 'site_visit'
+    comic_id TEXT,
+    comic_title TEXT,
+    chapter_id TEXT,
+    chapter_number NUMERIC(8, 2),
+    user_id TEXT,
+    username TEXT,
+    session_id TEXT NOT NULL,
+    device_type TEXT DEFAULT 'desktop',
+    user_agent TEXT,
+    ip_address TEXT DEFAULT '127.0.0.1',
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_analytics_events_created_at ON public.analytics_events(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_analytics_events_event_type ON public.analytics_events(event_type);
+CREATE INDEX IF NOT EXISTS idx_analytics_events_comic_id ON public.analytics_events(comic_id);
+CREATE INDEX IF NOT EXISTS idx_analytics_events_chapter_id ON public.analytics_events(chapter_id);
+CREATE INDEX IF NOT EXISTS idx_analytics_events_session_id ON public.analytics_events(session_id);
+CREATE INDEX IF NOT EXISTS idx_analytics_events_user_id ON public.analytics_events(user_id);
+
 -- 7. TABEL COMMENTS
 CREATE TABLE IF NOT EXISTS public.comments (
     id TEXT PRIMARY KEY,
@@ -386,6 +414,14 @@ DROP POLICY IF EXISTS "Allow anon insert activity_logs" ON public.activity_logs;
 DROP POLICY IF EXISTS "Allow public all activity_logs" ON public.activity_logs;
 CREATE POLICY "Public Full Access Activity Logs" ON public.activity_logs FOR ALL USING (true) WITH CHECK (true);
 
+-- 6b. Analytics Events Policies
+ALTER TABLE public.analytics_events ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Public Full Access Analytics Events" ON public.analytics_events;
+DROP POLICY IF EXISTS "Allow public read analytics_events" ON public.analytics_events;
+DROP POLICY IF EXISTS "Allow anon insert analytics_events" ON public.analytics_events;
+DROP POLICY IF EXISTS "Allow public all analytics_events" ON public.analytics_events;
+CREATE POLICY "Public Full Access Analytics Events" ON public.analytics_events FOR ALL USING (true) WITH CHECK (true);
+
 -- 7. Comments Policies
 DROP POLICY IF EXISTS "Public Full Access Comments" ON public.comments;
 DROP POLICY IF EXISTS "Allow public read comments" ON public.comments;
@@ -451,7 +487,46 @@ BEGIN
     ALTER PUBLICATION supabase_realtime ADD TABLE public.drive_accounts;
   EXCEPTION WHEN others THEN NULL;
   END;
+  BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.activity_logs;
+  EXCEPTION WHEN others THEN NULL;
+  END;
+  BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.analytics_events;
+  EXCEPTION WHEN others THEN NULL;
+  END;
 END $$;
+
+-- 11. Stored Procedures untuk Increment Views & Readers Otomatis
+CREATE OR REPLACE FUNCTION public.increment_chapter_views(ch_id TEXT)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+    UPDATE public.chapters
+    SET views_count = COALESCE(views_count, 0) + 1,
+        updated_at = NOW()
+    WHERE id = ch_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.increment_comic_readers(c_id TEXT)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+    UPDATE public.comics
+    SET total_readers = COALESCE(total_readers, 0) + 1,
+        updated_at = NOW()
+    WHERE id = c_id;
+END;
+$$;
+
+-- Grant execution to public / anon
+GRANT EXECUTE ON FUNCTION public.increment_chapter_views(TEXT) TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.increment_comic_readers(TEXT) TO anon, authenticated, service_role;
 
 -- Notify PostgREST to reload schema cache
 NOTIFY pgrst, 'reload schema';

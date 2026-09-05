@@ -17,6 +17,7 @@ export const DATABASE_TABLES = {
   BANNERS: 'banners',
   DRIVE_ACCOUNTS: 'drive_accounts',
   ACTIVITY_LOGS: 'activity_logs',
+  ANALYTICS_EVENTS: 'analytics_events',
   COMMENTS: 'comments',
   ADS: 'ads',
   AD_SETTINGS: 'ad_settings',
@@ -85,6 +86,15 @@ export const DATABASE_CONTRACT = {
     disallowedAliases: ['logs', 'audit_logs'],
     columns: [
       'id', 'username', 'action', 'type', 'status', 'details', 'ip_address', 'created_at'
+    ] as const,
+  },
+  [DATABASE_TABLES.ANALYTICS_EVENTS]: {
+    table: DATABASE_TABLES.ANALYTICS_EVENTS,
+    primaryKey: 'id',
+    disallowedAliases: ['events', 'analytics'],
+    columns: [
+      'id', 'event_type', 'comic_id', 'comic_title', 'chapter_id', 'chapter_number',
+      'user_id', 'username', 'session_id', 'device_type', 'user_agent', 'ip_address', 'created_at'
     ] as const,
   },
   [DATABASE_TABLES.COMMENTS]: {
