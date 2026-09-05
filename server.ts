@@ -15,13 +15,13 @@ import {
   initialComments 
 } from "./src/data/initialData";
 import { Comic, Chapter, User, Banner, DriveAccount, ActivityLog, SystemSettings, Comment, AdItem, AdSettings } from "./src/types";
-import { scrapeKomiktapSearch, scrapeKomiktapDetail, scrapeKomiktapChapterPages, scrapeKomiktapDiagnostic } from "./api/komiktap-proxy";
-import { 
+import komiktapHandler, { scrapeKomiktapSearch, scrapeKomiktapDetail, scrapeKomiktapChapterPages, scrapeKomiktapDiagnostic } from "./api/komiktap-proxy";
+import komikindoHandler, { 
   scrapeKomikindoSearch, 
   scrapeKomikindoSearchWithDiagnostics, 
   scrapeKomikindoDetail, 
   scrapeKomikindoChapterPages,
-  runKomikindoDiagnostic 
+  runKomikindoDiagnostic
 } from "./api/komikindo-proxy";
 
 interface CentralDB {
@@ -237,8 +237,13 @@ async function startServer() {
   app.use(express.json({ limit: "50mb" }));
 
   // API Health Check
-  app.get("/api/health", (_req, res) => {
-    res.json({ status: "ok", timestamp: new Date().toISOString(), version: dbState.version });
+  app.get(["/health", "/api/health"], (_req, res) => {
+    res.json({
+      ok: true,
+      status: "healthy",
+      timestamp: new Date().toISOString(),
+      version: dbState.version
+    });
   });
 
   // Supabase Universal Config endpoint (Strictly authoritative Environment Variables)
@@ -1022,6 +1027,10 @@ async function startServer() {
       res.status(500).json({ error: "Failed to fetch chapter pages from Komikindo", message: error.message, pages: [] });
     }
   });
+
+  // Direct proxy aliases for serverless parity
+  app.all("/api/komikindo-proxy", (req, res) => komikindoHandler(req, res));
+  app.all("/api/komiktap-proxy", (req, res) => komiktapHandler(req, res));
 
   // ----------------------------------------------------
   // MANGADEX PROXY & SCRAPER API ENDPOINTS

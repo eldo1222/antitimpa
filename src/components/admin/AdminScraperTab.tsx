@@ -510,24 +510,20 @@ export const AdminScraperTab: React.FC = () => {
 
   // 5. Import single scraped item (fetches full details if from Komikindo or Komiktap)
   const handleImportSingle = async (item: ScrapedComicResult, overrideOptions?: { isVisibleOnHome?: boolean; contentType?: ComicContentType; comicType?: ComicCategoryType }) => {
-    let itemToUse = item;
+    try {
+      let itemToUse = item;
 
-    // If Komikindo, fetch full chapter list from detail scraper
-    if ((item.sourceApi?.toLowerCase().includes('komikindo') || item.sourceUrl?.includes('komikindo.ch')) && (item.slug || item.sourceUrl)) {
-      try {
+      // If Komikindo, fetch full chapter list from detail scraper
+      if ((item.sourceApi?.toLowerCase().includes('komikindo') || item.sourceUrl?.includes('komikindo.ch')) && (item.slug || item.sourceUrl)) {
         setBatchStatus(`⏳ Mengambil struktur chapter lengkap Komikindo untuk "${item.title}"...`);
         const fullDetail = await getKomikindoDetail(item.slug || item.sourceUrl || '');
         if (fullDetail) {
           itemToUse = fullDetail;
         }
-      } catch (e) {
-        console.warn('Failed to load full Komikindo details, using basic item:', e);
       }
-    }
 
-    // If Komiktap, fetch full detail & chapters from Komiktap scraper
-    if ((item.sourceApi?.includes('Komiktap') || item.sourceUrl?.includes('komiktap.info')) && (item.slug || item.sourceUrl)) {
-      try {
+      // If Komiktap, fetch full detail & chapters from Komiktap scraper
+      if ((item.sourceApi?.includes('Komiktap') || item.sourceUrl?.includes('komiktap.info')) && (item.slug || item.sourceUrl)) {
         setBatchStatus(`⏳ Mengambil struktur chapter lengkap Komiktap untuk "${item.title}"...`);
         const ktDetail = await fetchKomiktapDetail(item.slug || item.sourceUrl || '');
         if (ktDetail && typeof ktDetail === 'object' && !Array.isArray(ktDetail)) {
@@ -549,35 +545,36 @@ export const AdminScraperTab: React.FC = () => {
             contentType: '18plus'
           };
         }
-      } catch (e) {
-        console.warn('Failed to load full Komiktap details:', e);
       }
-    }
 
-    const finalContentType = overrideOptions?.contentType ?? itemToUse.contentType ?? (defaultContentType === 'auto' ? undefined : defaultContentType);
-    const isNormal = finalContentType === 'normal';
-    
-    setBatchStatus(`⏳ Menarik data & chapter asli "${itemToUse.title}"...`);
-    const { comic, chapters: comicChaps } = await buildComicFromScrapeAsync(itemToUse, {
-      contentType: finalContentType,
-      comicType: overrideOptions?.comicType ?? itemToUse.comicType,
-      isFree: isNormal ? true : defaultIsFree,
-      isVisibleOnHome: overrideOptions?.isVisibleOnHome ?? defaultIsVisibleOnHome,
-      primaryDriveAccountId: defaultDriveAccountId,
-      onProgress: (current, total, chTitle) => {
-        setBatchStatus(`⏳ Menarik lembar gambar chapter ${current}/${total}: ${chTitle}...`);
+      const finalContentType = overrideOptions?.contentType ?? itemToUse.contentType ?? (defaultContentType === 'auto' ? undefined : defaultContentType);
+      const isNormal = finalContentType === 'normal';
+      
+      setBatchStatus(`⏳ Menarik data & chapter asli "${itemToUse.title}"...`);
+      const { comic, chapters: comicChaps } = await buildComicFromScrapeAsync(itemToUse, {
+        contentType: finalContentType,
+        comicType: overrideOptions?.comicType ?? itemToUse.comicType,
+        isFree: isNormal ? true : defaultIsFree,
+        isVisibleOnHome: overrideOptions?.isVisibleOnHome ?? defaultIsVisibleOnHome,
+        primaryDriveAccountId: defaultDriveAccountId,
+        onProgress: (current, total, chTitle) => {
+          setBatchStatus(`⏳ Menarik lembar gambar chapter ${current}/${total}: ${chTitle}...`);
+        }
+      });
+
+      const injectResult = await injectComicWithChapters(comic, comicChaps);
+
+      if (injectResult.success) {
+        setImportedSlugs(prev => ({ ...prev, [item.slug || item.title]: true }));
+        addActivityLog('comic_create', `Admin mengimpor "${comic.title}" (${(comic.comicType || 'manga').toUpperCase()}) dari ${item.sourceApi} dengan ${comicChaps.length} chapter asli`);
+        setBatchStatus(`✅ Berhasil mengimpor "${comic.title}" (${comicChaps.length} chapter) ke database & katalog!`);
+        setTimeout(() => setBatchStatus(null), 3500);
+      } else {
+        setBatchStatus(`❌ GAGAL Sinkronisasi Supabase: ${injectResult.error || 'Penulisan ditolak'}`);
       }
-    });
-
-    const injectResult = await injectComicWithChapters(comic, comicChaps);
-
-    if (injectResult.success) {
-      setImportedSlugs(prev => ({ ...prev, [item.slug || item.title]: true }));
-      addActivityLog('comic_create', `Admin mengimpor "${comic.title}" (${(comic.comicType || 'manga').toUpperCase()}) dari ${item.sourceApi} dengan ${comicChaps.length} chapter asli`);
-      setBatchStatus(`✅ Berhasil mengimpor "${comic.title}" (${comicChaps.length} chapter) ke database & katalog!`);
-      setTimeout(() => setBatchStatus(null), 3500);
-    } else {
-      setBatchStatus(`❌ GAGAL Sinkronisasi Supabase: ${injectResult.error || 'Penulisan ditolak'}`);
+    } catch (err: any) {
+      console.error('Import error:', err);
+      setBatchStatus(`❌ GAGAL Impor: ${err.message || 'Terjadi kesalahan saat memproses data komik.'}`);
     }
   };
 

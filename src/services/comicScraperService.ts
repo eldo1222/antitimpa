@@ -554,12 +554,14 @@ export async function searchKomikindo(
         (empty as any).diagnostics = json.diagnostics;
         return empty;
       }
+    } else {
+      const errJson = await res.json().catch(() => ({}));
+      if (errJson.error || errJson.message) {
+        lastError = new Error(errJson.message || errJson.error);
+      }
     }
   } catch (e: any) {
     lastError = e;
-    if (e.message?.startsWith('[KOMIKINDO_')) {
-      throw e;
-    }
     console.warn('Komikindo search error via /api/komikindo/search:', e);
   }
 
@@ -618,16 +620,18 @@ export async function searchKomikindo(
         (empty as any).diagnostics = json.diagnostics;
         return empty;
       }
+    } else {
+      const errJson = await res.json().catch(() => ({}));
+      if (errJson.error || errJson.message) {
+        lastError = new Error(errJson.message || errJson.error);
+      }
     }
   } catch (e: any) {
     lastError = e;
-    if (e.message?.startsWith('[KOMIKINDO_')) {
-      throw e;
-    }
     console.warn('Komikindo search error via /api/komikindo-proxy:', e);
   }
 
-  if (lastError && lastError.message?.startsWith('[KOMIKINDO_')) {
+  if (lastError) {
     throw lastError;
   }
 
@@ -667,22 +671,39 @@ export async function fetchKomikindoDetail(slugOrUrl: string): Promise<any> {
     ? (slugOrUrl.replace(/\/$/, '').split('/').pop() || '')
     : slugOrUrl.replace(/^\/|\/$/g, '');
 
+  let lastError: any = null;
+
   try {
     const res = await fetch(`/api/komikindo/comic/${encodeURIComponent(cleanSlug)}`);
     if (res.ok) {
       const json = await res.json();
       if (json.data) return json.data;
+    } else {
+      const errJson = await res.json().catch(() => ({}));
+      if (errJson.error || errJson.message) {
+        lastError = new Error(errJson.message || errJson.error);
+      }
     }
-  } catch (e) {}
+  } catch (e: any) {
+    lastError = e;
+  }
 
   try {
     const res = await fetch(`/api/komikindo-proxy?action=detail&slug=${encodeURIComponent(cleanSlug)}`);
     if (res.ok) {
       const json = await res.json();
       if (json.data) return json.data;
+    } else {
+      const errJson = await res.json().catch(() => ({}));
+      if (errJson.error || errJson.message) {
+        throw new Error(errJson.message || errJson.error);
+      }
     }
-  } catch (e) {}
+  } catch (e: any) {
+    lastError = e;
+  }
 
+  if (lastError) throw lastError;
   return null;
 }
 
@@ -1723,10 +1744,12 @@ export async function buildComicFromScrapeAsync(
 ): Promise<{ comic: Comic; chapters: Chapter[] }> {
   // If source is Komikindo (komikindo.ch), pull complete detail and all real chapters!
   if (scraped.sourceApi?.toLowerCase().includes('komikindo') || scraped.sourceUrl?.includes('komikindo.ch')) {
-    try {
-      const detail = await fetchKomikindoDetail(scraped.slug || scraped.sourceUrl || '');
-      if (detail) {
-        const comicId = `comic-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    const detail = await fetchKomikindoDetail(scraped.slug || scraped.sourceUrl || '');
+    if (!detail) {
+      throw new Error(`[KOMIKINDO_EMPTY_DETAIL] Detail komik "${scraped.title}" gagal dimuat dari KomikIndo.`);
+    }
+
+    const comicId = `comic-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
         const now = new Date().toISOString().split('T')[0];
         const isAdult = detail.contentType === '18plus' || /18\+|dewasa/i.test(detail.title) || (detail.genres || []).some((g: string) => /18\+|dewasa/i.test(g));
         const defaultType: ComicContentType = isAdult ? '18plus' : 'normal';
@@ -1840,10 +1863,6 @@ export async function buildComicFromScrapeAsync(
         });
 
         return { comic, chapters };
-      }
-    } catch (kiErr) {
-      console.warn('Komikindo async scrape detail error:', kiErr);
-    }
   }
 
   // If source is Komiktap (Komiktap.info), pull complete detail and all real chapters!
@@ -1968,8 +1987,10 @@ export async function buildComicFromScrapeAsync(
 
         return { comic, chapters };
       }
-    } catch (ktErr) {
-      console.warn('Komiktap async scrape detail error:', ktErr);
+      throw new Error(`[KOMIKTAP_EMPTY_DETAIL] Detail dan chapter untuk "${scraped.title}" tidak ditemukan di KomikTap.`);
+    } catch (ktErr: any) {
+      console.error('Komiktap async scrape detail error:', ktErr);
+      throw new Error(`[KOMIKTAP_FETCH_FAILED] Gagal mengambil data dari KomikTap: ${ktErr?.message || 'Error'}`);
     }
   }
 
