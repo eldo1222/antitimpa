@@ -42,7 +42,13 @@ import {
   ChevronsLeft,
   ChevronsRight,
   Crown,
-  Zap
+  Zap,
+  LayoutGrid,
+  List,
+  ArrowUp,
+  ArrowUpDown,
+  RefreshCw,
+  CheckCircle
 } from 'lucide-react';
 
 export const AdminChaptersTab: React.FC = () => {
@@ -80,9 +86,17 @@ export const AdminChaptersTab: React.FC = () => {
   // Chapter-specific search inside the active comic
   const [chapterSearchQuery, setChapterSearchQuery] = useState('');
   
-  // Pagination State for Chapter Table Mode
+  // Windows File Explorer Layout & Sorting States for Chapter Mode
+  const [chapterViewLayout, setChapterViewLayout] = useState<'list' | 'grid'>(() => {
+    return (localStorage.getItem('admin_chapter_view_layout') as 'list' | 'grid') || 'list';
+  });
+  const [chapterSortBy, setChapterSortBy] = useState<'num_desc' | 'num_asc' | 'newest' | 'oldest' | 'pages_desc' | 'pages_asc'>('num_desc');
+  const [chapterStatusFilter, setChapterStatusFilter] = useState<'all' | 'ready' | 'missing' | 'drive' | 'pdf' | 'external'>('all');
+  const [isRefreshingChapters, setIsRefreshingChapters] = useState(false);
+
+  // Pagination State for Chapter Mode (supports 10, 15, 20, 50, 100)
   const [chapterPage, setChapterPage] = useState<number>(1);
-  const [chaptersPerPage, setChaptersPerPage] = useState<number>(15);
+  const [chaptersPerPage, setChaptersPerPage] = useState<number>(20);
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingChapter, setEditingChapter] = useState<Chapter | null>(null);
@@ -133,18 +147,106 @@ export const AdminChaptersTab: React.FC = () => {
   const pdfInputRef = useRef<HTMLInputElement>(null);
 
   const currentComic = comics.find(c => c.id === selectedComicId);
-  const allCurrentChapters = [...(chapters[selectedComicId] || [])].sort((a, b) => b.chapterNumber - a.chapterNumber);
+  const allCurrentChapters = useMemo(() => {
+    return [...(chapters[selectedComicId] || [])];
+  }, [chapters, selectedComicId]);
 
-  // Filtered Chapters based on search inside active comic
+  // Natural numeric parser (handles 1, 2, 2.5, 10, 11, etc.)
+  const parseChapterNum = (ch: Chapter): number => {
+    if (typeof ch.chapterNumber === 'number' && !isNaN(ch.chapterNumber)) {
+      return ch.chapterNumber;
+    }
+    const match = String(ch.title || '').match(/(\d+(\.\d+)?)/);
+    return match ? parseFloat(match[1]) : 0;
+  };
+
+  // Filtered & Natural Numeric-aware Sorted Chapters based on search inside active comic
   const currentChapters = useMemo(() => {
-    if (!chapterSearchQuery.trim()) return allCurrentChapters;
-    const q = chapterSearchQuery.toLowerCase().trim();
-    return allCurrentChapters.filter(ch => 
-      String(ch.chapterNumber).includes(q) ||
-      ch.title.toLowerCase().includes(q) ||
-      ch.sourceType.toLowerCase().includes(q)
-    );
-  }, [allCurrentChapters, chapterSearchQuery]);
+    let list = [...allCurrentChapters];
+
+    // Status filter
+    if (chapterStatusFilter === 'ready') {
+      list = list.filter(ch => (ch.pages && ch.pages.length > 0) || ch.sourceType === 'drive' || ch.sourceType === 'pdf');
+    } else if (chapterStatusFilter === 'missing') {
+      list = list.filter(ch => ch.sourceType === 'images' && (!ch.pages || ch.pages.length === 0));
+    } else if (chapterStatusFilter === 'drive') {
+      list = list.filter(ch => ch.sourceType === 'drive');
+    } else if (chapterStatusFilter === 'pdf') {
+      list = list.filter(ch => ch.sourceType === 'pdf');
+    } else if (chapterStatusFilter === 'external') {
+      list = list.filter(ch => ch.sourceType === 'external');
+    }
+
+    // Search query
+    if (chapterSearchQuery.trim()) {
+      const q = chapterSearchQuery.toLowerCase().trim();
+      list = list.filter(ch => 
+        String(ch.chapterNumber).includes(q) ||
+        ch.title.toLowerCase().includes(q) ||
+        ch.sourceType.toLowerCase().includes(q)
+      );
+    }
+
+    // Natural Numeric & Date Sorting
+    list.sort((a, b) => {
+      if (chapterSortBy === 'num_asc') {
+        const numA = parseChapterNum(a);
+        const numB = parseChapterNum(b);
+        if (numA !== numB) return numA - numB;
+        return a.title.localeCompare(b.title, undefined, { numeric: true });
+      }
+      if (chapterSortBy === 'num_desc') {
+        const numA = parseChapterNum(a);
+        const numB = parseChapterNum(b);
+        if (numA !== numB) return numB - numA;
+        return b.title.localeCompare(a.title, undefined, { numeric: true });
+      }
+      if (chapterSortBy === 'newest') {
+        return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+      }
+      if (chapterSortBy === 'oldest') {
+        return new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime();
+      }
+      if (chapterSortBy === 'pages_desc') {
+        const pA = a.pages?.length || a.pageCount || 0;
+        const pB = b.pages?.length || b.pageCount || 0;
+        return pB - pA;
+      }
+      if (chapterSortBy === 'pages_asc') {
+        const pA = a.pages?.length || a.pageCount || 0;
+        const pB = b.pages?.length || b.pageCount || 0;
+        return pA - pB;
+      }
+      return 0;
+    });
+
+    return list;
+  }, [allCurrentChapters, chapterSearchQuery, chapterStatusFilter, chapterSortBy]);
+
+  const handleToggleLayout = (layout: 'list' | 'grid') => {
+    setChapterViewLayout(layout);
+    localStorage.setItem('admin_chapter_view_layout', layout);
+  };
+
+  const handleRefreshChapters = async () => {
+    if (!selectedComicId) return;
+    setIsRefreshingChapters(true);
+    try {
+      const res = await ChapterRepository.getPaginatedByComicId(selectedComicId, {
+        page: 1,
+        limit: 200,
+        sortBy: 'chapter_number',
+        sortOrder: 'desc'
+      });
+      setPdfToastMsg(`Sinkronisasi selesai! Total ${res.total} chapter termuat dari Supabase.`);
+      setTimeout(() => setPdfToastMsg(null), 3000);
+    } catch (_) {
+      setPdfToastMsg('Gagal memuat ulang chapter dari database.');
+      setTimeout(() => setPdfToastMsg(null), 3000);
+    } finally {
+      setIsRefreshingChapters(false);
+    }
+  };
 
   // Chapter Pagination Calculations
   const totalChapterPages = Math.ceil(currentChapters.length / chaptersPerPage) || 1;
@@ -267,7 +369,7 @@ export const AdminChaptersTab: React.FC = () => {
 
   React.useEffect(() => {
     setChapterPage(1);
-  }, [selectedComicId, chapterSearchQuery, chaptersPerPage]);
+  }, [selectedComicId, chapterSearchQuery, chaptersPerPage, chapterSortBy, chapterStatusFilter]);
 
   // Generate dynamic page numbers helper
   const getPageNumbers = (currentP: number, totalP: number) => {
@@ -1035,32 +1137,56 @@ export const AdminChaptersTab: React.FC = () => {
       ) : (
         /* View Mode 2: Detailed Chapter Manager for Selected Comic */
         <div className="space-y-4 animate-in fade-in">
-          {/* Top Breadcrumb Header Bar */}
-          <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between pb-2 border-b border-[#1c1c2a]">
-            <div className="flex items-center gap-3">
+          {/* Windows File Explorer Navigation & Breadcrumb Header Bar */}
+          <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between pb-3 border-b border-[#1c1c2a]">
+            <div className="flex items-center gap-2 flex-wrap">
               <button
                 onClick={() => setViewMode('folders')}
-                className="px-3 py-1.5 bg-[#161622] hover:bg-[#1e1e2e] text-slate-300 hover:text-white rounded-xl border border-[#252538] text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors shadow"
+                className="px-2.5 py-1.5 bg-[#161622] hover:bg-[#1f1f30] text-slate-300 hover:text-white rounded-xl border border-[#262638] text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors shadow"
+                title="Kembali ke Daftar Folder Komik"
               >
-                <ArrowLeft className="w-4 h-4 text-[#ff5b14]" />
-                <span>Semua Folder Komik</span>
+                <ArrowLeft className="w-3.5 h-3.5 text-[#ff5b14]" />
+                <span>Kembali</span>
               </button>
 
-              <div className="hidden sm:block h-5 w-px bg-[#242436]" />
+              <button
+                onClick={() => setViewMode('folders')}
+                className="px-2.5 py-1.5 bg-[#161622] hover:bg-[#1f1f30] text-slate-300 hover:text-white rounded-xl border border-[#262638] text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors shadow"
+                title="Naik Satu Level ke Root Komik"
+              >
+                <ArrowUp className="w-3.5 h-3.5 text-[#ff5b14]" />
+                <span>Naik Level</span>
+              </button>
 
-              <div>
-                <h2 className="text-sm font-bold text-white flex items-center gap-2 truncate max-w-md">
-                  <span>📁</span>
-                  <span className="truncate">{currentComic?.title || 'Manajemen Chapter'}</span>
-                </h2>
-                <p className="text-[11px] text-slate-400">Total {allCurrentChapters.length} chapter terdaftar di database</p>
+              <div className="flex items-center gap-1.5 bg-[#12121a] px-3 py-1.5 rounded-xl border border-[#222234] text-xs text-slate-400">
+                <span onClick={() => setViewMode('folders')} className="cursor-pointer hover:text-white flex items-center gap-1">
+                  📁 <span>Root</span>
+                </span>
+                <ChevronRight className="w-3.5 h-3.5 text-slate-600" />
+                <span onClick={() => setViewMode('folders')} className="cursor-pointer hover:text-white flex items-center gap-1">
+                  📁 <span>Comics ({comics.length})</span>
+                </span>
+                <ChevronRight className="w-3.5 h-3.5 text-slate-600" />
+                <span className="text-white font-bold truncate max-w-[200px] sm:max-w-xs flex items-center gap-1">
+                  📂 {currentComic?.title || 'Unknown'}
+                </span>
               </div>
             </div>
 
             <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
               <button
+                onClick={handleRefreshChapters}
+                disabled={isRefreshingChapters}
+                className="px-3 py-1.5 bg-[#161624] hover:bg-[#1f1f32] text-slate-300 hover:text-white rounded-xl border border-[#28283c] text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+                title="Muat Ulang Snapshot Data dari Supabase"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 text-[#ff5b14] ${isRefreshingChapters ? 'animate-spin' : ''}`} />
+                <span className="hidden sm:inline">Refresh</span>
+              </button>
+
+              <button
                 onClick={handleOpenAdd}
-                className="px-3.5 py-2 bg-[#ff5b14] hover:bg-[#e04e0e] text-white text-xs font-bold rounded-xl shadow-md flex items-center gap-1.5 transition-all cursor-pointer"
+                className="px-3.5 py-1.5 bg-[#ff5b14] hover:bg-[#e04e0e] text-white text-xs font-bold rounded-xl shadow-md flex items-center gap-1.5 transition-all cursor-pointer"
               >
                 <Plus className="w-4 h-4" />
                 <span>Upload Chapter Baru</span>
@@ -1123,21 +1249,88 @@ export const AdminChaptersTab: React.FC = () => {
             </div>
           )}
 
-          {/* Chapter Quick Search Bar */}
-          <div className="p-3 bg-[#12121a] rounded-xl border border-[#1f1f2e] flex items-center justify-between gap-3">
+          {/* Chapter Windows File Explorer Toolbar (Search, Sort, Filter, View Layout) */}
+          <div className="p-3 bg-[#12121a] rounded-xl border border-[#1f1f2e] flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 shadow-xs">
+            {/* Search */}
             <div className="relative flex-1">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
-                placeholder="Cari chapter berdasarkan nomor (#10) atau judul..."
+                placeholder="Cari nama chapter (#1, #10, judul)..."
                 value={chapterSearchQuery}
                 onChange={(e) => setChapterSearchQuery(e.target.value)}
-                className="w-full pl-9 pr-4 py-1.5 bg-[#171724] border border-[#26263a] rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#ff5b14]"
+                className="w-full pl-9 pr-8 py-1.5 bg-[#171724] border border-[#26263a] rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#ff5b14]"
               />
+              {chapterSearchQuery && (
+                <button 
+                  onClick={() => setChapterSearchQuery('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
 
-            <div className="text-xs text-slate-400 font-mono shrink-0">
-              Menampilkan: <strong className="text-white">{currentChapters.length}</strong> / {allCurrentChapters.length}
+            {/* Filter & Sort Controls */}
+            <div className="flex items-center gap-2 flex-wrap justify-between md:justify-end">
+              {/* Sort Dropdown */}
+              <div className="flex items-center gap-1 bg-[#171724] border border-[#26263a] rounded-lg px-2.5 py-1 text-xs">
+                <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
+                <select
+                  value={chapterSortBy}
+                  onChange={(e) => setChapterSortBy(e.target.value as any)}
+                  className="bg-transparent text-white text-xs focus:outline-none cursor-pointer pr-1"
+                >
+                  <option value="num_desc">Chapter ↓ (11, 10, 2, 1)</option>
+                  <option value="num_asc">Chapter ↑ (1, 2, 10, 11)</option>
+                  <option value="newest">Terbaru Diunggah</option>
+                  <option value="oldest">Terlama Diunggah</option>
+                  <option value="pages_desc">Halaman Terbanyak</option>
+                  <option value="pages_asc">Halaman Sedikit / Kosong</option>
+                </select>
+              </div>
+
+              {/* Status Filter Dropdown */}
+              <div className="flex items-center gap-1 bg-[#171724] border border-[#26263a] rounded-lg px-2.5 py-1 text-xs">
+                <Filter className="w-3.5 h-3.5 text-slate-400" />
+                <select
+                  value={chapterStatusFilter}
+                  onChange={(e) => setChapterStatusFilter(e.target.value as any)}
+                  className="bg-transparent text-white text-xs focus:outline-none cursor-pointer pr-1"
+                >
+                  <option value="all">Semua Status ({allCurrentChapters.length})</option>
+                  <option value="ready">✓ Siap (Ada Gambar)</option>
+                  <option value="missing">⚠ Kosong (0 Gambar)</option>
+                  <option value="drive">Google Drive</option>
+                  <option value="pdf">Dokumen PDF</option>
+                  <option value="external">Link Eksternal</option>
+                </select>
+              </div>
+
+              {/* View Mode Toggle (List vs Grid) */}
+              <div className="flex items-center bg-[#171724] border border-[#26263a] rounded-lg p-0.5">
+                <button
+                  type="button"
+                  onClick={() => handleToggleLayout('list')}
+                  className={`p-1.5 rounded-md transition-colors cursor-pointer ${chapterViewLayout === 'list' ? 'bg-[#ff5b14] text-white' : 'text-slate-400 hover:text-white'}`}
+                  title="Tampilan Tabel / List Explorer"
+                >
+                  <List className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleToggleLayout('grid')}
+                  className={`p-1.5 rounded-md transition-colors cursor-pointer ${chapterViewLayout === 'grid' ? 'bg-[#ff5b14] text-white' : 'text-slate-400 hover:text-white'}`}
+                  title="Tampilan Kartu / Grid Explorer"
+                >
+                  <LayoutGrid className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              {/* Counter */}
+              <div className="text-xs text-slate-400 font-mono shrink-0 hidden lg:block pl-1">
+                <strong className="text-white">{currentChapters.length}</strong>/{allCurrentChapters.length}
+              </div>
             </div>
           </div>
 
@@ -1283,52 +1476,239 @@ export const AdminChaptersTab: React.FC = () => {
         </div>
       )}
 
-      {/* Chapters Table */}
+      {/* Chapter View: Dual Mode (List View vs Grid View) */}
       <div className="bg-[#12121a] rounded-xl border border-[#1f1f2e] overflow-hidden shadow-sm">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead className="bg-[#161622] text-slate-400 font-semibold border-b border-[#222234]">
-              <tr>
-                <th className="p-3 w-10 text-center">
-                  <button 
-                    onClick={handleToggleSelectAll}
-                    className="text-slate-400 hover:text-white cursor-pointer"
-                    title={isAllSelected ? 'Batalkan Pilih Semua' : 'Pilih Semua'}
+        {visibleChapters.length === 0 ? (
+          <div className="p-12 text-center text-slate-500 space-y-3">
+            <div className="w-12 h-12 rounded-2xl bg-[#161624] border border-[#262638] flex items-center justify-center text-slate-400 mx-auto">
+              <FolderOpen className="w-6 h-6 text-[#ff5b14]" />
+            </div>
+            <div>
+              <h4 className="text-sm font-bold text-white">Folder ini belum memiliki chapter</h4>
+              <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
+                {chapterSearchQuery || chapterStatusFilter !== 'all' 
+                  ? 'Tidak ada chapter yang cocok dengan filter atau kata kunci pencarian Anda.' 
+                  : 'Silakan klik tombol "Upload Chapter Baru" di atas untuk menambahkan chapter pertama ke komik ini.'}
+              </p>
+            </div>
+            {(chapterSearchQuery || chapterStatusFilter !== 'all') && (
+              <button
+                onClick={() => { setChapterSearchQuery(''); setChapterStatusFilter('all'); }}
+                className="px-3 py-1.5 bg-[#181826] hover:bg-[#202032] text-slate-300 text-xs font-semibold rounded-lg border border-[#28283c] cursor-pointer transition-colors"
+              >
+                Reset Filter &amp; Pencarian
+              </button>
+            )}
+          </div>
+        ) : chapterViewLayout === 'grid' ? (
+          /* WINDOWS FILE EXPLORER: GRID CARD VIEW */
+          <div className="p-4">
+            <div className="flex items-center justify-between pb-3 border-b border-[#1f1f2e] mb-4 text-xs text-slate-400">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleToggleSelectAll}
+                  className="flex items-center gap-1.5 px-2.5 py-1 bg-[#161622] hover:bg-[#1e1e2c] border border-[#262638] rounded-lg text-slate-300 hover:text-white cursor-pointer transition-colors font-medium text-xs"
+                >
+                  {isAllSelected ? <CheckSquare className="w-4 h-4 text-[#ff5b14]" /> : <Square className="w-4 h-4 text-slate-400" />}
+                  <span>{isAllSelected ? 'Batalkan Semua' : 'Pilih Semua di Halaman'}</span>
+                </button>
+              </div>
+              <span className="font-mono text-[11px]">
+                {paginatedChapters.length} file di folder ini
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3.5">
+              {visibleChapters.map((ch, idx) => {
+                const isSelected = selectedChapterIds.includes(ch.id);
+                const hasPages = ch.pages && ch.pages.length > 0;
+                const isMissingImages = ch.sourceType === 'images' && !hasPages;
+
+                return (
+                  <div
+                    key={`${ch.id || ch.chapterNumber}-${idx}`}
+                    className={`bg-[#151520] hover:bg-[#191926] border rounded-xl p-3 flex flex-col justify-between transition-all group relative shadow-sm ${
+                      isSelected 
+                        ? 'border-[#ff5b14] ring-1 ring-[#ff5b14]/50 bg-[#ff5b14]/5' 
+                        : 'border-[#222234] hover:border-[#2f2f46]'
+                    }`}
                   >
-                    {isAllSelected ? <CheckSquare className="w-4 h-4 text-[#ff5b14]" /> : <Square className="w-4 h-4 text-slate-400" />}
-                  </button>
-                </th>
-                <th className="p-3">Chapter</th>
-                <th className="p-3">Judul Chapter</th>
-                <th className="p-3">Tipe Sumber</th>
-                <th className="p-3">Halaman / Drive Info</th>
-                <th className="p-3">Tanggal Unggah</th>
-                <th className="p-3 text-right">
-                  {selectedChapterIds.length > 0 ? (
-                    <button
-                      onClick={handleRequestBatchDelete}
-                      className="px-2.5 py-1 bg-red-600 hover:bg-red-500 text-white rounded-lg text-[11px] font-bold inline-flex items-center gap-1 shadow cursor-pointer transition-all active:scale-95"
-                      title="Hapus bab terpilih"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                      <span>Hapus ({selectedChapterIds.length})</span>
-                    </button>
-                  ) : (
-                    <span>Aksi</span>
-                  )}
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[#1b1b28]">
-              {visibleChapters.length === 0 ? (
+                    {/* Top Row: Checkbox + Status Badge */}
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <button
+                        onClick={() => handleToggleSelectOne(ch.id)}
+                        className="cursor-pointer text-slate-400 hover:text-white pt-0.5"
+                        title={isSelected ? 'Batalkan pilihan' : 'Pilih chapter ini'}
+                      >
+                        {isSelected ? <CheckSquare className="w-4 h-4 text-[#ff5b14]" /> : <Square className="w-4 h-4" />}
+                      </button>
+
+                      {/* Health Status Badge */}
+                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold border ${
+                        ch.sourceType === 'drive'
+                          ? 'bg-blue-500/15 text-blue-300 border-blue-500/30'
+                          : ch.sourceType === 'pdf'
+                          ? 'bg-red-500/15 text-red-300 border-red-500/30'
+                          : ch.sourceType === 'external'
+                          ? 'bg-purple-500/15 text-purple-300 border-purple-500/30'
+                          : isMissingImages
+                          ? 'bg-rose-500/15 text-rose-300 border-rose-500/30'
+                          : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                      }`}>
+                        {ch.sourceType === 'drive' && <HardDrive className="w-3 h-3" />}
+                        {ch.sourceType === 'pdf' && <FileText className="w-3 h-3" />}
+                        {ch.sourceType === 'external' && <Globe className="w-3 h-3" />}
+                        {ch.sourceType === 'images' && !isMissingImages && <CheckCircle className="w-3 h-3" />}
+                        {isMissingImages && <AlertTriangle className="w-3 h-3" />}
+                        <span>
+                          {ch.sourceType === 'drive'
+                            ? 'Drive'
+                            : ch.sourceType === 'pdf'
+                            ? 'PDF'
+                            : ch.sourceType === 'external'
+                            ? (ch.externalPlatform || 'Gateway')
+                            : isMissingImages
+                            ? '0 Hal (Kosong)'
+                            : `${ch.pages?.length || 0} Hal (Siap)`}
+                        </span>
+                      </span>
+                    </div>
+
+                    {/* Middle: File Icon & Chapter Details */}
+                    <div className="flex items-center gap-3 my-2">
+                      <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 border ${
+                        ch.sourceType === 'drive'
+                          ? 'bg-blue-500/10 border-blue-500/25 text-blue-400'
+                          : ch.sourceType === 'pdf'
+                          ? 'bg-red-500/10 border-red-500/25 text-red-400'
+                          : ch.sourceType === 'external'
+                          ? 'bg-purple-500/10 border-purple-500/25 text-purple-400'
+                          : isMissingImages
+                          ? 'bg-rose-500/10 border-rose-500/25 text-rose-400'
+                          : 'bg-emerald-500/10 border-emerald-500/25 text-emerald-400'
+                      }`}>
+                        {ch.sourceType === 'drive' && <HardDrive className="w-5 h-5" />}
+                        {ch.sourceType === 'pdf' && <FileText className="w-5 h-5" />}
+                        {ch.sourceType === 'external' && <Globe className="w-5 h-5" />}
+                        {ch.sourceType === 'images' && <ImageIcon className="w-5 h-5" />}
+                      </div>
+
+                      <div className="min-w-0 flex-1">
+                        <div className="font-mono font-extrabold text-sm text-white flex items-center gap-1.5">
+                          <span>Chapter #{ch.chapterNumber}</span>
+                        </div>
+                        <p className="text-xs text-slate-300 truncate font-semibold mt-0.5" title={ch.title}>
+                          {ch.title || `Bab #${ch.chapterNumber}`}
+                        </p>
+                        <p className="text-[10px] text-slate-500 mt-1">
+                          {new Date(ch.createdAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Bottom Action Bar */}
+                    <div className="pt-2.5 mt-2 border-t border-[#1f1f2e] flex items-center justify-between gap-1 text-slate-400">
+                      <div className="flex items-center gap-1">
+                        {isMissingImages && (
+                          <button
+                            onClick={() => handleFetchChapterPages(ch)}
+                            disabled={fetchingChapterId === ch.id}
+                            className="p-1.5 text-amber-400 hover:text-white hover:bg-amber-500/20 rounded-lg transition-colors cursor-pointer"
+                            title="Tarik Lembar Gambar"
+                          >
+                            {fetchingChapterId === ch.id ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
+                            ) : (
+                              <Sparkles className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                        )}
+                        <button
+                          onClick={() => handleDownloadChapterPdf(ch)}
+                          disabled={downloadingChapterId === ch.id}
+                          className="p-1.5 hover:text-amber-400 hover:bg-amber-500/10 rounded-lg transition-colors cursor-pointer"
+                          title="Download PDF"
+                        >
+                          {downloadingChapterId === ch.id ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
+                          ) : (
+                            <Download className="w-3.5 h-3.5" />
+                          )}
+                        </button>
+                      </div>
+
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => handlePreviewInReader(ch.id)}
+                          className="p-1.5 hover:text-emerald-400 hover:bg-emerald-500/10 rounded-lg transition-colors cursor-pointer"
+                          title="Buka Reader"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleOpenEdit(ch)}
+                          className="p-1.5 hover:text-white hover:bg-white/5 rounded-lg transition-colors cursor-pointer"
+                          title="Edit"
+                        >
+                          <Edit className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleRequestSingleDelete(ch)}
+                          className="p-1.5 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors cursor-pointer"
+                          title="Hapus"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          /* WINDOWS FILE EXPLORER: LIST VIEW TABLE */
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-[#161622] text-slate-400 font-semibold border-b border-[#222234]">
                 <tr>
-                  <td colSpan={7} className="p-8 text-center text-slate-500">
-                    Belum ada chapter untuk komik ini. Silakan klik "Upload Chapter Baru".
-                  </td>
+                  <th className="p-3 w-10 text-center">
+                    <button 
+                      onClick={handleToggleSelectAll}
+                      className="text-slate-400 hover:text-white cursor-pointer"
+                      title={isAllSelected ? 'Batalkan Pilih Semua' : 'Pilih Semua'}
+                    >
+                      {isAllSelected ? <CheckSquare className="w-4 h-4 text-[#ff5b14]" /> : <Square className="w-4 h-4 text-slate-400" />}
+                    </button>
+                  </th>
+                  <th className="p-3">Chapter</th>
+                  <th className="p-3">Judul Chapter</th>
+                  <th className="p-3">Tipe Sumber</th>
+                  <th className="p-3">Halaman / Drive Info</th>
+                  <th className="p-3">Status</th>
+                  <th className="p-3">Tanggal Unggah</th>
+                  <th className="p-3 text-right">
+                    {selectedChapterIds.length > 0 ? (
+                      <button
+                        onClick={handleRequestBatchDelete}
+                        className="px-2.5 py-1 bg-red-600 hover:bg-red-500 text-white rounded-lg text-[11px] font-bold inline-flex items-center gap-1 shadow cursor-pointer transition-all active:scale-95"
+                        title="Hapus bab terpilih"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span>Hapus ({selectedChapterIds.length})</span>
+                      </button>
+                    ) : (
+                      <span>Aksi</span>
+                    )}
+                  </th>
                 </tr>
-              ) : (
-                visibleChapters.map((ch, idx) => {
+              </thead>
+              <tbody className="divide-y divide-[#1b1b28]">
+                {visibleChapters.map((ch, idx) => {
                   const isSelected = selectedChapterIds.includes(ch.id);
+                  const hasPages = ch.pages && ch.pages.length > 0;
+                  const isMissingImages = ch.sourceType === 'images' && !hasPages;
+
                   return (
                     <tr 
                       key={`${ch.id || ch.chapterNumber}-${idx}`} 
@@ -1381,6 +1761,21 @@ export const AdminChaptersTab: React.FC = () => {
                           <span>{ch.pages?.length || ch.pageCount || 0} Gambar</span>
                         )}
                       </td>
+                      <td className="p-3">
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                          ch.sourceType === 'drive'
+                            ? 'bg-blue-500/15 text-blue-300 border-blue-500/30'
+                            : ch.sourceType === 'pdf'
+                            ? 'bg-red-500/15 text-red-300 border-red-500/30'
+                            : ch.sourceType === 'external'
+                            ? 'bg-purple-500/15 text-purple-300 border-purple-500/30'
+                            : isMissingImages
+                            ? 'bg-rose-500/15 text-rose-300 border-rose-500/30'
+                            : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                        }`}>
+                          {isMissingImages ? '⚠ Kosong' : '✓ Siap'}
+                        </span>
+                      </td>
                       <td className="p-3 text-slate-500 whitespace-nowrap">
                         {new Date(ch.createdAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
                       </td>
@@ -1397,7 +1792,7 @@ export const AdminChaptersTab: React.FC = () => {
                             <Download className="w-3.5 h-3.5" />
                           )}
                         </button>
-                        {(!ch.pages || ch.pages.length === 0) && (
+                        {isMissingImages && (
                           <button
                             onClick={() => handleFetchChapterPages(ch)}
                             disabled={fetchingChapterId === ch.id}
@@ -1435,11 +1830,11 @@ export const AdminChaptersTab: React.FC = () => {
                       </td>
                     </tr>
                   );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
 
         {/* Chapter Table Pagination Bar */}
         {currentChapters.length > 0 && (
@@ -2054,6 +2449,10 @@ export const AdminChaptersTab: React.FC = () => {
             <p className="text-[10px] text-red-300/80 pt-1">
               ⚠️ Halaman gambar atau embed drive terkait chapter ini akan dihapus permanen dari basis data.
             </p>
+            <div className="p-2 bg-emerald-500/10 rounded-lg border border-emerald-500/25 text-[11px] text-emerald-300 flex items-center gap-2 mt-1">
+              <span className="text-sm">🛡️</span>
+              <span><strong>Proteksi Komik:</strong> Operasi ini HANYA menghapus file chapter. Komik induk <strong>"{currentComic?.title}"</strong> tetap 100% utuh dan aman di database.</span>
+            </div>
           </div>
 
           <form onSubmit={handleConfirmDeleteChapters} className="space-y-3 text-xs">

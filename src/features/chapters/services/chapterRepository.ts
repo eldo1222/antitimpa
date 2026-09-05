@@ -49,6 +49,81 @@ export class ChapterRepository {
     }
   }
 
+  /**
+   * Server-side paginated chapter retrieval for a comic
+   */
+  public static async getPaginatedByComicId(
+    comicId: string, 
+    options: {
+      page: number;
+      limit: number;
+      search?: string;
+      sortBy?: 'chapter_number' | 'created_at' | 'updated_at' | 'title';
+      sortOrder?: 'asc' | 'desc';
+    }
+  ): Promise<{
+    data: Chapter[];
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+    error?: string;
+  }> {
+    const { page = 1, limit = 20, search = '', sortBy = 'chapter_number', sortOrder = 'asc' } = options;
+    if (!isSupabaseConfigured()) {
+      return { data: [], total: 0, page, limit, totalPages: 0, error: 'Supabase offline' };
+    }
+    const client = getSupabaseClient();
+    if (!client) {
+      return { data: [], total: 0, page, limit, totalPages: 0, error: 'Klien Supabase tidak tersedia' };
+    }
+
+    try {
+      let query = client
+        .from(DATABASE_TABLES.CHAPTERS)
+        .select('*', { count: 'exact' })
+        .eq('comic_id', comicId);
+
+      if (search.trim()) {
+        const clean = search.trim();
+        const numClean = parseFloat(clean);
+        if (!isNaN(numClean)) {
+          query = query.or(`title.ilike.%${clean}%,chapter_number.eq.${numClean}`);
+        } else {
+          query = query.ilike('title', `%${clean}%`);
+        }
+      }
+
+      const sortCol = sortBy === 'title' ? 'title' : (sortBy === 'created_at' ? 'created_at' : (sortBy === 'updated_at' ? 'updated_at' : 'chapter_number'));
+      query = query.order(sortCol, { ascending: sortOrder === 'asc' });
+
+      const from = Math.max(0, (page - 1) * limit);
+      const to = from + limit - 1;
+      query = query.range(from, to);
+
+      const { data, count, error } = await query;
+      if (error) {
+        logDatabaseError({ table: DATABASE_TABLES.CHAPTERS, operation: 'SELECT', error, details: { comicId, options } });
+        const parsed = parseSupabaseError(error);
+        return { data: [], total: 0, page, limit, totalPages: 0, error: parsed.userFriendlyMessage };
+      }
+
+      const total = count ?? (data?.length || 0);
+      const totalPages = Math.ceil(total / limit) || 1;
+
+      return {
+        data: (data || []).map(mapDbToChapter),
+        total,
+        page,
+        limit,
+        totalPages
+      };
+    } catch (err: any) {
+      logDatabaseError({ table: DATABASE_TABLES.CHAPTERS, operation: 'SELECT', error: err, details: { comicId, options } });
+      return { data: [], total: 0, page, limit, totalPages: 0, error: err?.message || 'Gagal memuat chapter' };
+    }
+  }
+
   public static async getAllGrouped(): Promise<{ data: Record<string, Chapter[]>; error?: string }> {
     if (!isSupabaseConfigured()) return { data: {} };
     const client = getSupabaseClient();
