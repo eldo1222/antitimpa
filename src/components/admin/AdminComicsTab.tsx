@@ -51,7 +51,7 @@ export const AdminComicsTab: React.FC = () => {
     batchToggleComicHomeVisibility,
     toggleComicHomeVisibility,
     selectComic, 
-    setIsAdminView,
+    setAdminActiveMenu,
     currentUser,
     banners,
     addBanner
@@ -77,6 +77,7 @@ export const AdminComicsTab: React.FC = () => {
   // Form fields
   const [title, setTitle] = useState('');
   const [slug, setSlug] = useState('');
+  const [rating, setRating] = useState<string>('4.8');
   const [storyWriter, setStoryWriter] = useState('');
   const [artist, setArtist] = useState('');
   const [status, setStatus] = useState<'ongoing' | 'completed'>('ongoing');
@@ -149,6 +150,7 @@ export const AdminComicsTab: React.FC = () => {
     setEditingComic(null);
     setTitle('');
     setSlug('');
+    setRating('4.8');
     setStoryWriter('');
     setArtist('');
     setStatus('ongoing');
@@ -172,9 +174,10 @@ export const AdminComicsTab: React.FC = () => {
   const handleOpenEdit = (comic: Comic) => {
     setEditingComic(comic);
     setTitle(comic.title);
-    setSlug(comic.slug);
-    setStoryWriter(comic.storyWriter);
-    setArtist(comic.artist);
+    setSlug(comic.slug || '');
+    setRating(comic.rating !== undefined ? String(comic.rating) : '4.8');
+    setStoryWriter(comic.storyWriter || '');
+    setArtist(comic.artist || '');
     setStatus(comic.status?.toLowerCase() === 'completed' ? 'completed' : 'ongoing');
     setContentType(comic.contentType || (comic.genres.some(g => g.includes('18+') || g.includes('Dewasa')) ? '18plus' : 'normal'));
     setComicType(comic.comicType || (comic.type as ComicCategoryType) || 'manga');
@@ -182,9 +185,9 @@ export const AdminComicsTab: React.FC = () => {
     setIsFree(comic.isFree ?? (comic.contentType === 'normal'));
     setIsVisibleOnHome(comic.isVisibleOnHome !== false && comic.showOnHome !== false);
     setGenresText(comic.genres.join(', '));
-    setSynopsis(comic.synopsis);
-    setCoverImage(comic.coverImage);
-    setBannerImage(comic.bannerImage);
+    setSynopsis(comic.synopsis || '');
+    setCoverImage(comic.coverImage || '');
+    setBannerImage(comic.bannerImage || '');
     setCoverSourceType(comic.coverImage?.startsWith('data:') ? 'file' : 'url');
     setBannerSourceType(comic.bannerImage?.startsWith('data:') ? 'file' : 'url');
     setHasExternalGateway(comic.hasExternalGateway || !!comic.externalUrl || !!(comic.whereToRead && comic.whereToRead.length > 0));
@@ -208,6 +211,8 @@ export const AdminComicsTab: React.FC = () => {
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     const genresArray = genresText.split(',').map(s => s.trim()).filter(Boolean);
+    const parsedRating = parseFloat(rating) || 4.8;
+    const computedSlug = slug.trim() || title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
 
     // Parse whereToReadText into structured items
     const parsedSources = whereToReadText
@@ -251,7 +256,8 @@ export const AdminComicsTab: React.FC = () => {
     if (editingComic) {
       updateComic(editingComic.id, {
         title,
-        slug: slug || title.toLowerCase().replace(/\s+/g, '-'),
+        slug: computedSlug,
+        rating: parsedRating,
         storyWriter,
         artist,
         status,
@@ -273,7 +279,8 @@ export const AdminComicsTab: React.FC = () => {
     } else {
       addComic({
         title,
-        slug: slug || title.toLowerCase().replace(/\s+/g, '-'),
+        slug: computedSlug,
+        rating: parsedRating,
         storyWriter: storyWriter || 'Author Studio',
         artist: artist || 'Artist Studio',
         status,
@@ -489,9 +496,9 @@ export const AdminComicsTab: React.FC = () => {
     setSelectedComicIds(prev => prev.filter(id => !ids.includes(id)));
   };
 
-  const handleViewFrontend = (comicId: string) => {
+  const handleNavigateToChapters = (comicId: string) => {
     selectComic(comicId);
-    setIsAdminView(false);
+    setAdminActiveMenu('chapters');
   };
 
   const handleQuickCycleCategory = (comic: Comic) => {
@@ -974,32 +981,25 @@ export const AdminComicsTab: React.FC = () => {
                       <td className="p-3 text-right">
                         <div className="flex items-center justify-end gap-1.5">
                           <button
+                            onClick={() => handleOpenEdit(comic)}
+                            className="p-1.5 text-slate-400 hover:text-blue-400 hover:bg-blue-500/10 rounded-lg transition-colors cursor-pointer"
+                            title="Edit Detail Komik"
+                          >
+                            <Edit className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleNavigateToChapters(comic.id)}
+                            className="p-1.5 text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/10 rounded-lg transition-colors cursor-pointer"
+                            title="Kelola Chapter Komik"
+                          >
+                            <BookOpen className="w-3.5 h-3.5" />
+                          </button>
+                          <button
                             onClick={() => handleQuickPromoteToBanner(comic)}
                             className="p-1.5 text-slate-400 hover:text-amber-400 hover:bg-amber-500/10 rounded-lg transition-colors cursor-pointer"
                             title="⚡ 1-Klik: Jadikan Banner Slider Beranda"
                           >
                             <Flame className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => handleViewFrontend(comic.id)}
-                            className="p-1.5 text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/10 rounded-lg transition-colors cursor-pointer"
-                            title="Pratinjau di Reader"
-                          >
-                            <Globe className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => handleOpenEdit(comic)}
-                            className="p-1.5 text-slate-400 hover:text-[#ff5b14] hover:bg-[#ff5b14]/10 rounded-lg transition-colors cursor-pointer"
-                            title="Edit Tag & Detail Komik"
-                          >
-                            <Tag className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => handleOpenEdit(comic)}
-                            className="p-1.5 text-slate-400 hover:text-blue-400 hover:bg-blue-500/10 rounded-lg transition-colors cursor-pointer"
-                            title="Edit Komik"
-                          >
-                            <Edit className="w-3.5 h-3.5" />
                           </button>
                           <button
                             onClick={() => handleRequestSingleDelete(comic)}
@@ -1104,446 +1104,561 @@ export const AdminComicsTab: React.FC = () => {
       </div>
 
       {/* Add / Edit Modal */}
-      <AdminModalPortal isOpen={showAddModal} onClose={() => setShowAddModal(false)} maxWidth="max-w-lg">
-        <div className="w-full bg-[#12121a] border border-[#262638] rounded-2xl p-5 text-slate-200 space-y-4 max-h-[90vh] overflow-y-auto shadow-2xl">
-          <div className="flex items-center justify-between pb-3 border-b border-[#202030]">
-            <h3 className="font-extrabold text-sm text-white">
-              {editingComic ? 'Edit Data Komik' : 'Tambah Komik Baru'}
-            </h3>
-            <button onClick={() => setShowAddModal(false)} className="p-1 text-slate-400 hover:text-white rounded-lg cursor-pointer">
-              <X className="w-4 h-4" />
+      <AdminModalPortal isOpen={showAddModal} onClose={() => setShowAddModal(false)} maxWidth="max-w-6xl">
+        <div className="w-full bg-[#12121a] border border-[#262638] rounded-2xl text-slate-200 shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
+          {/* Sticky Modal Header */}
+          <div className="flex items-center justify-between px-5 sm:px-6 py-4 border-b border-[#202030] bg-[#141420] shrink-0">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-[#ff5b14]/10 border border-[#ff5b14]/30 flex items-center justify-center text-[#ff5b14]">
+                {editingComic ? <Edit className="w-5 h-5" /> : <Plus className="w-5 h-5" />}
+              </div>
+              <div>
+                <h3 className="font-extrabold text-sm sm:text-base text-white tracking-wide">
+                  {editingComic ? 'Edit Detail Komik' : 'Tambah Komik Baru'}
+                </h3>
+                <p className="text-xs text-slate-400">
+                  {editingComic 
+                    ? `Perbarui informasi, metadata, cover, dan konfigurasi ${editingComic.title}` 
+                    : 'Lengkapi data formulir untuk mendaftarkan judul komik baru ke database'}
+                </p>
+              </div>
+            </div>
+            <button 
+              type="button"
+              onClick={() => setShowAddModal(false)} 
+              className="p-2 text-slate-400 hover:text-white hover:bg-[#1f1f2e] rounded-xl transition-colors cursor-pointer"
+              title="Tutup Modal"
+            >
+              <X className="w-5 h-5" />
             </button>
           </div>
 
-          <form onSubmit={handleSave} className="space-y-3.5 text-xs">
-              <div>
-                <label className="block text-slate-400 mb-1 font-semibold">Judul Komik</label>
-                <input
-                  type="text"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  placeholder="Contoh: Solo Leveling Ragnarok"
-                  className="w-full p-2 bg-[#181824] border border-[#27273a] rounded-xl text-white focus:outline-none focus:border-[#ff5b14]"
-                  required
-                />
-              </div>
-
-              {/* Klasifikasi Proyek Admin vs Scraping vs Gateway */}
-              <div className="p-3 bg-[#161622] rounded-xl border border-[#27273a] space-y-2">
-                <label className="block text-slate-300 font-bold">
-                  👑 Klasifikasi Jenis Proyek
-                </label>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setProjectType('admin_personal')}
-                    className={`p-2 rounded-xl text-left border transition-all cursor-pointer ${
-                      projectType === 'admin_personal'
-                        ? 'bg-amber-500/20 border-amber-500/60 text-amber-300'
-                        : 'bg-[#101018] border-[#252538] text-slate-400 hover:bg-[#181824]'
-                    }`}
-                  >
-                    <div className="flex items-center gap-1.5 font-bold mb-0.5 text-[11px]">
-                      <Crown className="w-3.5 h-3.5 text-amber-400" />
-                      <span>Project Pribadi</span>
-                    </div>
-                    <p className="text-[9px] text-slate-400 leading-tight">Proyek internal admin / upload mandiri</p>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setProjectType('scraped_ready')}
-                    className={`p-2 rounded-xl text-left border transition-all cursor-pointer ${
-                      projectType === 'scraped_ready'
-                        ? 'bg-emerald-500/20 border-emerald-500/60 text-emerald-300'
-                        : 'bg-[#101018] border-[#252538] text-slate-400 hover:bg-[#181824]'
-                    }`}
-                  >
-                    <div className="flex items-center gap-1.5 font-bold mb-0.5 text-[11px]">
-                      <Zap className="w-3.5 h-3.5 text-emerald-400" />
-                      <span>Scraping Siap</span>
-                    </div>
-                    <p className="text-[9px] text-slate-400 leading-tight">Gambar berhasil ditarik via API/Scraper</p>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setProjectType('preview_gateway')}
-                    className={`p-2 rounded-xl text-left border transition-all cursor-pointer ${
-                      projectType === 'preview_gateway'
-                        ? 'bg-sky-500/20 border-sky-500/60 text-sky-300'
-                        : 'bg-[#101018] border-[#252538] text-slate-400 hover:bg-[#181824]'
-                    }`}
-                  >
-                    <div className="flex items-center gap-1.5 font-bold mb-0.5 text-[11px]">
-                      <Globe className="w-3.5 h-3.5 text-sky-400" />
-                      <span>Preview Gateway</span>
-                    </div>
-                    <p className="text-[9px] text-slate-400 leading-tight">Pratinjau sinopsis &amp; tautan baca mitra</p>
-                  </button>
-                </div>
-              </div>
-
-              {/* Jenis Komik (Manga, Manhwa, Manhua, Webtoon) */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-slate-400 mb-1 font-semibold">Jenis Komik (Kategori Asal)</label>
-                  <select
-                    value={comicType}
-                    onChange={(e) => setComicType(e.target.value as ComicCategoryType)}
-                    className="w-full p-2 bg-[#181824] border border-[#27273a] rounded-xl text-white font-bold"
-                  >
-                    <option value="manga">🇯🇵 Manga (Jepang)</option>
-                    <option value="manhwa">🇰🇷 Manhwa (Korea)</option>
-                    <option value="manhua">🇨🇳 Manhua (China)</option>
-                    <option value="webtoon">🔞 18+ Webtoon</option>
-                  </select>
+          {/* Scrollable Form Body */}
+          <form id="comic-edit-form" onSubmit={handleSave} className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-6 text-xs">
+            {/* 2-Column Responsive Grid on Desktop */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+              
+              {/* COLUMN 1: INFORMASI UTAMA & MEDIA */}
+              <div className="space-y-4">
+                <div className="pb-2 border-b border-[#222234] flex items-center gap-2">
+                  <BookOpen className="w-4 h-4 text-[#ff5b14]" />
+                  <h4 className="font-extrabold text-xs uppercase tracking-wider text-slate-200">
+                    Informasi Utama &amp; Media
+                  </h4>
                 </div>
 
+                {/* Judul Komik */}
                 <div>
-                  <label className="block text-slate-400 mb-1 font-semibold">Status Publikasi</label>
-                  <select
-                    value={status}
-                    onChange={(e) => setStatus(e.target.value as any)}
-                    className="w-full p-2 bg-[#181824] border border-[#27273a] rounded-xl text-white"
-                  >
-                    <option value="ongoing">Ongoing (Sedang Berjalan)</option>
-                    <option value="completed">Completed (Tamat)</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-slate-400 mb-1 font-semibold">Penulis Cerita (Story)</label>
+                  <label className="block text-slate-300 mb-1 font-semibold">
+                    Judul Komik <span className="text-[#ff5b14]">*</span>
+                  </label>
                   <input
                     type="text"
-                    value={storyWriter}
-                    onChange={(e) => setStoryWriter(e.target.value)}
-                    placeholder="Contoh: Chugong"
-                    className="w-full p-2 bg-[#181824] border border-[#27273a] rounded-xl text-white"
+                    value={title}
+                    onChange={(e) => {
+                      setTitle(e.target.value);
+                      if (!editingComic && !slug) {
+                        setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, ''));
+                      }
+                    }}
+                    placeholder="Contoh: Solo Leveling Ragnarok"
+                    className="w-full p-2.5 bg-[#181824] border border-[#27273a] rounded-xl text-white font-medium focus:outline-none focus:border-[#ff5b14] transition-colors"
+                    required
                   />
                 </div>
+
+                {/* Slug URL */}
                 <div>
-                  <label className="block text-slate-400 mb-1 font-semibold">Ilustrator (Art)</label>
+                  <label className="block text-slate-400 mb-1 font-semibold">
+                    Slug URL (Identifier Web)
+                  </label>
                   <input
                     type="text"
-                    value={artist}
-                    onChange={(e) => setArtist(e.target.value)}
-                    placeholder="Contoh: REDICE Studio"
-                    className="w-full p-2 bg-[#181824] border border-[#27273a] rounded-xl text-white"
+                    value={slug}
+                    onChange={(e) => setSlug(e.target.value)}
+                    placeholder="contoh: solo-leveling-ragnarok"
+                    className="w-full p-2.5 bg-[#181824] border border-[#27273a] rounded-xl text-white font-mono text-xs focus:outline-none focus:border-[#ff5b14] transition-colors"
                   />
                 </div>
-              </div>
 
-              {/* Content Category & Home Visibility Settings */}
-              <div className="p-3 bg-[#161622] rounded-xl border border-[#27273a] space-y-3">
-                <span className="text-slate-300 font-bold text-xs block">
-                  ⚙️ Kategori Konten & Visibilitas Beranda
-                </span>
-
+                {/* Penulis Cerita & Ilustrator */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-slate-400 mb-1 font-semibold">Tipe Akses Konten</label>
-                    <select
-                      value={contentType}
-                      onChange={(e) => {
-                        const val = e.target.value as 'normal' | '18plus';
-                        setContentType(val);
-                        if (val === 'normal') setIsFree(true);
-                      }}
-                      className="w-full p-2 bg-[#101018] border border-[#2c2c3e] rounded-xl text-white font-semibold"
+                    <label className="block text-slate-400 mb-1 font-semibold">Penulis Cerita (Story)</label>
+                    <input
+                      type="text"
+                      value={storyWriter}
+                      onChange={(e) => setStoryWriter(e.target.value)}
+                      placeholder="Contoh: Chugong"
+                      className="w-full p-2 bg-[#181824] border border-[#27273a] rounded-xl text-white focus:outline-none focus:border-[#ff5b14]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-400 mb-1 font-semibold">Ilustrator (Art)</label>
+                    <input
+                      type="text"
+                      value={artist}
+                      onChange={(e) => setArtist(e.target.value)}
+                      placeholder="Contoh: REDICE Studio"
+                      className="w-full p-2 bg-[#181824] border border-[#27273a] rounded-xl text-white focus:outline-none focus:border-[#ff5b14]"
+                    />
+                  </div>
+                </div>
+
+                {/* Cover Image Upload (Portrait) */}
+                <div className="p-3.5 bg-[#161622] rounded-xl border border-[#262638] space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-slate-300 font-semibold flex items-center gap-1.5">
+                      <ImageIcon className="w-3.5 h-3.5 text-[#ff5b14]" />
+                      <span>Cover Komik (Portrait 3:4)</span>
+                    </label>
+                    <div className="flex bg-[#101018] p-0.5 rounded-lg border border-[#242434] text-[10px]">
+                      <button
+                        type="button"
+                        onClick={() => setCoverSourceType('file')}
+                        className={`px-2.5 py-1 rounded-md font-semibold cursor-pointer transition-colors ${
+                          coverSourceType === 'file' ? 'bg-[#ff5b14] text-white' : 'text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        Upload File
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCoverSourceType('url')}
+                        className={`px-2.5 py-1 rounded-md font-semibold cursor-pointer transition-colors ${
+                          coverSourceType === 'url' ? 'bg-[#ff5b14] text-white' : 'text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        Link URL
+                      </button>
+                    </div>
+                  </div>
+
+                  {coverSourceType === 'file' ? (
+                    <div className="flex items-center gap-3">
+                      <div 
+                        onClick={() => coverInputRef.current?.click()}
+                        className="flex-1 border-2 border-dashed border-[#ff5b14]/40 hover:border-[#ff5b14] rounded-xl p-3 text-center cursor-pointer bg-[#101018] transition-colors"
+                      >
+                        <input
+                          ref={coverInputRef}
+                          type="file"
+                          accept="image/png,image/jpeg,image/jpg,image/webp"
+                          onChange={handleCoverFileUpload}
+                          className="hidden"
+                        />
+                        <Upload className="w-5 h-5 text-[#ff5b14] mx-auto mb-1" />
+                        <p className="font-semibold text-slate-300 text-[11px]">
+                          {coverImage ? 'Klik untuk mengganti gambar cover' : 'Pilih File Gambar Cover'}
+                        </p>
+                        <p className="text-[10px] text-slate-500 mt-0.5">JPG, PNG, atau WebP (Rasio 3:4)</p>
+                      </div>
+
+                      {coverImage && (
+                        <div className="relative w-16 h-22 rounded-xl overflow-hidden border border-[#ff5b14] shrink-0 shadow-md bg-black">
+                          <img src={coverImage} alt="Cover Preview" className="w-full h-full object-cover" />
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="url"
+                        value={coverImage}
+                        onChange={(e) => setCoverImage(e.target.value)}
+                        placeholder="https://images.unsplash.com/... or image link"
+                        className="w-full p-2 bg-[#101018] border border-[#27273a] rounded-xl text-white font-mono text-xs focus:outline-none focus:border-[#ff5b14]"
+                      />
+                      {coverImage && (
+                        <div className="relative w-10 h-14 rounded-lg overflow-hidden border border-[#27273a] shrink-0 bg-black">
+                          <img src={coverImage} alt="Preview" className="w-full h-full object-cover" />
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Banner Header Image Upload (Landscape) */}
+                <div className="p-3.5 bg-[#161622] rounded-xl border border-[#262638] space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-slate-300 font-semibold flex items-center gap-1.5">
+                      <ImageIcon className="w-3.5 h-3.5 text-blue-400" />
+                      <span>Banner Slider / Header (Landscape 16:9)</span>
+                    </label>
+                    <div className="flex bg-[#101018] p-0.5 rounded-lg border border-[#242434] text-[10px]">
+                      <button
+                        type="button"
+                        onClick={() => setBannerSourceType('file')}
+                        className={`px-2.5 py-1 rounded-md font-semibold cursor-pointer transition-colors ${
+                          bannerSourceType === 'file' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        Upload File
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setBannerSourceType('url')}
+                        className={`px-2.5 py-1 rounded-md font-semibold cursor-pointer transition-colors ${
+                          bannerSourceType === 'url' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        Link URL
+                      </button>
+                    </div>
+                  </div>
+
+                  {bannerSourceType === 'file' ? (
+                    <div className="flex flex-col gap-2">
+                      <div 
+                        onClick={() => bannerInputRef.current?.click()}
+                        className="border-2 border-dashed border-blue-500/40 hover:border-blue-500 rounded-xl p-3 text-center cursor-pointer bg-[#101018] transition-colors"
+                      >
+                        <input
+                          ref={bannerInputRef}
+                          type="file"
+                          accept="image/png,image/jpeg,image/jpg,image/webp"
+                          onChange={handleBannerFileUpload}
+                          className="hidden"
+                        />
+                        <Upload className="w-5 h-5 text-blue-400 mx-auto mb-1" />
+                        <p className="font-semibold text-slate-300 text-[11px]">
+                          {bannerImage ? 'Klik untuk mengganti banner' : 'Pilih File Gambar Banner'}
+                        </p>
+                        <p className="text-[10px] text-slate-500 mt-0.5">JPG, PNG, atau WebP (Rasio 16:9)</p>
+                      </div>
+
+                      {bannerImage && (
+                        <div className="relative w-full h-24 rounded-xl overflow-hidden border border-blue-500/50 shrink-0 bg-black">
+                          <img src={bannerImage} alt="Banner Preview" className="w-full h-full object-cover" />
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <input
+                        type="url"
+                        value={bannerImage}
+                        onChange={(e) => setBannerImage(e.target.value)}
+                        placeholder="https://images.unsplash.com/... or banner link"
+                        className="w-full p-2 bg-[#101018] border border-[#27273a] rounded-xl text-white font-mono text-xs focus:outline-none focus:border-blue-500"
+                      />
+                      {bannerImage && (
+                        <div className="relative w-full h-20 rounded-lg overflow-hidden border border-[#27273a] bg-black">
+                          <img src={bannerImage} alt="Preview" className="w-full h-full object-cover" />
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Klasifikasi Proyek Admin vs Scraping vs Gateway */}
+                <div className="p-3.5 bg-[#161622] rounded-xl border border-[#27273a] space-y-2">
+                  <label className="block text-slate-300 font-bold">
+                    👑 Klasifikasi Jenis Proyek
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setProjectType('admin_personal')}
+                      className={`p-2.5 rounded-xl text-left border transition-all cursor-pointer ${
+                        projectType === 'admin_personal'
+                          ? 'bg-amber-500/20 border-amber-500/60 text-amber-300'
+                          : 'bg-[#101018] border-[#252538] text-slate-400 hover:bg-[#181824]'
+                      }`}
                     >
-                      <option value="normal">🟢 Komik Normal (Bebas Baca Gratis)</option>
-                      <option value="18plus">🔞 Komik Dewasa (18+ VIP - Wajib Akun & Koin)</option>
+                      <div className="flex items-center gap-1.5 font-bold mb-0.5 text-xs">
+                        <Crown className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Pribadi</span>
+                      </div>
+                      <p className="text-[10px] text-slate-400 leading-tight">Proyek internal admin / upload mandiri</p>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setProjectType('scraped_ready')}
+                      className={`p-2.5 rounded-xl text-left border transition-all cursor-pointer ${
+                        projectType === 'scraped_ready'
+                          ? 'bg-emerald-500/20 border-emerald-500/60 text-emerald-300'
+                          : 'bg-[#101018] border-[#252538] text-slate-400 hover:bg-[#181824]'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 font-bold mb-0.5 text-xs">
+                        <Zap className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>Scraping Siap</span>
+                      </div>
+                      <p className="text-[10px] text-slate-400 leading-tight">Gambar ditarik via API/Scraper</p>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setProjectType('preview_gateway')}
+                      className={`p-2.5 rounded-xl text-left border transition-all cursor-pointer ${
+                        projectType === 'preview_gateway'
+                          ? 'bg-sky-500/20 border-sky-500/60 text-sky-300'
+                          : 'bg-[#101018] border-[#252538] text-slate-400 hover:bg-[#181824]'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 font-bold mb-0.5 text-xs">
+                        <Globe className="w-3.5 h-3.5 text-sky-400" />
+                        <span>Gateway</span>
+                      </div>
+                      <p className="text-[10px] text-slate-400 leading-tight">Pratinjau sinopsis &amp; link mitra</p>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* COLUMN 2: METADATA, STATUS & VISIBILITAS */}
+              <div className="space-y-4">
+                <div className="pb-2 border-b border-[#222234] flex items-center gap-2">
+                  <Layers className="w-4 h-4 text-emerald-400" />
+                  <h4 className="font-extrabold text-xs uppercase tracking-wider text-slate-200">
+                    Metadata &amp; Pengaturan Konten
+                  </h4>
+                </div>
+
+                {/* Jenis Komik, Status, & Rating */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-slate-400 mb-1 font-semibold">Jenis Komik (Asal)</label>
+                    <select
+                      value={comicType}
+                      onChange={(e) => setComicType(e.target.value as ComicCategoryType)}
+                      className="w-full p-2 bg-[#181824] border border-[#27273a] rounded-xl text-white font-bold focus:outline-none focus:border-[#ff5b14]"
+                    >
+                      <option value="manga">🇯🇵 Manga</option>
+                      <option value="manhwa">🇰🇷 Manhwa</option>
+                      <option value="manhua">🇨🇳 Manhua</option>
+                      <option value="webtoon">🔞 Webtoon</option>
                     </select>
                   </div>
 
-                  <div className="flex flex-col justify-center gap-2">
-                    <label className="flex items-center gap-2 text-slate-300 font-semibold cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={isVisibleOnHome}
-                        onChange={(e) => setIsVisibleOnHome(e.target.checked)}
-                        className="rounded border-[#3a3a4e] text-[#ff5b14] focus:ring-[#ff5b14] w-4 h-4 cursor-pointer"
-                      />
-                      <span>Tampilkan di Halaman Beranda (Home)</span>
-                    </label>
+                  <div>
+                    <label className="block text-slate-400 mb-1 font-semibold">Status Publikasi</label>
+                    <select
+                      value={status}
+                      onChange={(e) => setStatus(e.target.value as any)}
+                      className="w-full p-2 bg-[#181824] border border-[#27273a] rounded-xl text-white focus:outline-none focus:border-[#ff5b14]"
+                    >
+                      <option value="ongoing">Ongoing (Berjalan)</option>
+                      <option value="completed">Completed (Tamat)</option>
+                    </select>
+                  </div>
 
-                    {contentType === '18plus' && (
-                      <label className="flex items-center gap-2 text-slate-400 text-[11px] cursor-pointer">
+                  <div>
+                    <label className="block text-slate-400 mb-1 font-semibold">Rating (1.0 - 5.0)</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="1.0"
+                      max="5.0"
+                      value={rating}
+                      onChange={(e) => setRating(e.target.value)}
+                      placeholder="4.8"
+                      className="w-full p-2 bg-[#181824] border border-[#27273a] rounded-xl text-white font-bold text-amber-400 focus:outline-none focus:border-[#ff5b14]"
+                    />
+                  </div>
+                </div>
+
+                {/* Content Category & Home Visibility Settings */}
+                <div className="p-3.5 bg-[#161622] rounded-xl border border-[#27273a] space-y-3">
+                  <span className="text-slate-300 font-bold text-xs block">
+                    ⚙️ Kategori Konten &amp; Visibilitas Beranda
+                  </span>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-slate-400 mb-1 font-semibold">Tipe Akses Konten</label>
+                      <select
+                        value={contentType}
+                        onChange={(e) => {
+                          const val = e.target.value as 'normal' | '18plus';
+                          setContentType(val);
+                          if (val === 'normal') setIsFree(true);
+                        }}
+                        className="w-full p-2 bg-[#101018] border border-[#2c2c3e] rounded-xl text-white font-semibold focus:outline-none focus:border-[#ff5b14]"
+                      >
+                        <option value="normal">🟢 Normal (Bebas Baca)</option>
+                        <option value="18plus">🔞 Dewasa (18+ VIP)</option>
+                      </select>
+                    </div>
+
+                    <div className="flex flex-col justify-center gap-2 pt-1 sm:pt-0">
+                      <label className="flex items-center gap-2 text-slate-300 font-semibold cursor-pointer">
                         <input
                           type="checkbox"
-                          checked={isFree}
-                          onChange={(e) => setIsFree(e.target.checked)}
-                          className="rounded border-[#3a3a4e] text-emerald-500 w-3.5 h-3.5"
+                          checked={isVisibleOnHome}
+                          onChange={(e) => setIsVisibleOnHome(e.target.checked)}
+                          className="rounded border-[#3a3a4e] text-[#ff5b14] focus:ring-[#ff5b14] w-4 h-4 cursor-pointer"
                         />
-                        <span>Jadikan komik 18+ ini bebas baca (Promosi)</span>
+                        <span>Tampilkan di Beranda (Home)</span>
                       </label>
-                    )}
-                  </div>
-                </div>
-              </div>
 
-              {/* Genre Selector */}
-              <div className="space-y-1.5">
-                <label className="text-slate-400 font-semibold flex items-center gap-1">
-                  <Tag className="w-3 h-3 text-[#ff5b14]" />
-                  <span>Genre Komik (Pilih Tag / Ketik)</span>
-                </label>
-                <input
-                  type="text"
-                  value={genresText}
-                  onChange={(e) => setGenresText(e.target.value)}
-                  placeholder="Contoh: Action, Fantasy, Leveling"
-                  className="w-full p-2 bg-[#181824] border border-[#27273a] rounded-xl text-white font-mono text-xs focus:border-[#ff5b14] focus:outline-none"
-                />
-                
-                {/* Preset Genre Quick Tag Pills */}
-                <div className="p-2 bg-[#101018] rounded-xl border border-[#222232] space-y-1.5">
-                  <span className="text-[10px] text-slate-500 font-bold block uppercase tracking-wider">
-                    Klik Tag Cepat Genre:
-                  </span>
-                  <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto pr-1">
-                    {PRESET_GENRES.map((g) => {
-                      const currentList = genresText.split(',').map(s => s.trim().toLowerCase());
-                      const isSelected = currentList.includes(g.toLowerCase());
-                      return (
-                        <button
-                          key={g}
-                          type="button"
-                          onClick={() => toggleGenreTag(g)}
-                          className={`px-2 py-0.5 rounded-md text-[10px] font-bold transition-all cursor-pointer ${
-                            isSelected
-                              ? 'bg-[#ff5b14] text-white shadow-xs'
-                              : 'bg-[#181824] hover:bg-[#252538] text-slate-400 hover:text-slate-200 border border-[#262638]'
-                          }`}
-                        >
-                          {isSelected ? `✓ ${g}` : `+ ${g}`}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-slate-400 mb-1 font-semibold">Sinopsis</label>
-                <textarea
-                  value={synopsis}
-                  onChange={(e) => setSynopsis(e.target.value)}
-                  placeholder="Ringkasan cerita komik..."
-                  rows={3}
-                  className="w-full p-2 bg-[#181824] border border-[#27273a] rounded-xl text-white"
-                />
-              </div>
-
-              {/* Cover Image Upload (Portrait) */}
-              <div className="p-3 bg-[#161622] rounded-xl border border-[#262638] space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="text-slate-300 font-semibold flex items-center gap-1.5">
-                    <ImageIcon className="w-3.5 h-3.5 text-[#ff5b14]" />
-                    <span>Cover Komik (Portrait)</span>
-                  </label>
-                  <div className="flex bg-[#101018] p-0.5 rounded-lg border border-[#242434] text-[10px]">
-                    <button
-                      type="button"
-                      onClick={() => setCoverSourceType('file')}
-                      className={`px-2 py-0.5 rounded-md font-semibold cursor-pointer ${
-                        coverSourceType === 'file' ? 'bg-[#ff5b14] text-white' : 'text-slate-400'
-                      }`}
-                    >
-                      Upload JPG/PNG
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setCoverSourceType('url')}
-                      className={`px-2 py-0.5 rounded-md font-semibold cursor-pointer ${
-                        coverSourceType === 'url' ? 'bg-[#ff5b14] text-white' : 'text-slate-400'
-                      }`}
-                    >
-                      Link URL
-                    </button>
-                  </div>
-                </div>
-
-                {coverSourceType === 'file' ? (
-                  <div className="flex items-center gap-3">
-                    <div 
-                      onClick={() => coverInputRef.current?.click()}
-                      className="flex-1 border-2 border-dashed border-[#ff5b14]/40 hover:border-[#ff5b14] rounded-xl p-3 text-center cursor-pointer bg-[#101018] transition-colors"
-                    >
-                      <input
-                        ref={coverInputRef}
-                        type="file"
-                        accept="image/png,image/jpeg,image/jpg,image/webp"
-                        onChange={handleCoverFileUpload}
-                        className="hidden"
-                      />
-                      <Upload className="w-5 h-5 text-[#ff5b14] mx-auto mb-1" />
-                      <p className="font-semibold text-slate-300 text-[11px]">
-                        {coverImage ? 'Klik untuk mengganti file JPG/PNG' : 'Pilih File Gambar Cover (JPG/PNG)'}
-                      </p>
-                      <p className="text-[9px] text-slate-500">Rasio portrait 3:4 disarankan</p>
+                      {contentType === '18plus' && (
+                        <label className="flex items-center gap-2 text-slate-400 text-[11px] cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={isFree}
+                            onChange={(e) => setIsFree(e.target.checked)}
+                            className="rounded border-[#3a3a4e] text-emerald-500 w-3.5 h-3.5"
+                          />
+                          <span>Jadikan komik 18+ ini bebas baca (Promosi)</span>
+                        </label>
+                      )}
                     </div>
-
-                    {coverImage && (
-                      <div className="relative w-14 h-18 rounded-lg overflow-hidden border border-[#ff5b14] shrink-0">
-                        <img src={coverImage} alt="Cover Preview" className="w-full h-full object-cover" />
-                      </div>
-                    )}
                   </div>
-                ) : (
+                </div>
+
+                {/* Genre Selector */}
+                <div className="p-3.5 bg-[#161622] rounded-xl border border-[#262638] space-y-2">
+                  <label className="text-slate-300 font-semibold flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <Tag className="w-3.5 h-3.5 text-[#ff5b14]" />
+                      <span>Genre Komik (Ketik atau Pilih Tag)</span>
+                    </span>
+                  </label>
                   <input
-                    type="url"
-                    value={coverImage}
-                    onChange={(e) => setCoverImage(e.target.value)}
-                    placeholder="https://images.unsplash.com/... or image link"
-                    className="w-full p-2 bg-[#101018] border border-[#27273a] rounded-xl text-white font-mono text-[11px]"
+                    type="text"
+                    value={genresText}
+                    onChange={(e) => setGenresText(e.target.value)}
+                    placeholder="Contoh: Action, Fantasy, Romance 18+"
+                    className="w-full p-2 bg-[#101018] border border-[#27273a] rounded-xl text-white font-mono text-xs focus:border-[#ff5b14] focus:outline-none"
                   />
-                )}
-              </div>
-
-              {/* Banner Image Upload (Landscape) */}
-              <div className="p-3 bg-[#161622] rounded-xl border border-[#262638] space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="text-slate-300 font-semibold flex items-center gap-1.5">
-                    <ImageIcon className="w-3.5 h-3.5 text-blue-400" />
-                    <span>Banner Header (Landscape)</span>
-                  </label>
-                  <div className="flex bg-[#101018] p-0.5 rounded-lg border border-[#242434] text-[10px]">
-                    <button
-                      type="button"
-                      onClick={() => setBannerSourceType('file')}
-                      className={`px-2 py-0.5 rounded-md font-semibold cursor-pointer ${
-                        bannerSourceType === 'file' ? 'bg-blue-600 text-white' : 'text-slate-400'
-                      }`}
-                    >
-                      Upload JPG/PNG
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setBannerSourceType('url')}
-                      className={`px-2 py-0.5 rounded-md font-semibold cursor-pointer ${
-                        bannerSourceType === 'url' ? 'bg-blue-600 text-white' : 'text-slate-400'
-                      }`}
-                    >
-                      Link URL
-                    </button>
+                  
+                  {/* Preset Genre Quick Tag Pills */}
+                  <div className="p-2.5 bg-[#101018] rounded-xl border border-[#222232] space-y-1.5">
+                    <span className="text-[10px] text-slate-500 font-bold block uppercase tracking-wider">
+                      Pilih Tag Cepat:
+                    </span>
+                    <div className="flex flex-wrap gap-1 max-h-28 overflow-y-auto pr-1">
+                      {PRESET_GENRES.map((g) => {
+                        const currentList = genresText.split(',').map(s => s.trim().toLowerCase());
+                        const isSelected = currentList.includes(g.toLowerCase());
+                        return (
+                          <button
+                            key={g}
+                            type="button"
+                            onClick={() => toggleGenreTag(g)}
+                            className={`px-2 py-0.5 rounded-md text-[10px] font-bold transition-all cursor-pointer ${
+                              isSelected
+                                ? 'bg-[#ff5b14] text-white shadow-xs'
+                                : 'bg-[#181824] hover:bg-[#252538] text-slate-400 hover:text-slate-200 border border-[#262638]'
+                            }`}
+                          >
+                            {isSelected ? `✓ ${g}` : `+ ${g}`}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
 
-                {bannerSourceType === 'file' ? (
-                  <div className="flex flex-col gap-2">
-                    <div 
-                      onClick={() => bannerInputRef.current?.click()}
-                      className="border-2 border-dashed border-blue-500/40 hover:border-blue-500 rounded-xl p-3 text-center cursor-pointer bg-[#101018] transition-colors"
-                    >
-                      <input
-                        ref={bannerInputRef}
-                        type="file"
-                        accept="image/png,image/jpeg,image/jpg,image/webp"
-                        onChange={handleBannerFileUpload}
-                        className="hidden"
-                      />
-                      <Upload className="w-5 h-5 text-blue-400 mx-auto mb-1" />
-                      <p className="font-semibold text-slate-300 text-[11px]">
-                        {bannerImage ? 'Klik untuk mengganti banner' : 'Pilih File Gambar Banner (JPG/PNG)'}
-                      </p>
-                      <p className="text-[9px] text-slate-500">Rasio landscape 16:9 disarankan</p>
+                {/* Where to Read / External Gateway Section */}
+                <div className="p-3.5 bg-[#161622] rounded-xl border border-purple-500/30 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-purple-400 font-bold text-xs">
+                      <Globe className="w-4 h-4" />
+                      <span>Gateway "Where to Read" &amp; Mitra Eksternal</span>
                     </div>
 
-                    {bannerImage && (
-                      <div className="relative w-full h-20 rounded-lg overflow-hidden border border-blue-500 shrink-0">
-                        <img src={bannerImage} alt="Banner Preview" className="w-full h-full object-cover" />
+                    <label className="flex items-center gap-1.5 text-xs text-purple-300 font-semibold cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={hasExternalGateway}
+                        onChange={(e) => setHasExternalGateway(e.target.checked)}
+                        className="rounded border-[#3a3a4e] text-purple-600 focus:ring-purple-500 w-4 h-4 cursor-pointer"
+                      />
+                      <span>Aktifkan Gateway</span>
+                    </label>
+                  </div>
+
+                  {hasExternalGateway && (
+                    <div className="space-y-2.5 pt-2 border-t border-[#252538]">
+                      <div>
+                        <label className="block text-slate-300 mb-1 font-semibold text-xs">
+                          Daftar Tautan Platform Penyedia (Format: <code className="text-purple-300">Platform: URL | Bahasa</code>):
+                        </label>
+                        <textarea
+                          value={whereToReadText}
+                          onChange={(e) => setWhereToReadText(e.target.value)}
+                          placeholder="MangaDex: https://mangadex.org/title/123456 | EN&#10;Crunchyroll: https://crunchyroll.com/series/123456 | Sub ID"
+                          rows={2}
+                          className="w-full p-2 bg-[#101018] border border-[#2c2c3e] rounded-xl text-white font-mono text-xs focus:border-purple-500"
+                        />
                       </div>
-                    )}
-                  </div>
-                ) : (
-                  <input
-                    type="url"
-                    value={bannerImage}
-                    onChange={(e) => setBannerImage(e.target.value)}
-                    placeholder="https://images.unsplash.com/... or banner link"
-                    className="w-full p-2 bg-[#101018] border border-[#27273a] rounded-xl text-white font-mono text-[11px]"
-                  />
-                )}
-              </div>
 
-              {/* Where to Read / External Gateway Section (MAL Style) */}
-              <div className="p-3.5 bg-[#161622] rounded-xl border border-purple-500/30 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-purple-400 font-bold text-xs">
-                    <Globe className="w-4 h-4" />
-                    <span>Gateway "Where to Read / Watch" & Mitra (MAL Style)</span>
-                  </div>
-
-                  <label className="flex items-center gap-1.5 text-xs text-purple-300 font-semibold cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={hasExternalGateway}
-                      onChange={(e) => setHasExternalGateway(e.target.checked)}
-                      className="rounded border-[#3a3a4e] text-purple-600 focus:ring-purple-500 w-4 h-4 cursor-pointer"
-                    />
-                    <span>Aktifkan Gateway</span>
-                  </label>
+                      <div>
+                        <label className="block text-slate-300 mb-1 font-semibold text-xs">
+                          Tautan Utama / Default External URL (Opsional):
+                        </label>
+                        <input
+                          type="url"
+                          value={externalUrl}
+                          onChange={(e) => setExternalUrl(e.target.value)}
+                          placeholder="https://..."
+                          className="w-full p-2 bg-[#101018] border border-[#2c2c3e] rounded-xl text-white font-mono text-xs focus:border-purple-500"
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
+              </div>
+            </div>
 
-                <p className="text-[11px] text-slate-400 leading-relaxed">
-                  Fitur ini memungkinkan judul anime/komik (termasuk hasil scraping Jikan/MAL tanpa chapter lokal) menyediakan tombol pop-up rujukan mitra resmi/scanlation (seperti Crunchyroll, NHentai, MangaDex, Muse Asia, dll).
-                </p>
+            {/* FULL-WIDTH SECTION: SINOPSIS */}
+            <div className="space-y-2 pt-2 border-t border-[#222234]">
+              <label className="block text-slate-300 font-semibold text-xs flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <BookOpen className="w-3.5 h-3.5 text-[#ff5b14]" />
+                  <span>Sinopsis &amp; Ringkasan Cerita Komik</span>
+                </span>
+                <span className="text-slate-500 font-normal text-[11px]">
+                  {synopsis.length} karakter
+                </span>
+              </label>
+              <textarea
+                value={synopsis}
+                onChange={(e) => setSynopsis(e.target.value)}
+                placeholder="Tuliskan sinopsis lengkap komik di sini..."
+                rows={6}
+                className="w-full p-3.5 bg-[#181824] border border-[#27273a] rounded-xl text-white text-xs leading-relaxed min-h-[160px] focus:outline-none focus:border-[#ff5b14] resize-y transition-colors"
+              />
+            </div>
+          </form>
 
-                {hasExternalGateway && (
-                  <div className="space-y-3 pt-1 border-t border-[#252538]">
-                    <div>
-                      <label className="block text-slate-300 mb-1 font-semibold text-xs">
-                        Daftar Tautan Platform Penyedia (Format: <code className="text-purple-300">Platform: URL | Bahasa</code>):
-                      </label>
-                      <textarea
-                        value={whereToReadText}
-                        onChange={(e) => setWhereToReadText(e.target.value)}
-                        placeholder="NHentai: https://nhentai.net/g/123456 | Raw&#10;MangaDex: https://mangadex.org/title/123456 | EN&#10;Crunchyroll: https://crunchyroll.com/series/123456 | Sub ID"
-                        rows={3}
-                        className="w-full p-2.5 bg-[#101018] border border-[#2c2c3e] rounded-xl text-white font-mono text-xs focus:border-purple-500"
-                      />
-                      <p className="text-[10px] text-slate-500 mt-1">
-                        Satu platform per baris. Contoh: <code className="text-slate-400">NHentai: https://nhentai.net/g/123456 | Bahasa Indonesia</code>
-                      </p>
-                    </div>
-
-                    <div>
-                      <label className="block text-slate-300 mb-1 font-semibold text-xs">
-                        Tautan Utama / Default External URL (Opsional):
-                      </label>
-                      <input
-                        type="url"
-                        value={externalUrl}
-                        onChange={(e) => setExternalUrl(e.target.value)}
-                        placeholder="https://nhentai.net/g/123456/"
-                        className="w-full p-2 bg-[#101018] border border-[#2c2c3e] rounded-xl text-white font-mono text-xs focus:border-purple-500"
-                      />
-                    </div>
-                  </div>
+          {/* Sticky Modal Footer */}
+          <div className="px-5 sm:px-6 py-4 bg-[#141420] border-t border-[#202030] flex items-center justify-between shrink-0">
+            <div className="text-xs text-slate-500 hidden sm:block">
+              {editingComic ? `ID: ${editingComic.id}` : 'Item baru belum tersimpan'}
+            </div>
+            <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
+              <button
+                type="button"
+                onClick={() => setShowAddModal(false)}
+                className="px-5 py-2.5 bg-[#181824] hover:bg-[#202032] text-slate-300 hover:text-white font-semibold rounded-xl border border-[#28283c] transition-colors cursor-pointer text-xs"
+              >
+                Batal
+              </button>
+              <button
+                type="submit"
+                form="comic-edit-form"
+                className="px-6 py-2.5 bg-[#ff5b14] hover:bg-[#e04e0e] text-white font-bold rounded-xl shadow-lg hover:shadow-[#ff5b14]/20 transition-all cursor-pointer text-xs flex items-center gap-1.5"
+              >
+                {editingComic ? (
+                  <>
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>Simpan Perubahan</span>
+                  </>
+                ) : (
+                  <>
+                    <Plus className="w-4 h-4" />
+                    <span>Tambah Komik</span>
+                  </>
                 )}
-              </div>
-
-              <div className="flex gap-2 pt-2 border-t border-[#1f1f2e]">
-                <button
-                  type="submit"
-                  className="flex-1 py-2.5 bg-[#ff5b14] hover:bg-[#e04e0e] text-white font-bold rounded-xl shadow cursor-pointer"
-                >
-                  {editingComic ? 'Simpan Perubahan' : 'Tambah Komik'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowAddModal(false)}
-                  className="px-4 py-2.5 bg-[#1a1a24] text-slate-300 rounded-xl cursor-pointer"
-                >
-                  Batal
-                </button>
-              </div>
-            </form>
+              </button>
+            </div>
           </div>
+        </div>
       </AdminModalPortal>
 
       {/* Custom Delete Confirmation Modal with Audit Reason (ISO/IEC 27001) */}
