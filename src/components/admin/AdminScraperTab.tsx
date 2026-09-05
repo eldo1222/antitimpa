@@ -51,6 +51,7 @@ import {
 } from 'lucide-react';
 import { ComicContentType, ComicCategoryType } from '../../types';
 import { AdminDiagnosticModal } from './AdminDiagnosticModal';
+import { KomikindoDiagnosticModal } from './KomikindoDiagnosticModal';
 
 export const AdminScraperTab: React.FC = () => {
   const { comics, chapters, injectComicWithChapters, batchInjectComicsWithChapters, driveAccounts, addActivityLog } = useApp();
@@ -58,6 +59,7 @@ export const AdminScraperTab: React.FC = () => {
   const [activeSource, setActiveSource] = useState<'komikindo' | 'mangadex' | 'komiktap' | 'jikan' | 'presets' | 'pdf_converter'>('komikindo');
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
+  const [isKomikindoDiagOpen, setIsKomikindoDiagOpen] = useState(false);
   const [searchResults, setSearchResults] = useState<ScrapedComicResult[]>([]);
   const [hasSearched, setHasSearched] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
@@ -1289,6 +1291,15 @@ export const AdminScraperTab: React.FC = () => {
               {isSearching ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
               <span>Cari Komikindo</span>
             </button>
+            <button
+              type="button"
+              onClick={() => setIsKomikindoDiagOpen(true)}
+              title="Audit diagnostik koneksi upstream Komikindo vs Cloudflare / Vercel"
+              className="px-3.5 py-2.5 bg-[#171726] hover:bg-[#202038] text-indigo-300 hover:text-white border border-indigo-500/30 font-bold text-xs rounded-xl shadow flex items-center gap-1.5 cursor-pointer transition-all shrink-0"
+            >
+              <Activity className="w-4 h-4 text-indigo-400" />
+              <span className="hidden sm:inline">Audit Upstream</span>
+            </button>
           </form>
 
           {/* Recommendation Tags and Page Pagination */}
@@ -2107,6 +2118,13 @@ export const AdminScraperTab: React.FC = () => {
       <AdminDiagnosticModal
         isOpen={isDiagnosticOpen}
         onClose={() => setIsDiagnosticOpen(false)}
+      />
+
+      {/* Komikindo Upstream Forensic Diagnostic Modal */}
+      <KomikindoDiagnosticModal
+        isOpen={isKomikindoDiagOpen}
+        onClose={() => setIsKomikindoDiagOpen(false)}
+        initialQuery={searchQuery || 'titan forge'}
       />
     </div>
   );

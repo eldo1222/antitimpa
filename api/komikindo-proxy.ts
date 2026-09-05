@@ -98,14 +98,45 @@ export type KomikindoScrapeStatus =
 
 export interface KomikindoDiagnostics {
   targetUrl: string;
+  httpMethod: string;
   httpStatus: number | null;
   contentType: string | null;
   htmlLength: number;
   parserMatches: number;
   redirected: boolean;
+  redirectCount: number;
   finalUrl: string;
-  timestamp: string;
+  userAgent: string;
+  referer: string;
+  parserStrategy: string;
+  challengeDetected: boolean;
+  requestTime: string;
+  durationMs: number;
+  verdict: 'OK' | 'FETCH_FAILED' | 'PARSER_FAILED' | 'SEARCH_EMPTY';
   runtime: 'vercel_serverless' | 'express_dev';
+}
+
+function logSafeKomikindoRequest(diag: KomikindoDiagnostics, queryNote: string) {
+  // Safe logging: only logs network parameters, timing, and parsing stats.
+  // Never logs credentials, tokens, cookies, or large body text.
+  console.log(`[KOMIKINDO_AUDIT] ========================================`);
+  console.log(`[KOMIKINDO_AUDIT] note: ${queryNote}`);
+  console.log(`[KOMIKINDO_AUDIT] requestTime: ${diag.requestTime}`);
+  console.log(`[KOMIKINDO_AUDIT] targetUrl: ${diag.targetUrl}`);
+  console.log(`[KOMIKINDO_AUDIT] httpMethod: ${diag.httpMethod}`);
+  console.log(`[KOMIKINDO_AUDIT] httpStatus: ${diag.httpStatus}`);
+  console.log(`[KOMIKINDO_AUDIT] contentType: ${diag.contentType}`);
+  console.log(`[KOMIKINDO_AUDIT] bodyLength: ${diag.htmlLength} bytes`);
+  console.log(`[KOMIKINDO_AUDIT] finalUrl: ${diag.finalUrl}`);
+  console.log(`[KOMIKINDO_AUDIT] redirectCount: ${diag.redirectCount}`);
+  console.log(`[KOMIKINDO_AUDIT] userAgent: ${diag.userAgent}`);
+  console.log(`[KOMIKINDO_AUDIT] referer: ${diag.referer}`);
+  console.log(`[KOMIKINDO_AUDIT] parserStrategy: ${diag.parserStrategy}`);
+  console.log(`[KOMIKINDO_AUDIT] challengeDetected: ${diag.challengeDetected}`);
+  console.log(`[KOMIKINDO_AUDIT] durationMs: ${diag.durationMs}ms`);
+  console.log(`[KOMIKINDO_AUDIT] runtime: ${diag.runtime}`);
+  console.log(`[KOMIKINDO_AUDIT] verdict: ${diag.verdict}`);
+  console.log(`[KOMIKINDO_AUDIT] ========================================`);
 }
 
 export interface KomikindoScrapeResult {
@@ -169,6 +200,8 @@ export async function scrapeKomikindoSearchWithDiagnostics(
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 14000);
+  const startTime = Date.now();
+  const requestTimeIso = new Date().toISOString();
 
   try {
     const res = await fetch(targetUrl, {
@@ -176,6 +209,7 @@ export async function scrapeKomikindoSearchWithDiagnostics(
       signal: controller.signal
     });
     clearTimeout(timeout);
+    const durationMs = Date.now() - startTime;
 
     const contentType = res.headers.get('content-type') || '';
     const redirected = res.redirected;
@@ -183,14 +217,27 @@ export async function scrapeKomikindoSearchWithDiagnostics(
 
     // CASE A: HTTP Status Not OK (e.g. 403, 429, 500, 503)
     if (!res.ok) {
-      console.error(`[KOMIKINDO][PROD][SEARCH][CASE_A_FETCH_FAILED]`);
-      console.error(`query: ${cleanQuery || '(empty - browse catalog)'}`);
-      console.error(`category: ${category}`);
-      console.error(`request URL: ${targetUrl}`);
-      console.error(`HTTP status: ${res.status}`);
-      console.error(`content-type: ${contentType}`);
-      console.error(`redirected: ${redirected}`);
-      console.error(`final URL: ${finalUrl}`);
+      const diag: KomikindoDiagnostics = {
+        targetUrl,
+        httpMethod: 'GET',
+        httpStatus: res.status,
+        contentType,
+        htmlLength: 0,
+        parserMatches: 0,
+        redirected,
+        redirectCount: redirected ? 1 : 0,
+        finalUrl,
+        userAgent: DEFAULT_HEADERS['User-Agent'],
+        referer: DEFAULT_HEADERS['Referer'],
+        parserStrategy: 'animepost_card_regex',
+        challengeDetected: res.status === 403,
+        requestTime: requestTimeIso,
+        durationMs,
+        verdict: 'FETCH_FAILED',
+        runtime: runtimeType
+      };
+
+      logSafeKomikindoRequest(diag, `CASE_A_FETCH_FAILED (HTTP ${res.status})`);
 
       return {
         status: 'KOMIKINDO_FETCH_FAILED',
@@ -203,17 +250,7 @@ export async function scrapeKomikindoSearchWithDiagnostics(
         message: `KomikIndo gagal diakses dari server production (${res.status} ${res.statusText}). ${
           res.status === 403 ? 'Proteksi Cloudflare upstream membatasi akses datacenter.' : ''
         }`,
-        diagnostics: {
-          targetUrl,
-          httpStatus: res.status,
-          contentType,
-          htmlLength: 0,
-          parserMatches: 0,
-          redirected,
-          finalUrl,
-          timestamp: new Date().toISOString(),
-          runtime: runtimeType
-        }
+        diagnostics: diag
       };
     }
 
@@ -230,7 +267,28 @@ export async function scrapeKomikindoSearchWithDiagnostics(
     );
 
     if (isCfChallenge) {
-      console.error(`[KOMIKINDO][PROD][SEARCH][CASE_A_FETCH_FAILED] Cloudflare verification challenge detected in HTML`);
+      const diag: KomikindoDiagnostics = {
+        targetUrl,
+        httpMethod: 'GET',
+        httpStatus: res.status,
+        contentType,
+        htmlLength: html.length,
+        parserMatches: 0,
+        redirected,
+        redirectCount: redirected ? 1 : 0,
+        finalUrl,
+        userAgent: DEFAULT_HEADERS['User-Agent'],
+        referer: DEFAULT_HEADERS['Referer'],
+        parserStrategy: 'animepost_card_regex',
+        challengeDetected: true,
+        requestTime: requestTimeIso,
+        durationMs,
+        verdict: 'FETCH_FAILED',
+        runtime: runtimeType
+      };
+
+      logSafeKomikindoRequest(diag, 'CASE_A_FETCH_FAILED (Cloudflare Challenge)');
+
       return {
         status: 'KOMIKINDO_FETCH_FAILED',
         data: [],
@@ -240,17 +298,7 @@ export async function scrapeKomikindoSearchWithDiagnostics(
         category,
         error: 'Cloudflare bot verification challenge detected',
         message: 'KomikIndo menampilkan Cloudflare verification challenge ke server production.',
-        diagnostics: {
-          targetUrl,
-          httpStatus: res.status,
-          contentType,
-          htmlLength: html.length,
-          parserMatches: 0,
-          redirected,
-          finalUrl,
-          timestamp: new Date().toISOString(),
-          runtime: runtimeType
-        }
+        diagnostics: diag
       };
     }
 
@@ -314,21 +362,30 @@ export async function scrapeKomikindoSearchWithDiagnostics(
       });
     }
 
-    // Diagnostic Logging Output
-    console.log(`[KOMIKINDO][PROD][SEARCH]`);
-    console.log(`query: ${cleanQuery || '(empty - browse catalog)'}`);
-    console.log(`category: ${category}`);
-    console.log(`request URL: ${targetUrl}`);
-    console.log(`HTTP status: ${res.status}`);
-    console.log(`content-type: ${contentType}`);
-    console.log(`response length: ${html.length}`);
-    console.log(`redirected: ${redirected}`);
-    console.log(`final URL: ${finalUrl}`);
-    console.log(`parser: animepost`);
-    console.log(`results: ${results.length}`);
-
     // OK: Found results
     if (results.length > 0) {
+      const diag: KomikindoDiagnostics = {
+        targetUrl,
+        httpMethod: 'GET',
+        httpStatus: res.status,
+        contentType,
+        htmlLength: html.length,
+        parserMatches: results.length,
+        redirected,
+        redirectCount: redirected ? 1 : 0,
+        finalUrl,
+        userAgent: DEFAULT_HEADERS['User-Agent'],
+        referer: DEFAULT_HEADERS['Referer'],
+        parserStrategy: 'animepost_card_regex',
+        challengeDetected: false,
+        requestTime: requestTimeIso,
+        durationMs,
+        verdict: 'OK',
+        runtime: runtimeType
+      };
+
+      logSafeKomikindoRequest(diag, `OK (${results.length} items parsed)`);
+
       return {
         status: 'KOMIKINDO_OK',
         data: results,
@@ -336,17 +393,7 @@ export async function scrapeKomikindoSearchWithDiagnostics(
         page,
         query: cleanQuery,
         category,
-        diagnostics: {
-          targetUrl,
-          httpStatus: res.status,
-          contentType,
-          htmlLength: html.length,
-          parserMatches: results.length,
-          redirected,
-          finalUrl,
-          timestamp: new Date().toISOString(),
-          runtime: runtimeType
-        }
+        diagnostics: diag
       };
     }
 
@@ -359,7 +406,28 @@ export async function scrapeKomikindoSearchWithDiagnostics(
     );
 
     if (Boolean(cleanQuery) || isExplicitNotFound) {
-      console.log(`[KOMIKINDO][PROD][SEARCH][CASE_C_SEARCH_EMPTY] Query: "${cleanQuery}" returned 0 results`);
+      const diag: KomikindoDiagnostics = {
+        targetUrl,
+        httpMethod: 'GET',
+        httpStatus: res.status,
+        contentType,
+        htmlLength: html.length,
+        parserMatches: 0,
+        redirected,
+        redirectCount: redirected ? 1 : 0,
+        finalUrl,
+        userAgent: DEFAULT_HEADERS['User-Agent'],
+        referer: DEFAULT_HEADERS['Referer'],
+        parserStrategy: 'animepost_card_regex',
+        challengeDetected: false,
+        requestTime: requestTimeIso,
+        durationMs,
+        verdict: 'SEARCH_EMPTY',
+        runtime: runtimeType
+      };
+
+      logSafeKomikindoRequest(diag, `CASE_C_SEARCH_EMPTY (query: "${cleanQuery}")`);
+
       return {
         status: 'KOMIKINDO_SEARCH_EMPTY',
         data: [],
@@ -370,22 +438,33 @@ export async function scrapeKomikindoSearchWithDiagnostics(
         message: cleanQuery
           ? `KomikIndo aktif dan parser berjalan, namun tidak ada komik untuk judul "${cleanQuery}".`
           : `KomikIndo aktif, namun tidak ditemukan komik pada kategori "${category}".`,
-        diagnostics: {
-          targetUrl,
-          httpStatus: res.status,
-          contentType,
-          htmlLength: html.length,
-          parserMatches: 0,
-          redirected,
-          finalUrl,
-          timestamp: new Date().toISOString(),
-          runtime: runtimeType
-        }
+        diagnostics: diag
       };
     }
 
     // CASE B: Parser Failed (HTML retrieved with length > 2000, but 0 matches)
-    console.error(`[KOMIKINDO][PROD][SEARCH][CASE_B_PARSER_FAILED] HTML length: ${html.length}, 0 matches`);
+    const diag: KomikindoDiagnostics = {
+      targetUrl,
+      httpMethod: 'GET',
+      httpStatus: res.status,
+      contentType,
+      htmlLength: html.length,
+      parserMatches: 0,
+      redirected,
+      redirectCount: redirected ? 1 : 0,
+      finalUrl,
+      userAgent: DEFAULT_HEADERS['User-Agent'],
+      referer: DEFAULT_HEADERS['Referer'],
+      parserStrategy: 'animepost_card_regex',
+      challengeDetected: false,
+      requestTime: requestTimeIso,
+      durationMs,
+      verdict: 'PARSER_FAILED',
+      runtime: runtimeType
+    };
+
+    logSafeKomikindoRequest(diag, `CASE_B_PARSER_FAILED (html length: ${html.length})`);
+
     return {
       status: 'KOMIKINDO_PARSER_FAILED',
       data: [],
@@ -395,22 +474,34 @@ export async function scrapeKomikindoSearchWithDiagnostics(
       category,
       error: `KomikIndo HTML berhasil diterima (${html.length} bytes), namun pola parser tidak menemukan kartu komik`,
       message: `KomikIndo berhasil diakses (${html.length} bytes), namun parser tidak menemukan hasil pencarian.`,
-      diagnostics: {
-        targetUrl,
-        httpStatus: res.status,
-        contentType,
-        htmlLength: html.length,
-        parserMatches: 0,
-        redirected,
-        finalUrl,
-        timestamp: new Date().toISOString(),
-        runtime: runtimeType
-      }
+      diagnostics: diag
     };
   } catch (err: any) {
     clearTimeout(timeout);
+    const durationMs = Date.now() - startTime;
     const isTimeout = err.name === 'AbortError';
-    console.error(`[KOMIKINDO][PROD][SEARCH][CASE_A_FETCH_FAILED] ${isTimeout ? 'Timeout 14s' : err.message}`);
+
+    const diag: KomikindoDiagnostics = {
+      targetUrl,
+      httpMethod: 'GET',
+      httpStatus: null,
+      contentType: null,
+      htmlLength: 0,
+      parserMatches: 0,
+      redirected: false,
+      redirectCount: 0,
+      finalUrl: targetUrl,
+      userAgent: DEFAULT_HEADERS['User-Agent'],
+      referer: DEFAULT_HEADERS['Referer'],
+      parserStrategy: 'animepost_card_regex',
+      challengeDetected: false,
+      requestTime: requestTimeIso,
+      durationMs,
+      verdict: 'FETCH_FAILED',
+      runtime: runtimeType
+    };
+
+    logSafeKomikindoRequest(diag, `CASE_A_FETCH_FAILED (${isTimeout ? 'Timeout 14s' : err.message})`);
 
     return {
       status: 'KOMIKINDO_FETCH_FAILED',
@@ -421,17 +512,7 @@ export async function scrapeKomikindoSearchWithDiagnostics(
       category,
       error: isTimeout ? 'Timeout koneksi 14 detik ke Komikindo' : err.message,
       message: `Gagal terhubung ke KomikIndo dari server (${isTimeout ? 'Connection Timeout 14s' : err.message}).`,
-      diagnostics: {
-        targetUrl,
-        httpStatus: null,
-        contentType: null,
-        htmlLength: 0,
-        parserMatches: 0,
-        redirected: false,
-        finalUrl: targetUrl,
-        timestamp: new Date().toISOString(),
-        runtime: runtimeType
-      }
+      diagnostics: diag
     };
   }
 }
@@ -452,6 +533,239 @@ export async function scrapeKomikindoSearch(
   (arr as any).error = result.error;
   (arr as any).diagnostics = result.diagnostics;
   return arr;
+}
+
+export interface KomikindoDiagnosticResponse {
+  status: string;
+  httpStatus: number | null;
+  contentType: string | null;
+  bodyLength: number;
+  finalUrl: string;
+  redirectCount: number;
+  challengeDetected: boolean;
+  parserReady: boolean;
+  parserMatches: number;
+  environment: string;
+  runtime: 'vercel_serverless' | 'express_dev';
+  timestamp: string;
+  durationMs: number;
+  verdict: string;
+  probes: {
+    homepage: {
+      url: string;
+      httpStatus: number | null;
+      contentType: string | null;
+      bodyLength: number;
+      finalUrl: string;
+      redirectCount: number;
+      challengeDetected: boolean;
+      durationMs: number;
+      error?: string | null;
+    };
+    search: {
+      url: string;
+      httpStatus: number | null;
+      contentType: string | null;
+      bodyLength: number;
+      finalUrl: string;
+      redirectCount: number;
+      challengeDetected: boolean;
+      parserReady: boolean;
+      parserMatches: number;
+      sampleTitles: string[];
+      durationMs: number;
+      error?: string | null;
+    };
+  };
+}
+
+/**
+ * Diagnostic probe runner for authorized admin / forensic audit.
+ * Performs live upstream probe against komikindo.ch homepage and search endpoint.
+ * Protected against arbitrary SSRF: strictly constrained to komikindo.ch.
+ */
+export async function runKomikindoDiagnostic(customQuery: string = 'titan forge'): Promise<KomikindoDiagnosticResponse> {
+  const isVercel = Boolean(process.env.VERCEL);
+  const runtimeType: 'vercel_serverless' | 'express_dev' = isVercel ? 'vercel_serverless' : 'express_dev';
+  const environment = process.env.NODE_ENV || (isVercel ? 'production' : 'development');
+
+  // Sanitize query to prevent any injection or URL manipulation
+  const safeQuery = String(customQuery || 'titan forge')
+    .replace(/[^a-zA-Z0-9\s-_]/g, '')
+    .slice(0, 40)
+    .trim() || 'titan forge';
+
+  const overallStart = Date.now();
+
+  // --- PROBE 1: Homepage (https://komikindo.ch/) ---
+  const homeTargetUrl = `${KOMIKINDO_BASE_URL}/`;
+  const homeStart = Date.now();
+  let homeProbe = {
+    url: homeTargetUrl,
+    httpStatus: null as number | null,
+    contentType: null as string | null,
+    bodyLength: 0,
+    finalUrl: homeTargetUrl,
+    redirectCount: 0,
+    challengeDetected: false,
+    durationMs: 0,
+    error: null as string | null
+  };
+
+  try {
+    const ctrl1 = new AbortController();
+    const t1 = setTimeout(() => ctrl1.abort(), 12000);
+    const res1 = await fetch(homeTargetUrl, {
+      headers: DEFAULT_HEADERS,
+      signal: ctrl1.signal
+    });
+    clearTimeout(t1);
+
+    const text1 = await res1.text();
+    const title1 = text1.match(/<title>(.*?)<\/title>/i)?.[1] || '';
+    const isCf1 = (
+      res1.status === 403 ||
+      title1.includes('Just a moment...') ||
+      title1.includes('Attention Required!') ||
+      title1.includes('Security Check') ||
+      text1.includes('id="challenge-error-title"') ||
+      text1.includes('cf-browser-verification')
+    );
+
+    homeProbe.httpStatus = res1.status;
+    homeProbe.contentType = res1.headers.get('content-type');
+    homeProbe.bodyLength = text1.length;
+    homeProbe.finalUrl = res1.url || homeTargetUrl;
+    homeProbe.redirectCount = res1.redirected ? 1 : 0;
+    homeProbe.challengeDetected = isCf1;
+    homeProbe.durationMs = Date.now() - homeStart;
+  } catch (err: any) {
+    homeProbe.durationMs = Date.now() - homeStart;
+    homeProbe.error = err.message || 'Unknown fetch error';
+  }
+
+  // --- PROBE 2: Search Query (https://komikindo.ch/?s=...) ---
+  const searchTargetUrl = `${KOMIKINDO_BASE_URL}/?s=${encodeURIComponent(safeQuery)}`;
+  const searchStart = Date.now();
+  let searchProbe = {
+    url: searchTargetUrl,
+    httpStatus: null as number | null,
+    contentType: null as string | null,
+    bodyLength: 0,
+    finalUrl: searchTargetUrl,
+    redirectCount: 0,
+    challengeDetected: false,
+    parserReady: false,
+    parserMatches: 0,
+    sampleTitles: [] as string[],
+    durationMs: 0,
+    error: null as string | null
+  };
+
+  try {
+    const ctrl2 = new AbortController();
+    const t2 = setTimeout(() => ctrl2.abort(), 12000);
+    const res2 = await fetch(searchTargetUrl, {
+      headers: DEFAULT_HEADERS,
+      signal: ctrl2.signal
+    });
+    clearTimeout(t2);
+
+    const text2 = await res2.text();
+    const title2 = text2.match(/<title>(.*?)<\/title>/i)?.[1] || '';
+    const isCf2 = (
+      res2.status === 403 ||
+      title2.includes('Just a moment...') ||
+      title2.includes('Attention Required!') ||
+      title2.includes('Security Check') ||
+      text2.includes('id="challenge-error-title"') ||
+      text2.includes('cf-browser-verification')
+    );
+
+    searchProbe.httpStatus = res2.status;
+    searchProbe.contentType = res2.headers.get('content-type');
+    searchProbe.bodyLength = text2.length;
+    searchProbe.finalUrl = res2.url || searchTargetUrl;
+    searchProbe.redirectCount = res2.redirected ? 1 : 0;
+    searchProbe.challengeDetected = isCf2;
+
+    // Test parser regex directly on retrieved HTML
+    const cardRegex = /<div class=[\"']animepost[\"']>([\s\S]*?)<\/div>\s*<\/div>\s*<\/div>/gi;
+    let match;
+    let count = 0;
+    const sampleTitles: string[] = [];
+
+    while ((match = cardRegex.exec(text2)) !== null) {
+      count++;
+      if (sampleTitles.length < 3) {
+        const titleAttrMatch = match[1].match(/title=[\"']([^\"']+)[\"']/i);
+        const titleTextMatch = match[1].match(/<div class=[\"']tt[\"']>[\s\S]*?<h3>([\s\S]*?)<\/h3>/i);
+        const rawTitle = titleTextMatch?.[1] || titleAttrMatch?.[1] || '';
+        const clean = cleanComicTitle(rawTitle);
+        if (clean) sampleTitles.push(clean);
+      }
+    }
+
+    searchProbe.parserReady = true;
+    searchProbe.parserMatches = count;
+    searchProbe.sampleTitles = sampleTitles;
+    searchProbe.durationMs = Date.now() - searchStart;
+  } catch (err: any) {
+    searchProbe.durationMs = Date.now() - searchStart;
+    searchProbe.error = err.message || 'Unknown fetch error';
+  }
+
+  const totalDurationMs = Date.now() - overallStart;
+
+  // Compute overall status and verdict
+  let verdict: string;
+  let status: string;
+
+  if (homeProbe.httpStatus === 403 || searchProbe.httpStatus === 403 || searchProbe.challengeDetected) {
+    verdict = 'BLOCKED_BY_UPSTREAM_FROM_VERCEL';
+    status = 'BLOCKED_BY_UPSTREAM';
+  } else if (searchProbe.httpStatus === 200 && searchProbe.parserMatches > 0) {
+    verdict = 'WORKING';
+    status = 'OK';
+  } else if (searchProbe.httpStatus === 200 && searchProbe.bodyLength > 2000 && searchProbe.parserMatches === 0) {
+    verdict = 'PARSER_FAILED';
+    status = 'PARSER_FAILED';
+  } else if (!searchProbe.httpStatus || searchProbe.httpStatus >= 500) {
+    verdict = 'FETCH_FAILED';
+    status = 'FETCH_FAILED';
+  } else {
+    verdict = 'SEARCH_EMPTY';
+    status = 'SEARCH_EMPTY';
+  }
+
+  // Safe structured audit logging to server stdout (never logs secrets)
+  console.log(`[KOMIKINDO_DIAGNOSTIC] ========================================`);
+  console.log(`[KOMIKINDO_DIAGNOSTIC] Environment: ${environment} (${runtimeType})`);
+  console.log(`[KOMIKINDO_DIAGNOSTIC] Overall Verdict: ${verdict}`);
+  console.log(`[KOMIKINDO_DIAGNOSTIC] Homepage: HTTP ${homeProbe.httpStatus} | Body: ${homeProbe.bodyLength}B | CF: ${homeProbe.challengeDetected} | ${homeProbe.durationMs}ms`);
+  console.log(`[KOMIKINDO_DIAGNOSTIC] Search ('${safeQuery}'): HTTP ${searchProbe.httpStatus} | Body: ${searchProbe.bodyLength}B | CF: ${searchProbe.challengeDetected} | Parsed: ${searchProbe.parserMatches} | ${searchProbe.durationMs}ms`);
+  console.log(`[KOMIKINDO_DIAGNOSTIC] ========================================`);
+
+  return {
+    status,
+    httpStatus: searchProbe.httpStatus ?? homeProbe.httpStatus,
+    contentType: searchProbe.contentType ?? homeProbe.contentType,
+    bodyLength: searchProbe.bodyLength,
+    finalUrl: searchProbe.finalUrl,
+    redirectCount: searchProbe.redirectCount,
+    challengeDetected: searchProbe.challengeDetected || homeProbe.challengeDetected,
+    parserReady: searchProbe.parserReady,
+    parserMatches: searchProbe.parserMatches,
+    environment,
+    runtime: runtimeType,
+    timestamp: new Date().toISOString(),
+    durationMs: totalDurationMs,
+    verdict,
+    probes: {
+      homepage: homeProbe,
+      search: searchProbe
+    }
+  };
 }
 
 /**
@@ -827,7 +1141,9 @@ export default async function handler(req: any, res: any) {
   }
 
   if (!action) {
-    if (pathStr.startsWith('search') || pathStr === 'search') {
+    if (pathStr.startsWith('diagnostic') || pathStr === 'diagnostic') {
+      action = 'diagnostic';
+    } else if (pathStr.startsWith('search') || pathStr === 'search') {
       action = 'search';
     } else if (pathStr.startsWith('detail') || pathStr === 'detail') {
       action = 'detail';
@@ -871,6 +1187,12 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
+    if (action === 'diagnostic') {
+      const q = String(query.q || query.searchQuery || query.s || 'titan forge').trim();
+      const diagnosticResult = await runKomikindoDiagnostic(q);
+      return sendResponse(200, diagnosticResult);
+    }
+
     if (action === 'search' || action === 'list') {
       // Strictly separate search query from category filter
       const rawQ = String(query.searchQuery || query.q || query.search || query.title || '').trim();

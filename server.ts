@@ -16,7 +16,13 @@ import {
 } from "./src/data/initialData";
 import { Comic, Chapter, User, Banner, DriveAccount, ActivityLog, SystemSettings, Comment, AdItem, AdSettings } from "./src/types";
 import { scrapeKomiktapSearch, scrapeKomiktapDetail, scrapeKomiktapChapterPages } from "./api/komiktap-proxy";
-import { scrapeKomikindoSearch, scrapeKomikindoSearchWithDiagnostics, scrapeKomikindoDetail, scrapeKomikindoChapterPages } from "./api/komikindo-proxy";
+import { 
+  scrapeKomikindoSearch, 
+  scrapeKomikindoSearchWithDiagnostics, 
+  scrapeKomikindoDetail, 
+  scrapeKomikindoChapterPages,
+  runKomikindoDiagnostic 
+} from "./api/komikindo-proxy";
 
 interface CentralDB {
   comics: Comic[];
@@ -919,6 +925,18 @@ async function startServer() {
   // ----------------------------------------------------
   // KOMIKINDO SCRAPER & PROXY API ENDPOINTS (komikindo.ch)
   // ----------------------------------------------------
+
+  // Diagnostic probe for Komikindo upstream connectivity & parsing audit
+  app.get("/api/komikindo/diagnostic", async (req, res) => {
+    try {
+      const q = String(req.query.q || req.query.searchQuery || req.query.s || "titan forge").trim();
+      const diagnosticResult = await runKomikindoDiagnostic(q);
+      res.json(diagnosticResult);
+    } catch (error: any) {
+      console.error("Komikindo diagnostic error:", error.message);
+      res.status(500).json({ error: "Failed to run Komikindo diagnostic", message: error.message });
+    }
+  });
 
   // Search or browse catalog from komikindo.ch
   app.get("/api/komikindo/search", async (req, res) => {

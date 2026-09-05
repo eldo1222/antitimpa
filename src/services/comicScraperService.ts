@@ -643,6 +643,24 @@ export async function searchKomikindo(
   throw new Error(`[KOMIKINDO_FETCH_FAILED] Server tidak dapat menjangkau proxy KomikIndo (${lastError?.message || 'Network unreachable'})`);
 }
 
+/**
+ * Diagnostic probe caller for authorized admin / forensic audit
+ */
+export async function fetchKomikindoDiagnostic(query: string = 'titan forge'): Promise<any> {
+  const sanitized = encodeURIComponent(query.slice(0, 40));
+  try {
+    const res = await fetch(`/api/komikindo/diagnostic?q=${sanitized}`);
+    if (res.ok) return await res.json();
+  } catch (err) {}
+
+  // Fallback to serverless direct action
+  const res = await fetch(`/api/komikindo-proxy?action=diagnostic&q=${sanitized}`);
+  if (!res.ok) {
+    throw new Error(`Diagnostic failed with status ${res.status}`);
+  }
+  return await res.json();
+}
+
 // 5. Fetch Full Detail + Chapters from Komikindo
 export async function fetchKomikindoDetail(slugOrUrl: string): Promise<any> {
   const cleanSlug = slugOrUrl.startsWith('http')
