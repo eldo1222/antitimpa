@@ -24,6 +24,18 @@
       "destination": "/api/jikan-proxy"
     },
     {
+      "source": "/api/komiktap/diagnostic",
+      "destination": "/api/komiktap-proxy?action=diagnostic"
+    },
+    {
+      "source": "/api/komiktap/search",
+      "destination": "/api/komiktap-proxy?action=search"
+    },
+    {
+      "source": "/api/komiktap/comic/:slug",
+      "destination": "/api/komiktap-proxy?action=detail&slug=:slug"
+    },
+    {
       "source": "/api/komiktap/detail",
       "destination": "/api/komiktap-proxy?action=detail"
     },

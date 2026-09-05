@@ -15,7 +15,7 @@ import {
   initialComments 
 } from "./src/data/initialData";
 import { Comic, Chapter, User, Banner, DriveAccount, ActivityLog, SystemSettings, Comment, AdItem, AdSettings } from "./src/types";
-import { scrapeKomiktapSearch, scrapeKomiktapDetail, scrapeKomiktapChapterPages } from "./api/komiktap-proxy";
+import { scrapeKomiktapSearch, scrapeKomiktapDetail, scrapeKomiktapChapterPages, scrapeKomiktapDiagnostic } from "./api/komiktap-proxy";
 import { 
   scrapeKomikindoSearch, 
   scrapeKomikindoSearchWithDiagnostics, 
@@ -878,10 +878,33 @@ async function startServer() {
     }
   });
 
-  // Get comic details & chapters list from Komiktap.info
+  // Diagnostic probe for Komiktap.info upstream connectivity & chapter parsing
+  app.get("/api/komiktap/diagnostic", async (req, res) => {
+    try {
+      const q = String(req.query.q || req.query.search || "Shitataru Kano Haha").trim();
+      const report = await scrapeKomiktapDiagnostic(q);
+      res.json(report);
+    } catch (error: any) {
+      res.status(500).json({ error: "Failed to run Komiktap diagnostic", message: error.message });
+    }
+  });
+
+  // Get comic details & chapters list from Komiktap.info (slug param)
   app.get("/api/komiktap/comic/:slug", async (req, res) => {
     try {
       const { slug } = req.params;
+      const detail = await scrapeKomiktapDetail(slug);
+      res.json({ data: detail });
+    } catch (error: any) {
+      console.error("Komiktap comic detail error:", error.message);
+      res.status(500).json({ error: "Failed to fetch comic detail from Komiktap", message: error.message });
+    }
+  });
+
+  // Get comic details & chapters list from Komiktap.info (query param)
+  app.get("/api/komiktap/detail", async (req, res) => {
+    try {
+      const slug = String(req.query.slug || req.query.url || "").trim();
       const detail = await scrapeKomiktapDetail(slug);
       res.json({ data: detail });
     } catch (error: any) {

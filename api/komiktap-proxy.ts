@@ -554,12 +554,237 @@ export async function scrapeKomiktapChapterPages(chapterUrlOrSlug: string, maxRe
   };
 }
 
+export interface KomiktapDiagnosticResponse {
+  status: string;
+  httpStatus: number | null;
+  contentType: string | null;
+  bodyLength: number;
+  finalUrl: string;
+  redirectCount: number;
+  challengeDetected: boolean;
+  parserReady: boolean;
+  parserMatches: number;
+  environment: string;
+  runtime: 'vercel_serverless' | 'express_dev';
+  timestamp: string;
+  durationMs: number;
+  verdict: string;
+  probes: {
+    homepage: {
+      url: string;
+      httpStatus: number | null;
+      contentType: string | null;
+      bodyLength: number;
+      challengeDetected: boolean;
+      durationMs: number;
+    };
+    search: {
+      url: string;
+      httpStatus: number | null;
+      contentType: string | null;
+      bodyLength: number;
+      challengeDetected: boolean;
+      parserReady: boolean;
+      parserMatches: number;
+      sampleTitles: string[];
+      durationMs: number;
+    };
+    detail: {
+      slug: string;
+      url: string;
+      httpStatus: number | null;
+      rawChaptersFound: number;
+      uniqueChapters: number;
+      sampleChapters: string[];
+      durationMs: number;
+      error: string | null;
+    };
+  };
+}
+
+/**
+ * Runs live forensic upstream probes against Komiktap (komiktap.info)
+ */
+export async function scrapeKomiktapDiagnostic(
+  searchQuery: string = 'Shitataru Kano Haha'
+): Promise<KomiktapDiagnosticResponse> {
+  const overallStart = Date.now();
+  const runtimeType = process.env.VERCEL ? 'vercel_serverless' : 'express_dev';
+  const cleanQ = (searchQuery || 'Shitataru Kano Haha').trim();
+
+  // 1. Homepage Probe
+  const hpStart = Date.now();
+  let hpStatus: number | null = null;
+  let hpContentType: string | null = null;
+  let hpLength = 0;
+  let hpIsCf = false;
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 10000);
+    const res = await fetch(`${KOMIKTAP_BASE_URL}/`, {
+      headers: DEFAULT_HEADERS,
+      signal: ctrl.signal
+    });
+    clearTimeout(t);
+    hpStatus = res.status;
+    hpContentType = res.headers.get('content-type');
+    const text = await res.text();
+    hpLength = text.length;
+    hpIsCf = res.status === 403 || text.includes('cf-browser-verification') || text.includes('Just a moment...');
+  } catch (_) {}
+  const hpDuration = Date.now() - hpStart;
+
+  // 2. Search Probe
+  const sStart = Date.now();
+  const searchUrl = `${KOMIKTAP_BASE_URL}/?s=${encodeURIComponent(cleanQ)}`;
+  let sStatus: number | null = null;
+  let sContentType: string | null = null;
+  let sLength = 0;
+  let sIsCf = false;
+  let sMatches = 0;
+  let sampleTitles: string[] = [];
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 12000);
+    const res = await fetch(searchUrl, {
+      headers: DEFAULT_HEADERS,
+      signal: ctrl.signal
+    });
+    clearTimeout(t);
+    sStatus = res.status;
+    sContentType = res.headers.get('content-type');
+    const text = await res.text();
+    sLength = text.length;
+    sIsCf = res.status === 403 || text.includes('cf-browser-verification') || text.includes('Just a moment...');
+
+    const cardRegex = /<div class=[\"']bsx[\"']>([\s\S]*?)<\/div>\s*<\/div>/gi;
+    let m;
+    while ((m = cardRegex.exec(text)) !== null) {
+      sMatches++;
+      if (sampleTitles.length < 3) {
+        const l = m[1].match(/<a href=[\"']([^\"']+)[\"'](?:\s+title=[\"']([^\"']+)[\"'])?/i);
+        if (l?.[2]) sampleTitles.push(l[2]);
+      }
+    }
+  } catch (_) {}
+  const sDuration = Date.now() - sStart;
+
+  // 3. Detail & Chapter Discovery Probe (specifically testing Shitataru Kano Haha)
+  const dStart = Date.now();
+  const detailSlug = 'shitataru-kano-haha';
+  const detailUrl = `${KOMIKTAP_BASE_URL}/manga/${detailSlug}/`;
+  let dStatus: number | null = null;
+  let rawChaptersCount = 0;
+  let uniqueChaptersCount = 0;
+  let sampleChapters: string[] = [];
+  let dError: string | null = null;
+  try {
+    const detail = await scrapeKomiktapDetail(detailSlug);
+    dStatus = 200;
+    uniqueChaptersCount = detail.chapters.length;
+    rawChaptersCount = detail.totalChapters || detail.chapters.length;
+    sampleChapters = detail.chapters.slice(0, 3).map(ch => `${ch.title} (#${ch.chapterNumber})`);
+  } catch (err: any) {
+    dError = err.message || 'Detail probe error';
+  }
+  const dDuration = Date.now() - dStart;
+
+  const totalDuration = Date.now() - overallStart;
+  const isOk = (sStatus === 200 || hpStatus === 200) && !sIsCf && !hpIsCf;
+  const verdict = isOk ? 'WORKING' : (sStatus === 403 || hpStatus === 403 || sIsCf ? 'BLOCKED_BY_UPSTREAM_FROM_VERCEL' : 'ERROR');
+
+  return {
+    status: isOk ? 'KOMIKTAP_OK' : 'KOMIKTAP_PROBE_ISSUE',
+    httpStatus: sStatus || hpStatus,
+    contentType: sContentType || hpContentType,
+    bodyLength: sLength || hpLength,
+    finalUrl: searchUrl,
+    redirectCount: 0,
+    challengeDetected: sIsCf || hpIsCf,
+    parserReady: true,
+    parserMatches: sMatches,
+    environment: process.env.NODE_ENV || 'development',
+    runtime: runtimeType,
+    timestamp: new Date().toISOString(),
+    durationMs: totalDuration,
+    verdict,
+    probes: {
+      homepage: {
+        url: `${KOMIKTAP_BASE_URL}/`,
+        httpStatus: hpStatus,
+        contentType: hpContentType,
+        bodyLength: hpLength,
+        challengeDetected: hpIsCf,
+        durationMs: hpDuration
+      },
+      search: {
+        url: searchUrl,
+        httpStatus: sStatus,
+        contentType: sContentType,
+        bodyLength: sLength,
+        challengeDetected: sIsCf,
+        parserReady: true,
+        parserMatches: sMatches,
+        sampleTitles,
+        durationMs: sDuration
+      },
+      detail: {
+        slug: detailSlug,
+        url: detailUrl,
+        httpStatus: dStatus,
+        rawChaptersFound: rawChaptersCount,
+        uniqueChapters: uniqueChaptersCount,
+        sampleChapters,
+        durationMs: dDuration,
+        error: dError
+      }
+    }
+  };
+}
+
 /**
  * Serverless HTTP Handler for /api/komiktap-proxy
  */
 export default async function handler(req: any, res: any) {
   const query = req.query || req.queryStringParameters || {};
-  const action = String(query.action || 'search').toLowerCase();
+  let action = String(query.action || '').toLowerCase();
+
+  // Resolve action and params from path if routed via /api/komiktap/:path*
+  const pathVal = query.path;
+  let pathStr = '';
+  if (Array.isArray(pathVal)) {
+    pathStr = pathVal.join('/');
+  } else if (typeof pathVal === 'string') {
+    pathStr = pathVal;
+  }
+
+  if (!action) {
+    if (pathStr.startsWith('diagnostic') || pathStr === 'diagnostic') {
+      action = 'diagnostic';
+    } else if (pathStr.startsWith('search') || pathStr === 'search') {
+      action = 'search';
+    } else if (pathStr.startsWith('detail') || pathStr === 'detail') {
+      action = 'detail';
+      if (!query.slug) {
+        const parts = pathStr.split('/');
+        if (parts[1]) query.slug = parts[1];
+      }
+    } else if (pathStr.startsWith('comic') || pathStr === 'comic') {
+      action = 'detail';
+      if (!query.slug) {
+        const parts = pathStr.split('/');
+        if (parts[1]) query.slug = parts[1];
+      }
+    } else if (pathStr.startsWith('chapter') || pathStr === 'chapter' || pathStr.startsWith('pages')) {
+      action = 'chapter';
+      if (!query.url && !query.slug) {
+        const parts = pathStr.split('/');
+        if (parts[1]) query.url = parts[1];
+      }
+    } else {
+      action = 'search';
+    }
+  }
 
   const sendResponse = (statusCode: number, data: any) => {
     if (res && typeof res.status === 'function') {
@@ -588,6 +813,12 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
+    if (action === 'diagnostic') {
+      const q = String(query.q || query.search || 'Shitataru Kano Haha').trim();
+      const diag = await scrapeKomiktapDiagnostic(q);
+      return sendResponse(200, diag);
+    }
+
     if (action === 'search' || action === 'list') {
       const q = String(query.q || query.search || query.title || '').trim();
       const category = String(query.category || 'all').toLowerCase();

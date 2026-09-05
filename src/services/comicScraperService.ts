@@ -1317,23 +1317,74 @@ export async function fetchKomiktapDetail(slugOrUrl: string): Promise<any> {
     ? (slugOrUrl.replace(/\/$/, '').split('/').pop() || '')
     : slugOrUrl.replace(/^\/|\/$/g, '');
 
+  const isValidDetail = (data: any): boolean => {
+    return Boolean(
+      data &&
+      typeof data === 'object' &&
+      !Array.isArray(data) &&
+      (data.title || data.slug) &&
+      Array.isArray(data.chapters)
+    );
+  };
+
+  // Attempt 1: /api/komiktap/comic/:slug (Primary API route)
   try {
     const res = await fetch(`/api/komiktap/comic/${encodeURIComponent(cleanSlug)}`);
     if (res.ok) {
       const json = await res.json();
-      if (json.data) return json.data;
+      if (isValidDetail(json.data)) return json.data;
+      if (isValidDetail(json)) return json;
     }
   } catch (e) {}
 
+  // Attempt 2: /api/komiktap-proxy?action=detail&slug=:slug (Direct serverless route)
   try {
     const res = await fetch(`/api/komiktap-proxy?action=detail&slug=${encodeURIComponent(cleanSlug)}`);
     if (res.ok) {
       const json = await res.json();
-      if (json.data) return json.data;
+      if (isValidDetail(json.data)) return json.data;
+      if (isValidDetail(json)) return json;
+    }
+  } catch (e) {}
+
+  // Attempt 3: /api/komiktap/detail?slug=:slug (Fallback rewrite route)
+  try {
+    const res = await fetch(`/api/komiktap/detail?slug=${encodeURIComponent(cleanSlug)}`);
+    if (res.ok) {
+      const json = await res.json();
+      if (isValidDetail(json.data)) return json.data;
+      if (isValidDetail(json)) return json;
     }
   } catch (e) {}
 
   return null;
+}
+
+/**
+ * Runs live forensic diagnostic against Komiktap (komiktap.info) upstream
+ */
+export async function runKomiktapDiagnostic(query: string = 'Shitataru Kano Haha'): Promise<any> {
+  // Attempt 1: /api/komiktap/diagnostic
+  try {
+    const res = await fetch(`/api/komiktap/diagnostic?q=${encodeURIComponent(query)}`);
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (e) {}
+
+  // Attempt 2: /api/komiktap-proxy?action=diagnostic
+  try {
+    const res = await fetch(`/api/komiktap-proxy?action=diagnostic&q=${encodeURIComponent(query)}`);
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (e) {}
+
+  return {
+    status: 'PROBE_NETWORK_ERROR',
+    verdict: 'ERROR',
+    message: 'Gagal menghubungi probe endpoint Komiktap dari frontend'
+  };
 }
 
 export async function runControlledConcurrency<T, R>(
@@ -1799,7 +1850,12 @@ export async function buildComicFromScrapeAsync(
   if (scraped.sourceApi?.includes('Komiktap') || scraped.sourceUrl?.includes('komiktap.info')) {
     try {
       const detail = await fetchKomiktapDetail(scraped.slug || scraped.sourceUrl || '');
-      if (detail) {
+      const effectiveDetail = (detail && typeof detail === 'object' && !Array.isArray(detail)) ? detail : null;
+      const effectiveChapters = (effectiveDetail && Array.isArray(effectiveDetail.chapters) && effectiveDetail.chapters.length > 0)
+        ? effectiveDetail.chapters
+        : (Array.isArray(scraped.chapters) && scraped.chapters.length > 0 ? scraped.chapters : []);
+
+      if (effectiveDetail || effectiveChapters.length > 0) {
         const comicId = `comic-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
         const now = new Date().toISOString().split('T')[0];
         const requestedContentType = customSettings?.contentType ?? '18plus';
@@ -1807,22 +1863,22 @@ export async function buildComicFromScrapeAsync(
         const isFree = customSettings?.isFree ?? false;
         const isVisibleOnHome = customSettings?.isVisibleOnHome ?? true;
         const isPublished = customSettings?.isPublished ?? true;
-        const comicType = customSettings?.comicType ?? detail.comicType ?? 'manhwa';
+        const comicType = customSettings?.comicType ?? effectiveDetail?.comicType ?? scraped.comicType ?? 'manhwa';
 
         const comic: Comic = {
           id: comicId,
-          title: detail.title || scraped.title,
-          slug: detail.slug || scraped.slug || (detail.title || scraped.title).toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-          coverImage: detail.coverImage || scraped.coverImage || getFallbackCover(scraped.title, comicType),
-          bannerImage: detail.bannerImage || detail.coverImage || scraped.coverImage || getFallbackCover(scraped.title, comicType),
-          synopsis: detail.synopsis || scraped.synopsis || `Komik ${detail.title} dari Komiktap.info`,
-          genres: detail.genres && detail.genres.length > 0 ? detail.genres : ['Manhwa 18+', 'Doujin', 'Dewasa', 'Romance 18+'],
-          status: detail.status || 'ongoing',
-          storyWriter: detail.storyWriter || 'Komiktap Creator',
-          artist: detail.artist || 'Komiktap Artist',
-          rating: detail.rating || 4.9,
+          title: effectiveDetail?.title || scraped.title,
+          slug: effectiveDetail?.slug || scraped.slug || (effectiveDetail?.title || scraped.title).toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+          coverImage: effectiveDetail?.coverImage || scraped.coverImage || getFallbackCover(scraped.title, comicType),
+          bannerImage: effectiveDetail?.bannerImage || effectiveDetail?.coverImage || scraped.coverImage || getFallbackCover(scraped.title, comicType),
+          synopsis: effectiveDetail?.synopsis || scraped.synopsis || `Komik ${effectiveDetail?.title || scraped.title} dari Komiktap.info`,
+          genres: effectiveDetail?.genres && effectiveDetail.genres.length > 0 ? effectiveDetail.genres : (scraped.genres && scraped.genres.length > 0 ? scraped.genres : ['Manhwa 18+', 'Doujin', 'Dewasa', 'Romance 18+']),
+          status: effectiveDetail?.status || scraped.status || 'ongoing',
+          storyWriter: effectiveDetail?.storyWriter || scraped.storyWriter || 'Komiktap Creator',
+          artist: effectiveDetail?.artist || scraped.artist || 'Komiktap Artist',
+          rating: effectiveDetail?.rating || scraped.rating || 4.9,
           ratingCount: 0,
-          totalChapters: detail.chapters?.length || 0,
+          totalChapters: effectiveChapters.length,
           totalReaders: 0,
           createdAt: now,
           updatedAt: now,
@@ -1836,7 +1892,7 @@ export async function buildComicFromScrapeAsync(
           showOnHome: isVisibleOnHome,
           isPublished,
           sourceApi: 'Komiktap API (Komiktap.info)',
-          sourceUrl: detail.url || scraped.sourceUrl || `https://komiktap.info/manga/${detail.slug}/`,
+          sourceUrl: effectiveDetail?.url || scraped.sourceUrl || `https://komiktap.info/manga/${effectiveDetail?.slug || scraped.slug}/`,
           primaryDriveAccountId: customSettings?.primaryDriveAccountId
         };
 
@@ -1846,7 +1902,7 @@ export async function buildComicFromScrapeAsync(
 
         // Preload chapter pages for all chapters concurrently (zero hard limits)
         const preloadedPagesMap = new Map<number, any[]>();
-        const chaptersToPreload = detail.chapters || [];
+        const chaptersToPreload = effectiveChapters;
         const totalChaps = chaptersToPreload.length;
 
         if (chaptersToPreload.length > 0) {
@@ -1874,7 +1930,7 @@ export async function buildComicFromScrapeAsync(
           }
         }
 
-        const chapters: Chapter[] = (detail.chapters || []).map((ch: any, idx: number) => {
+        const chapters: Chapter[] = effectiveChapters.map((ch: any, idx: number) => {
           let chNum = typeof ch.chapterNumber === 'number' ? ch.chapterNumber : (parseFloat(ch.chapterNumber) || (idx + 1));
           if (seenChapterNums.has(chNum)) {
             const count = seenChapterNums.get(chNum)! + 1;
@@ -1884,7 +1940,7 @@ export async function buildComicFromScrapeAsync(
             seenChapterNums.set(chNum, 0);
           }
 
-          const chSlug = ch.url || ch.slug || `${detail.slug}-chapter-${chNum}`;
+          const chSlug = ch.url || ch.slug || `${(effectiveDetail?.slug || scraped.slug)}-chapter-${chNum}`;
           const numStr = String(chNum).replace('.', '_');
           let chId = `ch-${comicId}-${numStr}`;
           if (seenChapterIds.has(chId)) {
@@ -1901,7 +1957,7 @@ export async function buildComicFromScrapeAsync(
             title: ch.title || `Chapter ${chNum}`,
             slug: chSlug,
             releaseDate: ch.releaseDate || now,
-            isNew: idx >= (detail.chapters?.length || 0) - 2,
+            isNew: idx >= (effectiveChapters.length || 0) - 2,
             isLocked: !isFree,
             sourceType: 'images' as const,
             pages: chapterPages,

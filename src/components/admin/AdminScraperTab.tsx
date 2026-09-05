@@ -9,6 +9,7 @@ import {
   searchDoujindesu,
   searchKomiktap,
   fetchKomiktapDetail,
+  runKomiktapDiagnostic,
   DOUJINDESU_SCRAPE_FEEDS,
   PRESET_SCRAPE_FEEDS, 
   buildComicFromScrape, 
@@ -105,6 +106,10 @@ export const AdminScraperTab: React.FC = () => {
   const [selectedChapterIdForPdf, setSelectedChapterIdForPdf] = useState<string>('');
   const [isConvertingChapterPdf, setIsConvertingChapterPdf] = useState(false);
   const [chapterPdfProgress, setChapterPdfProgress] = useState<string | null>(null);
+
+  // Komiktap Diagnostic Probe State
+  const [isTestingKomiktap, setIsTestingKomiktap] = useState(false);
+  const [komiktapDiagReport, setKomiktapDiagReport] = useState<any>(null);
 
   // Auto-Scraper Background Status State
   const [autoScraperInfo, setAutoScraperInfo] = useState<{
@@ -440,6 +445,20 @@ export const AdminScraperTab: React.FC = () => {
     }
   };
 
+  // Live Diagnostic Probe for Komiktap (Komiktap.info) Upstream & Chapter Parsing
+  const handleTestKomiktapDiagnostic = async () => {
+    setIsTestingKomiktap(true);
+    setKomiktapDiagReport(null);
+    try {
+      const rep = await runKomiktapDiagnostic('Shitataru Kano Haha');
+      setKomiktapDiagReport(rep);
+    } catch (err: any) {
+      setKomiktapDiagReport({ status: 'ERROR', error: err.message });
+    } finally {
+      setIsTestingKomiktap(false);
+    }
+  };
+
   // Direct Komiktap.info URL / Slug Scraper
   const handleDirectKomiktapImport = async () => {
     if (!komiktapDirectInput.trim()) return;
@@ -511,14 +530,19 @@ export const AdminScraperTab: React.FC = () => {
       try {
         setBatchStatus(`⏳ Mengambil struktur chapter lengkap Komiktap untuk "${item.title}"...`);
         const ktDetail = await fetchKomiktapDetail(item.slug || item.sourceUrl || '');
-        if (ktDetail) {
+        if (ktDetail && typeof ktDetail === 'object' && !Array.isArray(ktDetail)) {
+          const validChapters = (Array.isArray(ktDetail.chapters) && ktDetail.chapters.length > 0)
+            ? ktDetail.chapters
+            : (Array.isArray(itemToUse.chapters) && itemToUse.chapters.length > 0 ? itemToUse.chapters : []);
+
           itemToUse = {
             ...itemToUse,
             title: ktDetail.title || itemToUse.title,
             slug: ktDetail.slug || itemToUse.slug,
             coverImage: ktDetail.coverImage || itemToUse.coverImage,
             synopsis: ktDetail.synopsis || itemToUse.synopsis,
-            chapters: ktDetail.chapters || itemToUse.chapters || [],
+            chapters: validChapters,
+            totalChapters: validChapters.length,
             genres: ktDetail.genres && ktDetail.genres.length > 0 ? ktDetail.genres : itemToUse.genres,
             sourceUrl: ktDetail.url || itemToUse.sourceUrl,
             comicType: ktDetail.comicType || itemToUse.comicType,
@@ -1802,14 +1826,67 @@ export const AdminScraperTab: React.FC = () => {
               </button>
             </div>
 
-            <button
-              type="button"
-              onClick={() => handleSearchKomiktap(undefined, '', 'all')}
-              className="text-[11px] font-bold text-slate-400 hover:text-white flex items-center gap-1 cursor-pointer"
-            >
-              <RefreshCw className="w-3.5 h-3.5" /> Muat Ulang Katalog
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleTestKomiktapDiagnostic}
+                disabled={isTestingKomiktap}
+                className="text-[11px] font-bold text-rose-400 hover:text-rose-300 disabled:opacity-50 flex items-center gap-1 cursor-pointer px-2.5 py-1 rounded-lg bg-rose-950/40 border border-rose-500/30 transition-all"
+              >
+                {isTestingKomiktap ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                <span>{isTestingKomiktap ? 'Memeriksa...' : 'Audit Upstream'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSearchKomiktap(undefined, '', 'all')}
+                className="text-[11px] font-bold text-slate-400 hover:text-white flex items-center gap-1 cursor-pointer"
+              >
+                <RefreshCw className="w-3.5 h-3.5" /> Muat Ulang Katalog
+              </button>
+            </div>
           </div>
+
+          {komiktapDiagReport && (
+            <div className={`p-4 rounded-2xl border text-xs ${
+              komiktapDiagReport.verdict === 'WORKING' 
+                ? 'bg-emerald-950/20 border-emerald-500/30 text-emerald-300' 
+                : 'bg-amber-950/20 border-amber-500/30 text-amber-300'
+            }`}>
+              <div className="flex items-center justify-between font-bold mb-2">
+                <span className="flex items-center gap-1.5">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  <span>Audit Upstream Komiktap.info: {komiktapDiagReport.verdict} ({komiktapDiagReport.status})</span>
+                </span>
+                <span className="text-[10px] font-mono opacity-70">
+                  {komiktapDiagReport.runtime} • {komiktapDiagReport.durationMs}ms
+                </span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-2 pt-2 border-t border-white/10 text-[11px]">
+                <div>
+                  <span className="text-slate-400 block">Homepage Probe:</span>
+                  <span>HTTP {komiktapDiagReport.probes?.homepage?.httpStatus || 'N/A'} ({komiktapDiagReport.probes?.homepage?.challengeDetected ? 'CF Challenge' : 'Clean'})</span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block">Katalog Search:</span>
+                  <span>{komiktapDiagReport.probes?.search?.parserMatches || 0} judul cocok</span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block">Detail Discovery:</span>
+                  <span className="font-bold text-white">
+                    {komiktapDiagReport.probes?.detail?.rawChaptersFound ?? 0} chapter ditemukan
+                  </span>
+                </div>
+              </div>
+              {komiktapDiagReport.probes?.detail?.sampleChapters && komiktapDiagReport.probes.detail.sampleChapters.length > 0 && (
+                <div className="mt-2 text-[10px] text-slate-400 flex items-center gap-2">
+                  <span>Sample chapters:</span>
+                  {komiktapDiagReport.probes.detail.sampleChapters.map((sc: string, sci: number) => (
+                    <span key={sci} className="bg-black/30 px-1.5 py-0.5 rounded text-rose-300 border border-white/5">{sc}</span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {errorMsg && (
             <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-300 flex items-center gap-2">
